@@ -29,6 +29,7 @@ def settings() -> Settings:
             DBMATE,
             "--url",
             s.database_url_test,
+            "--no-dump-schema",
             "--migrations-dir",
             str(ROOT / "db/migrations"),
             "up",

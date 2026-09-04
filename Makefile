@@ -1,6 +1,3 @@
--include .env
-export
-
 .PHONY: install up down migrate migrate-test test lint dev api worker scheduler
 
 install:
@@ -13,10 +10,10 @@ down:
 	docker compose down
 
 migrate:
-	dbmate --url "$$DATABASE_URL" --migrations-dir db/migrations up
+	dbmate --no-dump-schema --migrations-dir db/migrations up
 
 migrate-test:
-	dbmate --url "$$DATABASE_URL_TEST" --migrations-dir db/migrations up
+	dbmate --env DATABASE_URL_TEST --no-dump-schema --migrations-dir db/migrations up
 
 test: migrate-test
 	uv run pytest -q
