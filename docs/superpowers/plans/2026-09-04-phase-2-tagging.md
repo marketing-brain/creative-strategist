@@ -25,7 +25,7 @@
 ## File structure
 
 ```
-db/migrations/20260904000003_tagging.sql
+db/migrations/20260904000004_tagging.sql
 src/cs/tagging/__init__.py
 src/cs/tagging/taxonomy.yaml         # the taxonomy (versioned by content hash)
 src/cs/tagging/taxonomy.py           # load_taxonomy() -> Taxonomy; to_json_schema(); validate_tags()
@@ -50,7 +50,7 @@ tests/tagging/...
 ### Task 1: Migration, taxonomy, and schema compilation
 
 **Files:**
-- Create: `db/migrations/20260904000003_tagging.sql`, `src/cs/tagging/__init__.py`, `src/cs/tagging/taxonomy.yaml`, `src/cs/tagging/taxonomy.py`
+- Create: `db/migrations/20260904000004_tagging.sql`, `src/cs/tagging/__init__.py`, `src/cs/tagging/taxonomy.yaml`, `src/cs/tagging/taxonomy.py`
 - Test: `tests/tagging/test_taxonomy.py`
 
 **Interfaces:**
@@ -60,7 +60,7 @@ tests/tagging/...
 
 - [ ] **Step 1: Migration**
 
-`db/migrations/20260904000003_tagging.sql`:
+`db/migrations/20260904000004_tagging.sql`:
 
 ```sql
 -- migrate:up
@@ -448,7 +448,7 @@ Expected: PASS
 - [ ] **Step 7: Commit**
 
 ```bash
-git add db/migrations/20260904000003_tagging.sql src/cs/tagging pyproject.toml uv.lock tests/tagging/test_taxonomy.py
+git add db/migrations/20260904000004_tagging.sql src/cs/tagging pyproject.toml uv.lock tests/tagging/test_taxonomy.py
 git commit -m "feat(tagging): taxonomy v1.0, schema compilation, and tagging tables"
 ```
 
@@ -1503,7 +1503,7 @@ git commit -m "feat(tagging): gateway embeddings and pgvector similarity"
 
 **Files:**
 - Create: `src/cs/tagging/batch.py`
-- Modify: `src/cs/tagging/repo.py` (append `untagged_creative_ids`), `src/cs/tagging/jobs.py` (add `tagging.batch_submit`, `tagging.batch_poll`, `BATCH_FACTORY`), `db/migrations/20260904000004_tag_batch.sql`
+- Modify: `src/cs/tagging/repo.py` (append `untagged_creative_ids`), `src/cs/tagging/jobs.py` (add `tagging.batch_submit`, `tagging.batch_poll`, `BATCH_FACTORY`), `db/migrations/20260904000005_tag_batch.sql`
 - Test: `tests/tagging/test_batch.py`
 
 **Interfaces:**
@@ -1516,7 +1516,7 @@ git commit -m "feat(tagging): gateway embeddings and pgvector similarity"
 
 - [ ] **Step 1: Migration**
 
-`db/migrations/20260904000004_tag_batch.sql`:
+`db/migrations/20260904000005_tag_batch.sql`:
 
 ```sql
 -- migrate:up
@@ -1797,7 +1797,7 @@ Expected: PASS
 - [ ] **Step 7: Commit**
 
 ```bash
-git add db/migrations/20260904000004_tag_batch.sql src/cs/tagging tests/tagging/test_batch.py
+git add db/migrations/20260904000005_tag_batch.sql src/cs/tagging tests/tagging/test_batch.py
 git commit -m "feat(tagging): message batches backfill with submit/poll jobs"
 ```
 

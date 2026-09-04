@@ -25,7 +25,7 @@
 ## File structure
 
 ```
-db/migrations/20260904000006_generation.sql
+db/migrations/20260904000007_generation.sql
 src/cs/generation/__init__.py
 src/cs/generation/brand.py         # BrandKit dataclass, repo (create version, get active), logo storage
 src/cs/generation/copy.py          # CopyWriter Protocol, ClaudeCopyWriter (write + brand check)
@@ -52,7 +52,7 @@ tests/generation/..., tests/publish/..., tests/e2e/test_loop.py
 ### Task 1: Migration and brand kit
 
 **Files:**
-- Create: `db/migrations/20260904000006_generation.sql`, `src/cs/generation/__init__.py`, `src/cs/generation/brand.py`, `src/cs/api/routers/brand.py`
+- Create: `db/migrations/20260904000007_generation.sql`, `src/cs/generation/__init__.py`, `src/cs/generation/brand.py`, `src/cs/api/routers/brand.py`
 - Modify: `src/cs/api/app.py`
 - Test: `tests/generation/test_brand.py`, `tests/api/test_brand.py`
 
@@ -65,7 +65,7 @@ tests/generation/..., tests/publish/..., tests/e2e/test_loop.py
 
 - [ ] **Step 1: Migration**
 
-`db/migrations/20260904000006_generation.sql`:
+`db/migrations/20260904000007_generation.sql`:
 
 ```sql
 -- migrate:up
@@ -312,7 +312,7 @@ Run: `uv run pytest tests/generation/test_brand.py tests/api/test_brand.py -v`
 Expected: PASS
 
 ```bash
-git add db/migrations/20260904000006_generation.sql src/cs/generation src/cs/api tests/generation/test_brand.py tests/api/test_brand.py
+git add db/migrations/20260904000007_generation.sql src/cs/generation src/cs/api tests/generation/test_brand.py tests/api/test_brand.py
 git commit -m "feat(generation): schema and versioned brand kit with logo upload"
 ```
 

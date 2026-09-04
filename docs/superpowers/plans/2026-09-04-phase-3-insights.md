@@ -25,7 +25,7 @@
 ## File structure
 
 ```
-db/migrations/20260904000005_insights.sql   # insight, brief, copilot_conversation, copilot_message, view creative_latest_tag
+db/migrations/20260904000006_insights.sql   # insight, brief, copilot_conversation, copilot_message, view creative_latest_tag
 src/cs/insights/__init__.py
 src/cs/insights/types.py          # InsightDraft dataclass
 src/cs/insights/patterns.py       # compute_pattern_insights()
@@ -46,7 +46,7 @@ tests/insights/...
 ### Task 1: Migration, view, and InsightDraft
 
 **Files:**
-- Create: `db/migrations/20260904000005_insights.sql`, `src/cs/insights/__init__.py`, `src/cs/insights/types.py`, `src/cs/insights/repo.py`
+- Create: `db/migrations/20260904000006_insights.sql`, `src/cs/insights/__init__.py`, `src/cs/insights/types.py`, `src/cs/insights/repo.py`
 - Test: `tests/insights/test_repo.py`
 
 **Interfaces:**
@@ -57,7 +57,7 @@ tests/insights/...
 
 - [ ] **Step 1: Migration**
 
-`db/migrations/20260904000005_insights.sql`:
+`db/migrations/20260904000006_insights.sql`:
 
 ```sql
 -- migrate:up
@@ -257,7 +257,7 @@ Run: `uv run pytest tests/insights/test_repo.py -v`
 Expected: PASS
 
 ```bash
-git add db/migrations/20260904000005_insights.sql src/cs/insights tests/insights/test_repo.py
+git add db/migrations/20260904000006_insights.sql src/cs/insights tests/insights/test_repo.py
 git commit -m "feat(insights): schema, latest-tag view, insight and brief repository"
 ```
 

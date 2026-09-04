@@ -24,3 +24,12 @@ Shared conventions for every phase:
 - Long work runs as a job in the `job` table via `cs.core.queue.enqueue`; handlers register with `@cs.jobs.registry.handler("job_type")`.
 - External services sit behind a Protocol with a `Fake*` implementation under `src/cs/**/fakes.py`; tests use the fakes.
 - Commit after every task with a conventional-commit message.
+
+## Conventions added by the Phase 0 final review (binding for Phases 1–5)
+
+- `db/migrations/20260904000002_schedule_state.sql` exists (scheduler persistence); later migrations are numbered from `000003` (ingest), `000004` (tagging), `000005` (tag_batch), `000006` (insights), `000007` (generation).
+- Blob keys always start with `f"{org_id}/"`; `GET /blobs/{key}` requires auth and serves only the caller's org prefix, local backend only.
+- `cs.core.queue`: `complete(db, job_id, worker_id)`, `fail(db, job_id, worker_id, error)`, `heartbeat(db, job_id, worker_id)`; `enqueue` stamps `schema_version: 1` into payloads; `reclaim_stale` dead-letters jobs already at `max_attempts`. Handlers run under a heartbeat, so long jobs are safe as long as the process is alive.
+- The JSON codec encodes `UUID`, `datetime`/`date`, and `Decimal` automatically; job payloads may contain UUIDs directly.
+- `AUTH_MODE` defaults to `clerk` and requires `CLERK_JWKS_URL`; `.env.example` and the test fixtures set `dev` explicitly.
+- Scheduler last-run times persist in `schedule_state`; schedules registered in later phases should still use period-scoped dedup keys where a duplicate run would be costly.

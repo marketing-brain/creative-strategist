@@ -25,7 +25,7 @@
 ## File structure
 
 ```
-db/migrations/20260904000002_ingest.sql   # ad_account, ad, creative, asset, metric_daily (partitioned)
+db/migrations/20260904000003_ingest.sql   # ad_account, ad, creative, asset, metric_daily (partitioned)
 src/cs/core/crypto.py                     # encrypt_str / decrypt_str (Fernet)
 src/cs/connectors/__init__.py
 src/cs/connectors/base.py                 # AdPlatformConnector Protocol + dataclasses
@@ -56,7 +56,7 @@ tests/api/test_accounts_and_creatives.py
 ### Task 1: Ingest migration and token crypto
 
 **Files:**
-- Create: `db/migrations/20260904000002_ingest.sql`, `src/cs/core/crypto.py`, `src/cs/ingest/__init__.py`, `src/cs/ingest/partitions.py`
+- Create: `db/migrations/20260904000003_ingest.sql`, `src/cs/core/crypto.py`, `src/cs/ingest/__init__.py`, `src/cs/ingest/partitions.py`
 - Test: `tests/core/test_crypto.py`, `tests/ingest/test_partitions.py`
 
 **Interfaces:**
@@ -66,7 +66,7 @@ tests/api/test_accounts_and_creatives.py
 
 - [ ] **Step 1: Write the migration**
 
-`db/migrations/20260904000002_ingest.sql`:
+`db/migrations/20260904000003_ingest.sql`:
 
 ```sql
 -- migrate:up
@@ -264,7 +264,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add db/migrations/20260904000002_ingest.sql src/cs/core/crypto.py src/cs/ingest tests/core/test_crypto.py tests/ingest/test_partitions.py
+git add db/migrations/20260904000003_ingest.sql src/cs/core/crypto.py src/cs/ingest tests/core/test_crypto.py tests/ingest/test_partitions.py
 git commit -m "feat(ingest): schema for accounts, ads, creatives, assets, metrics; token crypto"
 ```
 
