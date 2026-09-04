@@ -1,1 +1,10 @@
 .superpowers/
+.venv/
+__pycache__/
+*.pyc
+.env
+var/
+node_modules/
+.next/
+.pytest_cache/
+.ruff_cache/
