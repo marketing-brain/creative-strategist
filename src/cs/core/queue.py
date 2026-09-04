@@ -82,7 +82,7 @@ async def claim(db: Database, worker_id: str, job_types: list[str] | None = None
 async def complete(db: Database, job_id: UUID) -> None:
     await db.execute(
         "UPDATE job SET status='done', finished_at=now(), locked_by=NULL"
-        " WHERE id=$1 AND status IN ('pending', 'running')",
+        " WHERE id=$1 AND status='running'",
         job_id,
     )
 

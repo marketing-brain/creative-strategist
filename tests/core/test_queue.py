@@ -16,6 +16,7 @@ async def test_dedup_key_blocks_duplicate_pending(db, org_id):
     a = await queue.enqueue(db, org_id, "sync", dedup_key="acct-1")
     b = await queue.enqueue(db, org_id, "sync", dedup_key="acct-1")
     assert a is not None and b is None
+    assert (await queue.claim(db, "w1")).id == a
     await queue.complete(db, a)
     c = await queue.enqueue(db, org_id, "sync", dedup_key="acct-1")
     assert c is not None
