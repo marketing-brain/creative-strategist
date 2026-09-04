@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,7 +16,7 @@ class Settings(BaseSettings):
     s3_bucket: str = "cs-blobs"
     s3_endpoint_url: str | None = None
 
-    auth_mode: Literal["dev", "clerk"] = "dev"
+    auth_mode: Literal["dev", "clerk"] = "clerk"
     clerk_jwks_url: str = ""
     clerk_issuer: str = ""
 
@@ -42,6 +43,12 @@ class Settings(BaseSettings):
 
     worker_poll_seconds: float = 1.0
     job_lease_seconds: int = 600
+
+    @model_validator(mode="after")
+    def _check_clerk_config(self) -> "Settings":
+        if self.auth_mode == "clerk" and not self.clerk_jwks_url:
+            raise ValueError("CLERK_JWKS_URL is required when AUTH_MODE=clerk")
+        return self
 
 
 @lru_cache

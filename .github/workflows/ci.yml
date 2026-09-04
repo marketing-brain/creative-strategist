@@ -14,6 +14,7 @@ jobs:
       DATABASE_URL: postgres://cs:cs@localhost:5432/cs_test?sslmode=disable
       DATABASE_URL_TEST: postgres://cs:cs@localhost:5432/cs_test?sslmode=disable
       TOKEN_ENCRYPTION_KEY: piCYmkw56Goak3cRFwGNnH1Rze5W0zL1jcO2MXu27Ww=
+      AUTH_MODE: dev
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3

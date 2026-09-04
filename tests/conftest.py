@@ -23,6 +23,8 @@ def settings() -> Settings:
     os.environ.setdefault(
         "DATABASE_URL_TEST", "postgres://cs:cs@127.0.0.1:5432/cs_test?sslmode=disable"
     )
+    os.environ.setdefault("AUTH_MODE", "dev")
+    os.environ.setdefault("BLOB_BACKEND", "local")
     s = Settings()
     subprocess.run(
         [
