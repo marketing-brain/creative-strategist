@@ -80,7 +80,7 @@ Conventions follow `../db-design.md`: singular table names, UUIDv7 app-generated
 
 ### Mutable registries
 
-- `org(id, name, clerk_org_id, created_at)`
+- `org(id, name, clerk_org_id, active_brand_kit_id, created_at)`
 - `user_org(user_id, org_id, role CHECK IN ('member','admin'))` — `user_id` is the Clerk user id.
 - `ad_account(id, org_id, platform CHECK IN ('meta'), platform_account_id, name, currency, access_token_enc, token_expires_at, status, sync_cursor JSONB, created_at)`
 - `brand_kit(id, org_id, version, colors JSONB, fonts JSONB, logo_path, logo_sha256, voice_rules TEXT, prohibited_claims TEXT[], created_at)` — new version = new row; `org.active_brand_kit_id` points at current.
@@ -89,11 +89,11 @@ Conventions follow `../db-design.md`: singular table names, UUIDv7 app-generated
 
 ### Append-only lineage
 
-- `creative(id, org_id, ad_account_id, platform_creative_id, format CHECK IN ('image','video','carousel'), headline, primary_text, description, cta_type, link_url, primary_asset_id, raw_path, first_seen_at, last_seen_at, schema_version)` — one row per Meta ad creative. `raw_path` points at the stored API response.
+- `creative(id, org_id, ad_account_id, platform_creative_id, format CHECK IN ('image','video','carousel'), headline, primary_text, description, cta_type, link_url, primary_asset_id, generated_asset_id NULL, raw_path, first_seen_at, last_seen_at, schema_version)` — one row per Meta ad creative. `raw_path` points at the stored API response.
 - `asset(id, org_id, creative_id, kind CHECK IN ('original_image','original_video','keyframe','audio','transcript','thumbnail'), path, sha256, mime, width, height, duration_ms, seq, created_at)`
 - `metric_daily(org_id, ad_account_id, creative_id, ad_id, day, placement, spend, impressions, clicks, link_clicks, conversions, conversion_value, video_3s_views, video_thruplay, video_p50, video_p100, raw JSONB)` — partitioned by month on `day`. Primary key `(creative_id, ad_id, day, placement)`. Derived metrics (CTR, CPA, ROAS, thumbstop, hold rate) are computed in views, not stored.
 - `tag_run(id, org_id, creative_id, taxonomy_version_id, model, status, prompt_sha256, input_tokens, output_tokens, created_at, finished_at)` — unique on `(creative_id, taxonomy_version_id, model)`.
-- `tag(id, tag_run_id, creative_id, dimension, value, confidence, evidence)` — index on `(org_id, dimension, value)`.
+- `tag(id, org_id, tag_run_id, creative_id, dimension, value, confidence, evidence)` — index on `(org_id, dimension, value)`.
 - `creative_embedding(creative_id, tag_run_id, embedding vector(1024))`
 - `insight(id, org_id, ad_account_id, kind CHECK IN ('pattern','fatigue'), dimension, value, window_start, window_end, sample_creatives, sample_spend, metric, baseline, observed, lift, explanation, suggested_test, created_at)`
 - `brief(id, org_id, week_start, content_md, insight_ids UUID[], created_at)`
@@ -115,7 +115,7 @@ Once a published ad appears in the next metric sync, a `creative` row is created
 
 - **Taxonomy:** `tagging/taxonomy.yaml`, versioned. ~40 dimensions in groups: hook (type, first-3s content), message angle, offer, CTA, visual style, people/faces, product presence and timing, text density, color palette, format, tone; video-only: pacing, music, voiceover, caption style. Each dimension declares allowed values or `free_text`. The YAML compiles to a JSON schema used for structured output.
 - **Images:** one Claude call: image + taxonomy schema → validated JSON of `{dimension, value, confidence, evidence}`.
-- **Video:** ffmpeg scene-change keyframes (max 24, plus frames at 0s, 1s, 3s), audio extracted and transcribed (speech provider behind a `Transcriber` interface); one Claude call with ordered frames, timestamps, and transcript.
+- **Video:** ffmpeg scene-change keyframes (max 24, plus frames at 0s, 1s, 3s), audio extracted and transcribed (behind a `Transcriber` interface; default is a whisper-class model through Vercel AI Gateway, with a direct provider as fallback); one Claude call with ordered frames, timestamps, and transcript.
 - **Model:** default `claude-opus-5`, per-stage config. Adaptive thinking (default). Refusal fallback beta enabled. Structured outputs via `output_config.format`.
 - **Batching:** backfills of >50 creatives go through the Message Batches API; incremental tagging is synchronous per job.
 - **Idempotency:** `tag_run` unique on `(creative_id, taxonomy_version_id, model)`. Re-tagging on a new taxonomy version creates new runs; old runs stay.
@@ -135,8 +135,8 @@ Once a published ad appears in the next metric sync, a `creative` row is created
 - **Brand kit:** onboarding form: upload logo (SVG/PNG), pick colors, fonts, voice rules, prohibited claims. Versioned.
 - **Inputs:** an insight, or a free-form concept, plus optional reference creatives. The generation job builds a brief from the insight's winning tags, the brand kit, and the references.
 - **Copy:** Claude writes N headline / primary text / CTA sets; a second Claude pass checks each against voice rules and prohibited claims and rejects violations.
-- **Statics:** `ImageGenerator` interface with `generate(prompt, reference_images, aspect) → bytes`. Provider selected at plan time (candidates: hosted models reachable through Vercel AI Gateway or fal). Output post-processed by Pillow: resize/crop to 1:1, 4:5, 9:16; logo composited per brand kit placement rules.
-- **Video:** `VideoGenerator` interface with `generate(still, prompt, duration_s) → bytes`. Hosted image-to-video provider selected at plan time. Post-processing with ffmpeg: captions from the copy, logo end card, export per aspect.
+- **Statics:** `ImageGenerator` interface with `generate(prompt, reference_images, aspect) → bytes`. Default provider: image generation through Vercel AI Gateway (one credential, model swappable by config string); a direct-provider implementation is the fallback if a needed model is not on the gateway. Output post-processed by Pillow: resize/crop to 1:1, 4:5, 9:16; logo composited per brand kit placement rules.
+- **Video:** `VideoGenerator` interface with `generate(still, prompt, duration_s) → bytes`. Default provider: video generation through Vercel AI Gateway, same swap rules as images. Post-processing with ffmpeg: captions from the copy, logo end card, export per aspect.
 - **Output:** `generated_asset` rows in `draft`. Generation failures are recorded per asset; a generation with some successes is `done` with partial results.
 
 ## 9. Publish
