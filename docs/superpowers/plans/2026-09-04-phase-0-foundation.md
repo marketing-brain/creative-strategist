@@ -625,7 +625,7 @@ CREATE TABLE job (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   finished_at TIMESTAMPTZ
 );
-CREATE UNIQUE INDEX job_pending_dedup_idx ON job (job_type, dedup_key)
+CREATE UNIQUE INDEX job_pending_dedup_idx ON job (org_id, job_type, dedup_key)
   WHERE status IN ('pending', 'running') AND dedup_key IS NOT NULL;
 CREATE INDEX job_claim_idx ON job (status, run_after) WHERE status = 'pending';
 
@@ -811,7 +811,7 @@ git commit -m "feat(core): database wrapper, foundation migration, test fixtures
 **Interfaces:**
 - Produces:
   - `@dataclass Job(id: UUID, org_id: UUID, job_type: str, payload: dict, attempts: int, max_attempts: int)`
-  - `async enqueue(db, org_id: UUID, job_type: str, payload: dict | None = None, *, dedup_key: str | None = None, run_after: datetime | None = None, max_attempts: int = 5) -> UUID | None` (returns `None` when a pending/running job with the same `(job_type, dedup_key)` exists)
+  - `async enqueue(db, org_id: UUID, job_type: str, payload: dict | None = None, *, dedup_key: str | None = None, run_after: datetime | None = None, max_attempts: int = 5) -> UUID | None` (returns `None` when a pending/running job in the same org with the same `(job_type, dedup_key)` exists)
   - `async claim(db, worker_id: str, job_types: list[str] | None = None) -> Job | None`
   - `async complete(db, job_id: UUID) -> None`
   - `async fail(db, job_id: UUID, error: str) -> None` (re-queues with backoff `min(2**attempts, 300)` seconds until `attempts >= max_attempts`, then `dead`)
@@ -920,7 +920,7 @@ async def enqueue(
         """
         INSERT INTO job (id, org_id, job_type, dedup_key, payload, status, run_after, max_attempts)
         VALUES ($1, $2, $3, $4, $5, 'pending', COALESCE($6, now()), $7)
-        ON CONFLICT (job_type, dedup_key) WHERE status IN ('pending','running') AND dedup_key IS NOT NULL
+        ON CONFLICT (org_id, job_type, dedup_key) WHERE status IN ('pending','running') AND dedup_key IS NOT NULL
         DO NOTHING
         RETURNING id
         """,
