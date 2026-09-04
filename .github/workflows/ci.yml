@@ -1,0 +1,24 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env: { POSTGRES_USER: cs, POSTGRES_PASSWORD: cs, POSTGRES_DB: cs_test }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U cs" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://cs:cs@localhost:5432/cs_test?sslmode=disable
+      DATABASE_URL_TEST: postgres://cs:cs@localhost:5432/cs_test?sslmode=disable
+      TOKEN_ENCRYPTION_KEY: piCYmkw56Goak3cRFwGNnH1Rze5W0zL1jcO2MXu27Ww=
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: curl -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64 && sudo chmod +x /usr/local/bin/dbmate
+      - run: uv sync --extra dev
+      - run: make lint
+      - run: make test
