@@ -94,7 +94,7 @@ Conventions follow `../db-design.md`: singular table names, UUIDv7 app-generated
 - `metric_daily(org_id, ad_account_id, creative_id, ad_id, day, placement, spend, impressions, clicks, link_clicks, conversions, conversion_value, video_3s_views, video_thruplay, video_p50, video_p100, raw JSONB)` — partitioned by month on `day`. Primary key `(creative_id, ad_id, day, placement)`. Derived metrics (CTR, CPA, ROAS, thumbstop, hold rate) are computed in views, not stored.
 - `tag_run(id, org_id, creative_id, taxonomy_version_id, model, status, prompt_sha256, input_tokens, output_tokens, created_at, finished_at)` — unique on `(creative_id, taxonomy_version_id, model)`.
 - `tag(id, org_id, tag_run_id, creative_id, dimension, value, confidence, evidence)` — index on `(org_id, dimension, value)`.
-- `creative_embedding(creative_id, tag_run_id, embedding vector(1024))`
+- `creative_embedding(creative_id, tag_run_id, embedding vector(1536))`
 - `insight(id, org_id, ad_account_id, kind CHECK IN ('pattern','fatigue'), dimension, value, window_start, window_end, sample_creatives, sample_spend, metric, baseline, observed, lift, explanation, suggested_test, created_at)`
 - `brief(id, org_id, week_start, content_md, insight_ids UUID[], created_at)`
 - `generation(id, org_id, brand_kit_id, source_insight_id, source_creative_ids UUID[], concept TEXT, kind CHECK IN ('static','video'), model, prompt, status, created_by, created_at, finished_at)`
@@ -136,7 +136,7 @@ Once a published ad appears in the next metric sync, a `creative` row is created
 - **Inputs:** an insight, or a free-form concept, plus optional reference creatives. The generation job builds a brief from the insight's winning tags, the brand kit, and the references.
 - **Copy:** Claude writes N headline / primary text / CTA sets; a second Claude pass checks each against voice rules and prohibited claims and rejects violations.
 - **Statics:** `ImageGenerator` interface with `generate(prompt, reference_images, aspect) → bytes`. Default provider: image generation through Vercel AI Gateway (one credential, model swappable by config string); a direct-provider implementation is the fallback if a needed model is not on the gateway. Output post-processed by Pillow: resize/crop to 1:1, 4:5, 9:16; logo composited per brand kit placement rules.
-- **Video:** `VideoGenerator` interface with `generate(still, prompt, duration_s) → bytes`. Default provider: video generation through Vercel AI Gateway, same swap rules as images. Post-processing with ffmpeg: captions from the copy, logo end card, export per aspect.
+- **Video:** `VideoGenerator` interface with `generate(still, prompt, duration_s) → bytes`. Default provider: video generation through Vercel AI Gateway. The gateway exposes video only through the TypeScript AI SDK, so the worker shells out to a small Node CLI in `tools/video-gen/` that wraps `experimental_startVideo` and `experimental_getVideoStatus`; the Python `VideoGenerator` interface hides this. Post-processing with ffmpeg: captions from the copy, logo end card, export per aspect.
 - **Output:** `generated_asset` rows in `draft`. Generation failures are recorded per asset; a generation with some successes is `done` with partial results.
 
 ## 9. Publish
