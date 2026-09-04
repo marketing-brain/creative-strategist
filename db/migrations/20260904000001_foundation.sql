@@ -33,7 +33,7 @@ CREATE TABLE job (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   finished_at TIMESTAMPTZ
 );
-CREATE UNIQUE INDEX job_pending_dedup_idx ON job (job_type, dedup_key)
+CREATE UNIQUE INDEX job_pending_dedup_idx ON job (org_id, job_type, dedup_key)
   WHERE status IN ('pending', 'running') AND dedup_key IS NOT NULL;
 CREATE INDEX job_claim_idx ON job (status, run_after) WHERE status = 'pending';
 
