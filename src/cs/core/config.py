@@ -28,10 +28,10 @@ class Settings(BaseSettings):
     meta_api_version: str = "v21.0"
 
     anthropic_api_key: str = ""
-    model_tagging: str = "claude-opus-5"
-    model_insights: str = "claude-opus-5"
-    model_copilot: str = "claude-opus-5"
-    model_copy: str = "claude-opus-5"
+    claude_model_tagging: str = "claude-opus-5"
+    claude_model_insights: str = "claude-opus-5"
+    claude_model_copilot: str = "claude-opus-5"
+    claude_model_copy: str = "claude-opus-5"
 
     ai_gateway_api_key: str = ""
     ai_gateway_base_url: str = "https://ai-gateway.vercel.sh"
