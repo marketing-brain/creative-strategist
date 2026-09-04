@@ -418,239 +418,10 @@ git commit -m "feat(core): add UUIDv7 id generator"
 
 ---
 
-### Task 3: Database wrapper, first migration, test fixtures
-
-**Files:**
-- Create: `src/cs/core/db.py`, `db/migrations/20260904000001_foundation.sql`, `tests/conftest.py`
-- Test: `tests/core/test_db.py`
-
-**Interfaces:**
-- Produces: `cs.core.db.Database` with `await Database.connect(url) -> Database`, `close()`, `fetch(sql, *args) -> list[Record]`, `fetchrow(sql, *args) -> Record | None`, `fetchval(sql, *args)`, `execute(sql, *args) -> str`, `transaction()` async context manager yielding a `Database` bound to one connection.
-- Produces test fixtures: `settings`, `db` (function-scoped, tables truncated before each test), `org_id` (a fresh org row), `blobs` (LocalBlobStore in tmp dir).
-- Produces tables `org`, `user_org`, `job`.
-
-- [ ] **Step 1: Write the migration**
-
-`db/migrations/20260904000001_foundation.sql`:
-
-```sql
--- migrate:up
-CREATE EXTENSION IF NOT EXISTS vector;
-
-CREATE TABLE org (
-  id UUID PRIMARY KEY,
-  name TEXT NOT NULL,
-  clerk_org_id TEXT UNIQUE,
-  active_brand_kit_id UUID,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE user_org (
-  user_id TEXT NOT NULL,
-  org_id UUID NOT NULL REFERENCES org(id),
-  role TEXT NOT NULL CHECK (role IN ('member', 'admin')),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (user_id, org_id)
-);
-
-CREATE TABLE job (
-  id UUID PRIMARY KEY,
-  org_id UUID NOT NULL REFERENCES org(id),
-  job_type TEXT NOT NULL,
-  dedup_key TEXT,
-  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-  status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'done', 'failed', 'dead')),
-  attempts INT NOT NULL DEFAULT 0,
-  max_attempts INT NOT NULL DEFAULT 5,
-  run_after TIMESTAMPTZ NOT NULL DEFAULT now(),
-  locked_by TEXT,
-  locked_at TIMESTAMPTZ,
-  error TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  finished_at TIMESTAMPTZ
-);
-CREATE UNIQUE INDEX job_pending_dedup_idx ON job (job_type, dedup_key)
-  WHERE status IN ('pending', 'running') AND dedup_key IS NOT NULL;
-CREATE INDEX job_claim_idx ON job (status, run_after) WHERE status = 'pending';
-
--- migrate:down
-DROP TABLE job;
-DROP TABLE user_org;
-DROP TABLE org;
-```
-
-- [ ] **Step 2: Write the failing test**
-
-`tests/core/test_db.py`:
-
-```python
-from cs.core.ids import new_id
-
-
-async def test_roundtrip_and_transaction_rollback(db):
-    oid = new_id()
-    await db.execute("INSERT INTO org (id, name) VALUES ($1, $2)", oid, "acme")
-    row = await db.fetchrow("SELECT name FROM org WHERE id = $1", oid)
-    assert row["name"] == "acme"
-
-    try:
-        async with db.transaction() as tx:
-            await tx.execute("UPDATE org SET name = 'changed' WHERE id = $1", oid)
-            raise RuntimeError("boom")
-    except RuntimeError:
-        pass
-    assert await db.fetchval("SELECT name FROM org WHERE id = $1", oid) == "acme"
-```
-
-- [ ] **Step 3: Write conftest**
-
-`tests/conftest.py`:
-
-```python
-import os
-import subprocess
-from pathlib import Path
-
-import pytest
-
-from cs.core.blobs import LocalBlobStore
-from cs.core.config import Settings
-from cs.core.db import Database
-from cs.core.ids import new_id
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
-@pytest.fixture(scope="session")
-def settings() -> Settings:
-    os.environ.setdefault("TOKEN_ENCRYPTION_KEY", "dGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXk=")
-    os.environ.setdefault("DATABASE_URL", "postgres://cs:cs@localhost:5432/cs?sslmode=disable")
-    os.environ.setdefault(
-        "DATABASE_URL_TEST", "postgres://cs:cs@localhost:5432/cs_test?sslmode=disable"
-    )
-    s = Settings()
-    subprocess.run(
-        ["dbmate", "--url", s.database_url_test, "--migrations-dir", str(ROOT / "db/migrations"), "up"],
-        check=True,
-        capture_output=True,
-    )
-    return s
-
-
-@pytest.fixture
-async def db(settings):
-    database = await Database.connect(settings.database_url_test)
-    tables = await database.fetch(
-        "SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> 'schema_migrations'"
-    )
-    names = ", ".join(f'"{t["tablename"]}"' for t in tables)
-    if names:
-        await database.execute(f"TRUNCATE {names} CASCADE")
-    yield database
-    await database.close()
-
-
-@pytest.fixture
-async def org_id(db):
-    oid = new_id()
-    await db.execute("INSERT INTO org (id, name) VALUES ($1, 'test org')", oid)
-    return oid
-
-
-@pytest.fixture
-def blobs(tmp_path):
-    return LocalBlobStore(tmp_path / "blobs")
-```
-
-Note: `cs.core.blobs` does not exist until Task 4. For this task, temporarily comment out the `blobs` fixture and its import; Task 4 restores them.
-
-- [ ] **Step 4: Run test to verify it fails**
-
-Run: `docker compose up -d && uv run pytest tests/core/test_db.py -v`
-Expected: FAIL with `ModuleNotFoundError: cs.core.db`
-
-- [ ] **Step 5: Implement Database**
-
-`src/cs/core/db.py`:
-
-```python
-from __future__ import annotations
-
-import json
-from contextlib import asynccontextmanager
-from typing import Any
-
-import asyncpg
-
-
-async def _init_conn(conn: asyncpg.Connection) -> None:
-    await conn.set_type_codec(
-        "jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog", format="text"
-    )
-    await conn.set_type_codec(
-        "json", encoder=json.dumps, decoder=json.loads, schema="pg_catalog", format="text"
-    )
-
-
-class Database:
-    def __init__(self, pool: asyncpg.Pool | None, conn: asyncpg.Connection | None = None):
-        self._pool = pool
-        self._conn = conn
-
-    @classmethod
-    async def connect(cls, url: str) -> Database:
-        pool = await asyncpg.create_pool(url, min_size=1, max_size=10, init=_init_conn)
-        return cls(pool)
-
-    async def close(self) -> None:
-        if self._pool:
-            await self._pool.close()
-
-    def _target(self):
-        return self._conn if self._conn is not None else self._pool
-
-    async def fetch(self, sql: str, *args: Any) -> list[asyncpg.Record]:
-        return await self._target().fetch(sql, *args)
-
-    async def fetchrow(self, sql: str, *args: Any) -> asyncpg.Record | None:
-        return await self._target().fetchrow(sql, *args)
-
-    async def fetchval(self, sql: str, *args: Any) -> Any:
-        return await self._target().fetchval(sql, *args)
-
-    async def execute(self, sql: str, *args: Any) -> str:
-        return await self._target().execute(sql, *args)
-
-    @asynccontextmanager
-    async def transaction(self):
-        if self._conn is not None:
-            async with self._conn.transaction():
-                yield self
-            return
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                yield Database(None, conn)
-```
-
-- [ ] **Step 6: Run test to verify it passes**
-
-Run: `uv run pytest tests/core/test_db.py -v`
-Expected: PASS
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add src/cs/core/db.py db/migrations tests/conftest.py tests/core/test_db.py
-git commit -m "feat(core): database wrapper, foundation migration, test fixtures"
-```
-
----
-
-### Task 4: Blob store
+### Task 3: Blob store
 
 **Files:**
 - Create: `src/cs/core/blobs.py`
-- Modify: `tests/conftest.py` (restore `blobs` fixture)
 - Test: `tests/core/test_blobs.py`
 
 **Interfaces:**
@@ -789,18 +560,244 @@ def blob_store_from_settings(settings: Settings) -> BlobStore:
     return LocalBlobStore(settings.blob_root, settings.public_base_url)
 ```
 
-- [ ] **Step 4: Restore the `blobs` fixture in `tests/conftest.py`** (uncomment the import and fixture from Task 3).
+- [ ] **Step 4: Run tests**
 
-- [ ] **Step 5: Run tests**
-
-Run: `uv run pytest tests/core -v`
+Run: `uv run pytest tests/core/test_blobs.py -v`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add src/cs/core/blobs.py tests/core/test_blobs.py tests/conftest.py
+git add src/cs/core/blobs.py tests/core/test_blobs.py
 git commit -m "feat(core): blob store with local and S3 backends"
+```
+
+---
+
+### Task 4: Database wrapper, first migration, test fixtures
+
+**Files:**
+- Create: `src/cs/core/db.py`, `db/migrations/20260904000001_foundation.sql`, `tests/conftest.py`
+- Test: `tests/core/test_db.py`
+
+**Interfaces:**
+- Produces: `cs.core.db.Database` with `await Database.connect(url) -> Database`, `close()`, `fetch(sql, *args) -> list[Record]`, `fetchrow(sql, *args) -> Record | None`, `fetchval(sql, *args)`, `execute(sql, *args) -> str`, `transaction()` async context manager yielding a `Database` bound to one connection.
+- Produces test fixtures: `settings`, `db` (function-scoped, tables truncated before each test), `org_id` (a fresh org row), `blobs` (LocalBlobStore in tmp dir).
+- Produces tables `org`, `user_org`, `job`.
+
+- [ ] **Step 1: Write the migration**
+
+`db/migrations/20260904000001_foundation.sql`:
+
+```sql
+-- migrate:up
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE org (
+  id UUID PRIMARY KEY,
+  name TEXT NOT NULL,
+  clerk_org_id TEXT UNIQUE,
+  active_brand_kit_id UUID,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE user_org (
+  user_id TEXT NOT NULL,
+  org_id UUID NOT NULL REFERENCES org(id),
+  role TEXT NOT NULL CHECK (role IN ('member', 'admin')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, org_id)
+);
+
+CREATE TABLE job (
+  id UUID PRIMARY KEY,
+  org_id UUID NOT NULL REFERENCES org(id),
+  job_type TEXT NOT NULL,
+  dedup_key TEXT,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'done', 'failed', 'dead')),
+  attempts INT NOT NULL DEFAULT 0,
+  max_attempts INT NOT NULL DEFAULT 5,
+  run_after TIMESTAMPTZ NOT NULL DEFAULT now(),
+  locked_by TEXT,
+  locked_at TIMESTAMPTZ,
+  error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX job_pending_dedup_idx ON job (job_type, dedup_key)
+  WHERE status IN ('pending', 'running') AND dedup_key IS NOT NULL;
+CREATE INDEX job_claim_idx ON job (status, run_after) WHERE status = 'pending';
+
+-- migrate:down
+DROP TABLE job;
+DROP TABLE user_org;
+DROP TABLE org;
+```
+
+- [ ] **Step 2: Write the failing test**
+
+`tests/core/test_db.py`:
+
+```python
+from cs.core.ids import new_id
+
+
+async def test_roundtrip_and_transaction_rollback(db):
+    oid = new_id()
+    await db.execute("INSERT INTO org (id, name) VALUES ($1, $2)", oid, "acme")
+    row = await db.fetchrow("SELECT name FROM org WHERE id = $1", oid)
+    assert row["name"] == "acme"
+
+    try:
+        async with db.transaction() as tx:
+            await tx.execute("UPDATE org SET name = 'changed' WHERE id = $1", oid)
+            raise RuntimeError("boom")
+    except RuntimeError:
+        pass
+    assert await db.fetchval("SELECT name FROM org WHERE id = $1", oid) == "acme"
+```
+
+- [ ] **Step 3: Write conftest**
+
+Create an empty `tests/__init__.py` so tests can import `tests.conftest`.
+
+`tests/conftest.py`:
+
+```python
+import os
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from cs.core.blobs import LocalBlobStore
+from cs.core.config import Settings
+from cs.core.db import Database
+from cs.core.ids import new_id
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(scope="session")
+def settings() -> Settings:
+    os.environ.setdefault("TOKEN_ENCRYPTION_KEY", "piCYmkw56Goak3cRFwGNnH1Rze5W0zL1jcO2MXu27Ww=")
+    os.environ.setdefault("DATABASE_URL", "postgres://cs:cs@localhost:5432/cs?sslmode=disable")
+    os.environ.setdefault(
+        "DATABASE_URL_TEST", "postgres://cs:cs@localhost:5432/cs_test?sslmode=disable"
+    )
+    s = Settings()
+    subprocess.run(
+        ["dbmate", "--url", s.database_url_test, "--migrations-dir", str(ROOT / "db/migrations"), "up"],
+        check=True,
+        capture_output=True,
+    )
+    return s
+
+
+@pytest.fixture
+async def db(settings):
+    database = await Database.connect(settings.database_url_test)
+    tables = await database.fetch(
+        "SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> 'schema_migrations'"
+    )
+    names = ", ".join(f'"{t["tablename"]}"' for t in tables)
+    if names:
+        await database.execute(f"TRUNCATE {names} CASCADE")
+    yield database
+    await database.close()
+
+
+@pytest.fixture
+async def org_id(db):
+    oid = new_id()
+    await db.execute("INSERT INTO org (id, name) VALUES ($1, 'test org')", oid)
+    return oid
+
+
+@pytest.fixture
+def blobs(tmp_path):
+    return LocalBlobStore(tmp_path / "blobs")
+```
+
+- [ ] **Step 4: Run test to verify it fails**
+
+Run: `docker compose up -d && uv run pytest tests/core/test_db.py -v`
+Expected: FAIL with `ModuleNotFoundError: cs.core.db`
+
+- [ ] **Step 5: Implement Database**
+
+`src/cs/core/db.py`:
+
+```python
+from __future__ import annotations
+
+import json
+from contextlib import asynccontextmanager
+from typing import Any
+
+import asyncpg
+
+
+async def _init_conn(conn: asyncpg.Connection) -> None:
+    await conn.set_type_codec(
+        "jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog", format="text"
+    )
+    await conn.set_type_codec(
+        "json", encoder=json.dumps, decoder=json.loads, schema="pg_catalog", format="text"
+    )
+
+
+class Database:
+    def __init__(self, pool: asyncpg.Pool | None, conn: asyncpg.Connection | None = None):
+        self._pool = pool
+        self._conn = conn
+
+    @classmethod
+    async def connect(cls, url: str) -> Database:
+        pool = await asyncpg.create_pool(url, min_size=1, max_size=10, init=_init_conn)
+        return cls(pool)
+
+    async def close(self) -> None:
+        if self._pool:
+            await self._pool.close()
+
+    def _target(self):
+        return self._conn if self._conn is not None else self._pool
+
+    async def fetch(self, sql: str, *args: Any) -> list[asyncpg.Record]:
+        return await self._target().fetch(sql, *args)
+
+    async def fetchrow(self, sql: str, *args: Any) -> asyncpg.Record | None:
+        return await self._target().fetchrow(sql, *args)
+
+    async def fetchval(self, sql: str, *args: Any) -> Any:
+        return await self._target().fetchval(sql, *args)
+
+    async def execute(self, sql: str, *args: Any) -> str:
+        return await self._target().execute(sql, *args)
+
+    @asynccontextmanager
+    async def transaction(self):
+        if self._conn is not None:
+            async with self._conn.transaction():
+                yield self
+            return
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                yield Database(None, conn)
+```
+
+- [ ] **Step 6: Run test to verify it passes**
+
+Run: `uv run pytest tests/core/test_db.py -v`
+Expected: PASS
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/cs/core/db.py db/migrations tests/__init__.py tests/conftest.py tests/core/test_db.py
+git commit -m "feat(core): database wrapper, foundation migration, test fixtures"
 ```
 
 ---
@@ -1008,7 +1005,7 @@ git commit -m "feat(core): postgres-backed job queue with dedup, backoff, and le
 - Test: `tests/jobs/test_worker.py`, `tests/jobs/test_scheduler.py`
 
 **Interfaces:**
-- Consumes: `cs.core.queue` (Task 5), `cs.core.blobs.BlobStore` (Task 4), `Settings` (Task 1).
+- Consumes: `cs.core.queue` (Task 5), `cs.core.blobs.BlobStore` (Task 3), `Settings` (Task 1).
 - Produces:
   - `@dataclass JobContext(db: Database, blobs: BlobStore, settings: Settings, job: Job)`
   - `handler(job_type: str)` decorator registering `async def fn(ctx: JobContext) -> None` in `HANDLERS: dict[str, Handler]`
@@ -1661,7 +1658,7 @@ jobs:
     env:
       DATABASE_URL: postgres://cs:cs@localhost:5432/cs_test?sslmode=disable
       DATABASE_URL_TEST: postgres://cs:cs@localhost:5432/cs_test?sslmode=disable
-      TOKEN_ENCRYPTION_KEY: dGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXk=
+      TOKEN_ENCRYPTION_KEY: piCYmkw56Goak3cRFwGNnH1Rze5W0zL1jcO2MXu27Ww=
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
@@ -1712,6 +1709,6 @@ git commit -m "chore: CI workflow and README"
 
 ## Self-review
 
-- **Spec coverage:** Section 3 processes (api, worker, scheduler) → Tasks 6, 7. Section 4 conventions (uuid7, jsonb, raw SQL, one-way status) → Tasks 2, 3, 5. Section 11 job lifecycle, lease reclaim, dead-letter, structured logging fields → Tasks 5, 6. Section 13 local dev → Tasks 1, 8. Auth via Clerk with org scoping → Task 7. Blob rule → Task 4.
+- **Spec coverage:** Section 3 processes (api, worker, scheduler) → Tasks 6, 7. Section 4 conventions (uuid7, jsonb, raw SQL, one-way status) → Tasks 2, 4, 5. Section 11 job lifecycle, lease reclaim, dead-letter, structured logging fields → Tasks 5, 6. Section 13 local dev → Tasks 1, 8. Auth via Clerk with org scoping → Task 7. Blob rule → Task 3.
 - **Type consistency:** `Job` fields used in `worker.run_once` match `queue.Job`. `JobContext` fields (`db`, `blobs`, `settings`, `job`) are the names every later handler uses. `dev_headers` lives in `tests/conftest.py` and is imported by API tests in later phases.
 - **Deferred:** `cs.jobs.all_handlers` is an empty module here; each later phase appends an import line to it.

@@ -256,8 +256,6 @@ async def ensure_metric_partition(db: Database, day: date) -> None:
     )
 ```
 
-Note: the Fernet key in `tests/conftest.py` from Phase 0 (`dGVzdC1rZXkt...`) is not a valid Fernet key. Replace that line with a generated one: `Fernet.generate_key().decode()` computed once and pasted, e.g. `"k6r0yV2n7mQ9c1wQ3pX8uZbL4tA6dF0hJ2sK5vN8xE0="` (any 32-byte urlsafe-base64 string). Update `.github/workflows/ci.yml` to the same value.
-
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `uv run pytest tests/core/test_crypto.py tests/ingest/test_partitions.py -v`
@@ -266,7 +264,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add db/migrations/20260904000002_ingest.sql src/cs/core/crypto.py src/cs/ingest tests/core/test_crypto.py tests/ingest/test_partitions.py tests/conftest.py .github
+git add db/migrations/20260904000002_ingest.sql src/cs/core/crypto.py src/cs/ingest tests/core/test_crypto.py tests/ingest/test_partitions.py
 git commit -m "feat(ingest): schema for accounts, ads, creatives, assets, metrics; token crypto"
 ```
 
@@ -1280,7 +1278,8 @@ async def test_backfill_ingests_and_downloads(db, blobs, settings, org_id, accou
     assert {c["format"] for c in creatives} == {"image", "video"}
     assert all(c["primary_asset_path"] for c in creatives)
     assert await db.fetchval("SELECT count(*) FROM metric_daily") == 1
-    assert await db.fetchval("SELECT count(*) FROM job WHERE status <> 'done'") == 0
+    # tagging.tag_creative jobs are enqueued per download; their handler arrives in Phase 2
+    assert await db.fetchval("SELECT count(*) FROM job WHERE status <> 'done' AND job_type <> 'tagging.tag_creative'") == 0
     cursor = await db.fetchval("SELECT sync_cursor FROM ad_account WHERE id=$1", account_id)
     assert cursor["last_synced_until"] == date.today().isoformat()
 
@@ -1591,7 +1590,7 @@ import cs.ingest.jobs  # noqa: F401
 
 For tests, `tests/conftest.py` must import handlers too. Add at its top: `import cs.jobs.all_handlers  # noqa: F401`.
 
-Note: `download_creative` enqueues `tagging.tag_creative`, which has no handler until Phase 2. The worker marks such jobs failed → they retry with backoff and then die. In `tests/ingest/test_jobs.py::test_backfill_ingests_and_downloads` the assertion `count(*) FROM job WHERE status <> 'done'` is therefore `2` (one per creative) until Phase 2 registers the handler. Write the assertion as `assert await db.fetchval("SELECT count(*) FROM job WHERE status <> 'done' AND job_type <> 'tagging.tag_creative'") == 0` so it is true in both phases.
+Note: `download_creative` enqueues `tagging.tag_creative`, which has no handler until Phase 2. The worker marks such jobs failed; they retry with backoff and then die. The backfill test above already excludes that job type from its "all done" assertion.
 
 - [ ] **Step 6: Run tests to verify they pass**
 

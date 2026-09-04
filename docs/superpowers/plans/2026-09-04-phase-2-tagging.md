@@ -538,7 +538,7 @@ async def test_claude_tagger_sends_images_and_parses_json(settings):
     schema = load_taxonomy().json_schema("image")
     res = await tagger.tag([(b"\xff\xd8\xff", "image/jpeg")], "describe", schema)
     assert res.tags == payload["tags"] and res.input_tokens == 10 and not res.refused
-    call = client.beta.messages.messages if False else client.beta.messages.calls[0]
+    call = client.beta.messages.calls[0]
     assert call["model"] == "claude-opus-5"
     assert call["betas"] == ["server-side-fallback-2026-07-01"] and call["fallbacks"] == "default"
     assert call["output_config"]["format"]["type"] == "json_schema"

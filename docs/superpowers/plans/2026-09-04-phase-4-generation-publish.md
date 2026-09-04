@@ -454,12 +454,10 @@ class ClaudeCopyWriter:
             return []
         check_user = json.dumps({"voice_rules": kit.voice_rules, "prohibited_claims": kit.prohibited_claims,
                                  "sets": [s.__dict__ for s in sets]})
-        verdict = await self._call(CHECK_SYSTEM, check_user, CHECK_SCHEMA).__await__() if False else await self._call(CHECK_SYSTEM, check_user, CHECK_SCHEMA)
+        verdict = await self._call(CHECK_SYSTEM, check_user, CHECK_SCHEMA)
         approved = verdict.get("approved", [True] * len(sets))
         return [s for s, ok in zip(sets, approved, strict=False) if ok]
 ```
-
-(Remove the stray `if False` expression when implementing: the line must read `verdict = await self._call(CHECK_SYSTEM, check_user, CHECK_SCHEMA)`.)
 
 `src/cs/generation/fakes.py`:
 
@@ -1862,5 +1860,5 @@ git commit -m "test: end-to-end loop on fakes from backfill to loop closure"
 ## Self-review
 
 - **Spec coverage:** brand kit versioned with logo, colors, fonts, voice, prohibited claims → Task 1. Copy with second-pass brand check → Task 2. Statics via gateway with references, resized to the three aspects, logo composited → Tasks 3, 5. Video via gateway image-to-video seeded from a still, captions + end card → Tasks 4, 5. Drafts, one-way review, publish form with campaign/ad set fetched live, paused by default → Task 6. Loop closure on next sync → Task 6 + e2e Task 7. Partial success: `run_generation` records each produced asset as it goes, so an image failure mid-way leaves earlier assets in place and the generation `failed` with the error.
-- **Placeholder scan:** Task 2 code block contains a flagged stray expression with an explicit instruction to remove it; no TBDs.
+- **Placeholder scan:** none.
 - **Type consistency:** `FakeConnector.created_ads[i]["status"]`, `uploads[i][0]`, `create_ad` return `("cr_new_n", "ad_new_n")` match the Phase 1 fake. `repo.set_review_state` returns bool used by routes. Job payload keys: `generation_id`, `publish_job_id`. Seams: `COPYWRITER_FACTORY`, `IMAGE_FACTORY`, `VIDEO_FACTORY`, `ingest_service.CONNECTOR_FACTORY`.
