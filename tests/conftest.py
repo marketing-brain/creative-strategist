@@ -3,8 +3,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import httpx
 import pytest
 
+from cs.api.app import create_app
 from cs.core.blobs import LocalBlobStore
 from cs.core.config import Settings
 from cs.core.db import Database
@@ -61,3 +63,16 @@ async def org_id(db):
 @pytest.fixture
 def blobs(tmp_path):
     return LocalBlobStore(tmp_path / "blobs")
+
+
+def dev_headers(org: str = "org_test", user: str = "user_1", role: str = "admin") -> dict:
+    return {"X-Dev-User": user, "X-Dev-Org": org, "X-Dev-Role": role}
+
+
+@pytest.fixture
+async def client(settings, db, blobs):
+    app = create_app(settings, db, blobs)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        yield c
