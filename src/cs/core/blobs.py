@@ -35,7 +35,7 @@ class LocalBlobStore:
 
     async def put(self, key: str, data: bytes, content_type: str) -> str:
         p = self._path(key)
-        p.parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(p.parent.mkdir, parents=True, exist_ok=True)
         await asyncio.to_thread(p.write_bytes, data)
         return key
 
@@ -43,7 +43,7 @@ class LocalBlobStore:
         return await asyncio.to_thread(self._path(key).read_bytes)
 
     async def exists(self, key: str) -> bool:
-        return self._path(key).exists()
+        return await asyncio.to_thread(self._path(key).exists)
 
     async def url_for(self, key: str, expires_seconds: int = 3600) -> str:
         _check_key(key)
@@ -74,8 +74,11 @@ class S3BlobStore:
         try:
             await asyncio.to_thread(self.client.head_object, Bucket=self.bucket, Key=key)
             return True
-        except self.client.exceptions.ClientError:
-            return False
+        except self.client.exceptions.ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code")
+            if code in ("404", "NoSuchKey", "NotFound"):
+                return False
+            raise
 
     async def url_for(self, key: str, expires_seconds: int = 3600) -> str:
         _check_key(key)
