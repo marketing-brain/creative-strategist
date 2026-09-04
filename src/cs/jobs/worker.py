@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import socket
 import traceback
+import uuid
 
 from cs.core import queue
 from cs.core.blobs import BlobStore, blob_store_from_settings
@@ -31,7 +33,10 @@ async def run_once(db: Database, blobs: BlobStore, settings: Settings, worker_id
         )
     except Exception as exc:  # noqa: BLE001 - worker must survive any handler failure
         await queue.fail(db, job.id, f"{exc}\n{traceback.format_exc()}")
-        log.exception("job failed", extra={"job_id": str(job.id), "job_type": job.job_type})
+        log.exception(
+            "job failed",
+            extra={"job_id": str(job.id), "job_type": job.job_type, "org_id": str(job.org_id)},
+        )
     return True
 
 
@@ -41,7 +46,7 @@ async def run_worker(settings: Settings | None = None) -> None:
 
     db = await Database.connect(settings.database_url)
     blobs = blob_store_from_settings(settings)
-    worker_id = f"{socket.gethostname()}:{id(db)}"
+    worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
     log.info("worker started", extra={"worker_id": worker_id})
     try:
         while True:
