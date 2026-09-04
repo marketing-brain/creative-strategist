@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Default tagging model `claude-opus-5` (from `settings.model_tagging`); adaptive thinking (default); `output_config.format` JSON schema; refusal fallback via `client.beta.messages.create(..., betas=["server-side-fallback-2026-07-01"], fallbacks="default")`; always check `stop_reason == "refusal"` before reading content.
+- Default tagging model `claude-opus-5` (from `settings.claude_model_tagging`); adaptive thinking (default); `output_config.format` JSON schema; refusal fallback via `client.beta.messages.create(..., betas=["server-side-fallback-2026-07-01"], fallbacks="default")`; always check `stop_reason == "refusal"` before reading content.
 - Batches API requests must **not** include `fallbacks`/`betas` (rejected on batches).
 - Images sent to Claude are resized so the longest side ≤ 1568px and encoded JPEG quality 85.
 - Video: keyframes at 0s, 1s, 3s plus scene changes (threshold 0.3), capped at 24 frames total, ordered by timestamp; audio transcribed through the AI Gateway REST endpoint `POST {ai_gateway_base_url}/v4/ai/transcription-model` with header `ai-model-id`.
@@ -678,7 +678,7 @@ def build_content(images: list[tuple[bytes, str]], user_text: str) -> list[dict]
 class ClaudeTagger:
     def __init__(self, settings: Settings, client: anthropic.AsyncAnthropic | None = None, model: str | None = None):
         self.client = client or anthropic.AsyncAnthropic()
-        self.model = model or settings.model_tagging
+        self.model = model or settings.claude_model_tagging
 
     async def tag(self, images: list[tuple[bytes, str]], user_text: str, schema: dict) -> TagResult:
         from cs.tagging.prompts import SYSTEM
@@ -1052,7 +1052,7 @@ async def test_tag_image_creative_persists_tags(db, blobs, settings, org_id, ima
     tags = await repo.latest_tags(db, org_id, image_creative)
     assert {t["dimension"] for t in tags} >= {"hook_type", "message_angle", "hook_summary"}
     run = await db.fetchrow("SELECT status, input_tokens, model FROM tag_run WHERE id=$1", run_id)
-    assert run["status"] == "done" and run["input_tokens"] == 100 and run["model"] == settings.model_tagging
+    assert run["status"] == "done" and run["input_tokens"] == 100 and run["model"] == settings.claude_model_tagging
     assert await db.fetchval("SELECT count(*) FROM job WHERE job_type='tagging.embed_creative'") == 1
 
 
@@ -1229,7 +1229,7 @@ async def tag_creative(ctx: JobContext, creative_id: UUID, tagger: Tagger, trans
         raise RuntimeError(f"creative {creative_id} has no primary asset yet")
     taxonomy = load_taxonomy()
     tv_id = await repo.ensure_taxonomy_version(ctx.db, taxonomy)
-    model = ctx.settings.model_tagging
+    model = ctx.settings.claude_model_tagging
     run_id = await repo.start_tag_run(ctx.db, org_id, creative_id, tv_id, model)
     if run_id is None:
         return None
@@ -1623,7 +1623,7 @@ async def test_claude_batch_tagger_shapes_requests(settings):
     bid = await bt.submit([{"custom_id": "c1", "images": [(b"\xff\xd8\xff", "image/jpeg")], "user_text": "t", "schema": {"type": "object"}}])
     assert bid == "msgbatch_1"
     params = created["requests"][0]["params"]
-    assert "fallbacks" not in params and "betas" not in params and params["model"] == settings.model_tagging
+    assert "fallbacks" not in params and "betas" not in params and params["model"] == settings.claude_model_tagging
     ended, results = await bt.poll(bid)
     assert ended and results[0]["ok"] and results[0]["custom_id"] == "c1"
 ```
@@ -1658,7 +1658,7 @@ class BatchTagger(Protocol):
 class ClaudeBatchTagger:
     def __init__(self, settings: Settings, client: anthropic.AsyncAnthropic | None = None):
         self.client = client or anthropic.AsyncAnthropic()
-        self.model = settings.model_tagging
+        self.model = settings.claude_model_tagging
 
     async def submit(self, requests: list[dict]) -> str:
         payload = [{
@@ -1735,7 +1735,7 @@ async def batch_submit(ctx: JobContext) -> None:
     org_id = ctx.job.org_id
     taxonomy = load_taxonomy()
     tv = await tag_repo.ensure_taxonomy_version(ctx.db, taxonomy)
-    model = ctx.settings.model_tagging
+    model = ctx.settings.claude_model_tagging
     ids = await tag_repo.untagged_creative_ids(ctx.db, org_id, tv, model, int(ctx.job.payload.get("limit", 500)))
     if not ids:
         return

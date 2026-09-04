@@ -17,7 +17,7 @@
 - Aspects produced for every static: `1:1` (1080×1080), `4:5` (1080×1350), `9:16` (1080×1920).
 - Image model from `settings.image_model` (default `bfl/flux-2-pro`) via `POST {ai_gateway_base_url}/v1/images/generations` with `response_format=b64_json`; reference-guided variants via `/v1/images/edits`.
 - Video model from `settings.video_model` (default `klingai/kling-v3.0-i2v`), 5 seconds, via the Node CLI with `poll` enabled; the start still must be a hosted URL (blob `url_for`), never inline base64.
-- Copy model `settings.model_copy`, refusal fallback on, structured output.
+- Copy model `settings.claude_model_copy`, refusal fallback on, structured output.
 - All earlier constraints apply.
 
 ---
@@ -431,7 +431,7 @@ class CopyWriter(Protocol):
 class ClaudeCopyWriter:
     def __init__(self, settings: Settings, client: anthropic.AsyncAnthropic | None = None):
         self.client = client or anthropic.AsyncAnthropic()
-        self.model = settings.model_copy
+        self.model = settings.claude_model_copy
 
     async def _call(self, system: str, user: str, schema: dict) -> dict:
         resp = await self.client.beta.messages.create(

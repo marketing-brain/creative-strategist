@@ -216,10 +216,10 @@ META_APP_SECRET=
 META_REDIRECT_URI=http://localhost:8000/meta/oauth/callback
 META_API_VERSION=v21.0
 ANTHROPIC_API_KEY=
-MODEL_TAGGING=claude-opus-5
-MODEL_INSIGHTS=claude-opus-5
-MODEL_COPILOT=claude-opus-5
-MODEL_COPY=claude-opus-5
+CLAUDE_MODEL_TAGGING=claude-opus-5
+CLAUDE_MODEL_INSIGHTS=claude-opus-5
+CLAUDE_MODEL_COPILOT=claude-opus-5
+CLAUDE_MODEL_COPY=claude-opus-5
 AI_GATEWAY_API_KEY=
 AI_GATEWAY_BASE_URL=https://ai-gateway.vercel.sh
 IMAGE_MODEL=bfl/flux-2-pro
@@ -257,7 +257,7 @@ def test_settings_reads_env(monkeypatch):
     s = Settings()
     assert s.database_url == "postgres://x"
     assert s.blob_backend == "local"
-    assert s.model_tagging == "claude-opus-5"
+    assert s.claude_model_tagging == "claude-opus-5"
     assert s.meta_api_version == "v21.0"
 ```
 
@@ -303,10 +303,10 @@ class Settings(BaseSettings):
     meta_api_version: str = "v21.0"
 
     anthropic_api_key: str = ""
-    model_tagging: str = "claude-opus-5"
-    model_insights: str = "claude-opus-5"
-    model_copilot: str = "claude-opus-5"
-    model_copy: str = "claude-opus-5"
+    claude_model_tagging: str = "claude-opus-5"
+    claude_model_insights: str = "claude-opus-5"
+    claude_model_copilot: str = "claude-opus-5"
+    claude_model_copy: str = "claude-opus-5"
 
     ai_gateway_api_key: str = ""
     ai_gateway_base_url: str = "https://ai-gateway.vercel.sh"

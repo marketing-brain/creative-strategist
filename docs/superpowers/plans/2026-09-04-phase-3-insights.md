@@ -17,7 +17,7 @@
 - Metrics considered: `ctr = clicks/impressions`, `cpa = spend/conversions`, `roas = conversion_value/spend`. Lift is signed so positive is always "better".
 - Insights are append-only; a duplicate `(kind, dimension, value, metric, window, creative_id)` is skipped, never updated.
 - Copilot tools are read-only repo calls; no model-generated SQL.
-- Models from `settings.model_insights` and `settings.model_copilot` (default `claude-opus-5`).
+- Models from `settings.claude_model_insights` and `settings.claude_model_copilot` (default `claude-opus-5`).
 - All earlier constraints apply.
 
 ---
@@ -704,7 +704,7 @@ class Explainer(Protocol):
 class ClaudeExplainer:
     def __init__(self, settings: Settings, client: anthropic.AsyncAnthropic | None = None):
         self.client = client or anthropic.AsyncAnthropic()
-        self.model = settings.model_insights
+        self.model = settings.claude_model_insights
 
     async def explain(self, draft: InsightDraft, context: dict) -> tuple[str, str]:
         resp = await self.client.beta.messages.create(
@@ -1221,7 +1221,7 @@ class Copilot(Protocol):
 class ClaudeCopilot:
     def __init__(self, settings: Settings, client: anthropic.AsyncAnthropic | None = None):
         self.client = client or anthropic.AsyncAnthropic()
-        self.model = settings.model_copilot
+        self.model = settings.claude_model_copilot
 
     def _tools(self, t: CopilotTools) -> list:
         @beta_async_tool
