@@ -19,12 +19,14 @@
 - Video model from `settings.video_model` (default `klingai/kling-v3.0-i2v`), 5 seconds, via the Node CLI with `poll` enabled; the start still must be a hosted URL (blob `url_for`), never inline base64.
 - Copy model `settings.claude_model_copy`, refusal fallback on, structured output.
 - All earlier constraints apply.
+- Follow-ups this phase must close, all in Task 0, ahead of the generation/brand work: the Phase 1 final review's "introduce the derived-metrics SQL view spec §4 describes so insights and the API share one definition" (never done in Phase 3, now three divergent ctr/cpa/roas implementations exist); the Phase 2 final review's carousel-first-card-only tagging limitation (escalated by the Phase 3 review since pattern/fatigue insights now wrap card-0-only tags in confident LLM prose); and the Phase 2 final review's `extract_keyframes`/`extract_audio` ffmpeg subprocess calls running on the event loop thread instead of `asyncio.to_thread`.
 
 ---
 
 ## File structure
 
 ```
+src/cs/core/metrics.py             # derived_metrics(): shared ctr/cpa/roas formula (Task 0)
 db/migrations/20260904000007_generation.sql
 src/cs/generation/__init__.py
 src/cs/generation/brand.py         # BrandKit dataclass, repo (create version, get active), logo storage
@@ -45,6 +47,308 @@ src/cs/api/routers/meta_targets.py # /accounts/{id}/campaigns, /accounts/{id}/ad
 tools/video-gen/package.json
 tools/video-gen/index.mjs
 tests/generation/..., tests/publish/..., tests/e2e/test_loop.py
+```
+
+Task 0 also modifies (no new migration): `src/cs/insights/patterns.py`, `src/cs/api/routers/creatives.py` (both re-point at `cs.core.metrics.derived_metrics`); `src/cs/tagging/runner.py`, `src/cs/tagging/prompts.py`, `src/cs/ingest/repo.py` (carousel multi-card tagging); `src/cs/tagging/runner.py` again (ffmpeg calls via `asyncio.to_thread`).
+
+---
+
+### Task 0: Follow-ups from the Phase 1-3 final reviews
+
+**Why this task exists:** three items were carried forward and none is safe to defer further now that generation/publish will read from the same metrics and tags. (1) The Phase 1 final review assigned "introduce the derived-metrics SQL view spec §4 describes" to Phase 3; Phase 3 didn't do it, so `src/cs/api/routers/creatives.py::_derived` and `src/cs/insights/patterns.py::metrics_from_sums` (also used by `fatigue.py` and `copilot.py`) independently compute ctr/cpa/roas with different rounding (4/2/2 vs 6/4/4) and different null semantics (0.0 vs `None` when there are no impressions) — a Copilot answer can already disagree with what `/creatives` shows for the same data, and generation briefs pull from insights, so the drift would propagate into ad copy. (2) The Phase 2 final review flagged carousel creatives as tagged via card 0's image only; the Phase 3 review escalated this because pattern/fatigue insights now aggregate those card-0-only tags into confident LLM prose — and Phase 4's `build_brief()` (Task 5) quotes that same prose into generation briefs, so a wrong tag now drives ad creative, not just an insight. (3) The Phase 2 final review noted `extract_keyframes`'s and `extract_audio`'s ffmpeg subprocess calls run synchronously on the event loop thread in `tagging.tag_creative`, risking the job's heartbeat starving past the reclaim window on a long video.
+
+**Ruling on "SQL view":** the spec's "computed in views, not stored" describes intent (derived metrics aren't persisted columns), not a mandate for a literal `CREATE VIEW`. The three call sites first aggregate `metric_daily` differently — one groups by day for a single creative, one sums per segment vs. a baseline across many creatives, one sums two date-windows per creative already fetched into Python — so a single relational view over raw rows can't serve all three without each site re-deriving its own aggregation on top of it anyway. A shared Python function given the aggregated sums is the one piece those three call sites don't already have in common, and is what actually produces "one definition." Cost if wrong: a future contributor re-litigates this and moves the formula into SQL; the call sites already share one function, so that move only touches `src/cs/core/metrics.py`, not its callers.
+
+**Ruling on rounding/null semantics:** canonicalize on `metrics_from_sums`'s existing precision (ctr round 6, cpa/roas round 4) and its `None`-when-undefined semantics (not `_derived`'s 0.0-when-no-impressions), since insights' lift comparisons need the precision and no test locks in the 0.0 behavior (confirmed by search — the only creatives-metrics test, `tests/api/test_accounts_and_creatives.py::test_creatives_list_detail_metrics`, seeds impressions=1000 and never hits the zero case). Cost if wrong: Phase 5's frontend sees `null` instead of `0%` for a creative with no impressions yet and must handle it — a one-line display-side change, not a data bug.
+
+**Files:**
+- Create: `src/cs/core/metrics.py`; Test: `tests/core/test_metrics.py`
+- Modify: `src/cs/insights/patterns.py`, `src/cs/api/routers/creatives.py`
+- Modify: `src/cs/ingest/repo.py`, `src/cs/tagging/runner.py`, `src/cs/tagging/prompts.py`; Test: `tests/ingest/test_repo.py`, `tests/tagging/test_runner.py`
+- Modify: `src/cs/tagging/runner.py` (ffmpeg calls); Test: `tests/tagging/test_runner.py`
+
+**Interfaces:**
+- `cs.core.metrics.derived_metrics(spend: Decimal, impressions: int, clicks: int, conversions: Decimal, conversion_value: Decimal) -> dict{ctr, cpa, roas}` — exact body of today's `patterns.metrics_from_sums`, moved verbatim.
+- `cs.insights.patterns.metrics_from_sums` becomes `from cs.core.metrics import derived_metrics as metrics_from_sums` (re-export; `fatigue.py` and `copilot.py` import sites are unchanged).
+- `cs.api.routers.creatives._derived` calls `derived_metrics(...)` instead of computing ctr/cpa/roas inline.
+- `cs.ingest.repo.list_assets_by_kind(db, org_id, creative_id, kind) -> list[Record]`, ordered by `seq`.
+- `cs.tagging.runner._prepare_inputs`: for `format == "carousel"`, fetch every `original_image` asset via `list_assets_by_kind` (not just `primary_asset_path`) and pass one image per card to the tagger, in `seq` order.
+- `cs.tagging.runner._prepare_inputs`: `extract_keyframes`, `extract_audio`, and the transcript-asset's `probe_duration_ms` call all wrapped in `asyncio.to_thread`.
+
+- [ ] **Step 1: Write failing tests — shared metrics**
+
+`tests/core/test_metrics.py`:
+
+```python
+from decimal import Decimal
+
+from cs.core.metrics import derived_metrics
+from cs.insights.patterns import metrics_from_sums
+
+
+def test_derived_metrics_formula_and_nulls():
+    assert derived_metrics(Decimal("100"), 10000, 200, Decimal("10"), Decimal("500")) == {
+        "ctr": 0.02,
+        "cpa": 10.0,
+        "roas": 5.0,
+    }
+    assert derived_metrics(Decimal("0"), 0, 0, Decimal("0"), Decimal("0")) == {
+        "ctr": None,
+        "cpa": None,
+        "roas": None,
+    }
+
+
+def test_insights_reexports_the_same_function():
+    assert metrics_from_sums is derived_metrics
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `uv run pytest tests/core/test_metrics.py -v`
+Expected: FAIL (`cs.core.metrics` does not exist yet)
+
+- [ ] **Step 3: Implement**
+
+`src/cs/core/metrics.py`:
+
+```python
+from __future__ import annotations
+
+from decimal import Decimal
+
+
+def derived_metrics(
+    spend: Decimal, impressions: int, clicks: int, conversions: Decimal, conversion_value: Decimal
+) -> dict:
+    spend_f, conv_f, val_f = float(spend), float(conversions), float(conversion_value)
+    return {
+        "ctr": round(clicks / impressions, 6) if impressions else None,
+        "cpa": round(spend_f / conv_f, 4) if conv_f else None,
+        "roas": round(val_f / spend_f, 4) if spend_f else None,
+    }
+```
+
+In `src/cs/insights/patterns.py`, replace the `metrics_from_sums` function body with:
+
+```python
+from cs.core.metrics import derived_metrics as metrics_from_sums
+```
+
+(remove the old `def metrics_from_sums(...)` block entirely; `signed_lift` and everything else in the file is unchanged. `fatigue.py` and `copilot.py` both `from cs.insights.patterns import metrics_from_sums` already — leave those imports as-is.)
+
+In `src/cs/api/routers/creatives.py`, replace `_derived`'s inline ctr/cpa/roas lines:
+
+```python
+from cs.core.metrics import derived_metrics
+
+
+def _derived(r) -> dict:
+    out = {
+        **{
+            k: (float(v) if hasattr(v, "as_integer_ratio") and not isinstance(v, int) else v)
+            for k, v in dict(r).items()
+        },
+        **{k: int(r[k] or 0) for k in COUNT_FIELDS if k in r},
+    }
+    out["day"] = r["day"].isoformat()
+    out.update(
+        derived_metrics(r["spend"], int(r["impressions"]), int(r["clicks"]), r["conversions"], r["conversion_value"])
+    )
+    return out
+```
+
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `uv run pytest tests/core/test_metrics.py tests/insights tests/api/test_accounts_and_creatives.py -v`
+Expected: PASS (`test_creatives_list_detail_metrics`'s `ctr == 0.02, cpa == 5.0, roas == 10.0` still holds at the new precision — 20/1000, 10/2, 100/10 are exact ratios)
+
+- [ ] **Step 5: Write failing tests — carousel multi-card tagging**
+
+Add to `tests/ingest/test_repo.py`:
+
+```python
+async def test_list_assets_by_kind_orders_by_seq(db, org_id, settings):
+    from cs.connectors.base import PlatformCreative
+    from cs.core.crypto import encrypt_str
+    from cs.ingest import repo
+
+    acct = await repo.upsert_ad_account(db, org_id, "1", "M", "USD", encrypt_str(settings, "t"), None)
+    cid, _ = await repo.upsert_creative(
+        db, org_id, acct, PlatformCreative("cx", "carousel", "H", "P", None, None, "u", None, None, {}), "raw"
+    )
+    for i in (2, 0, 1):  # insert out of order
+        await repo.insert_asset(db, org_id, cid, "original_image", f"o/{i}.png", "sha", "image/png", seq=i)
+    rows = await repo.list_assets_by_kind(db, org_id, cid, "original_image")
+    assert [r["seq"] for r in rows] == [0, 1, 2]
+```
+
+Add to `tests/tagging/test_runner.py`:
+
+```python
+@pytest.fixture
+async def carousel_creative(db, org_id, settings, blobs):
+    acct = await ingest_repo.upsert_ad_account(
+        db, org_id, "1", "M", "USD", encrypt_str(settings, "t"), None
+    )
+    cid, _ = await ingest_repo.upsert_creative(
+        db,
+        org_id,
+        acct,
+        PlatformCreative("cx", "carousel", "H", "P", None, "SHOP_NOW", "u", None, None, {}),
+        "raw",
+    )
+    asset_ids = []
+    for i in range(3):
+        key = f"{org_id}/creatives/{cid}/card_{i:02d}.png"
+        await blobs.put(key, _png(), "image/png")
+        aid = await ingest_repo.insert_asset(
+            db, org_id, cid, "original_image", key, "sha", "image/png", seq=i
+        )
+        asset_ids.append(aid)
+    await ingest_repo.set_primary_asset(db, org_id, cid, asset_ids[0])
+    return cid
+
+
+async def test_tag_carousel_creative_uses_all_cards(db, blobs, settings, org_id, carousel_creative):
+    tagger, tr = FakeTagger(), FakeTranscriber()
+    run_id = await runner.tag_creative(
+        _ctx(db, blobs, settings, org_id, {}), carousel_creative, tagger, tr
+    )
+    assert run_id is not None and tagger.calls[0]["n_images"] == 3 and tr.calls == 0
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+async def test_ffmpeg_calls_run_off_the_event_loop_thread(db, blobs, settings, org_id, tmp_path, monkeypatch):
+    import threading
+
+    from cs.tagging import runner as runner_mod
+    from cs.tagging.video import Keyframe
+
+    cid = await _make_video_creative(db, blobs, settings, org_id, tmp_path)
+    seen_threads = []
+
+    def fake_extract_keyframes(data):
+        seen_threads.append(threading.current_thread())
+        return [Keyframe(0.0, _png(), 64, 64)]
+
+    def fake_extract_audio(data):
+        seen_threads.append(threading.current_thread())
+        return None
+
+    monkeypatch.setattr(runner_mod, "extract_keyframes", fake_extract_keyframes)
+    monkeypatch.setattr(runner_mod, "extract_audio", fake_extract_audio)
+    await runner.tag_creative(_ctx(db, blobs, settings, org_id, {}), cid, FakeTagger(), FakeTranscriber())
+    assert len(seen_threads) == 2
+    assert all(t is not threading.current_thread() for t in seen_threads)
+```
+
+- [ ] **Step 6: Run to verify they fail**
+
+Run: `uv run pytest tests/ingest/test_repo.py tests/tagging/test_runner.py -v`
+Expected: FAIL (`list_assets_by_kind` doesn't exist; carousel test gets `n_images == 1`; the thread-offload test's monkeypatched functions run on the main thread since `asyncio.to_thread` isn't used yet)
+
+- [ ] **Step 7: Implement**
+
+In `src/cs/ingest/repo.py`, add after `get_asset_by_seq`:
+
+```python
+async def list_assets_by_kind(
+    db: Database, org_id: UUID, creative_id: UUID, kind: str
+) -> list[asyncpg.Record]:
+    return await db.fetch(
+        "SELECT * FROM asset WHERE org_id=$1 AND creative_id=$2 AND kind=$3 ORDER BY seq",
+        org_id,
+        creative_id,
+        kind,
+    )
+```
+
+In `src/cs/tagging/runner.py`, restructure `_prepare_inputs` to branch on format before fetching the primary asset (carousels don't tag from it) and add the carousel case:
+
+```python
+async def _prepare_inputs(ctx: JobContext, creative, transcriber: Transcriber):
+    org_id = ctx.job.org_id
+    if creative["format"] == "carousel":
+        cards = await ingest_repo.list_assets_by_kind(
+            ctx.db, org_id, creative["id"], "original_image"
+        )
+        images = []
+        for card in cards:
+            raw = await ctx.blobs.get(card["path"])
+            jpeg, _, _ = prepare_image(raw)
+            images.append((jpeg, "image/jpeg"))
+        return images, None, None
+    data = await ctx.blobs.get(creative["primary_asset_path"])
+    if creative["format"] == "video":
+        await ingest_repo.delete_assets_by_kind(
+            ctx.db, org_id, creative["id"], ("keyframe", "transcript")
+        )
+        frames = await asyncio.to_thread(extract_keyframes, data)
+        images = [(f.jpeg, "image/jpeg") for f in frames]
+        stamps = [f.timestamp for f in frames]
+        for i, f in enumerate(frames):
+            key = f"{org_id}/creatives/{creative['id']}/keyframes/{i:02d}.jpg"
+            await ctx.blobs.put(key, f.jpeg, "image/jpeg")
+            await ingest_repo.insert_asset(
+                ctx.db,
+                org_id,
+                creative["id"],
+                "keyframe",
+                key,
+                sha256_hex(f.jpeg),
+                "image/jpeg",
+                f.width,
+                f.height,
+                int(f.timestamp * 1000),
+                seq=i,
+            )
+        audio = await asyncio.to_thread(extract_audio, data)
+        transcript = await transcriber.transcribe(audio, "audio/mpeg") if audio else ""
+        tkey = f"{org_id}/creatives/{creative['id']}/transcript.txt"
+        await ctx.blobs.put(tkey, transcript.encode(), "text/plain")
+        await ingest_repo.insert_asset(
+            ctx.db,
+            org_id,
+            creative["id"],
+            "transcript",
+            tkey,
+            sha256_hex(transcript.encode()),
+            "text/plain",
+            duration_ms=await asyncio.to_thread(probe_duration_ms, data),
+        )
+        return images, transcript, stamps
+    jpeg, _, _ = prepare_image(data)
+    return [(jpeg, "image/jpeg")], None, None
+```
+
+Add `import asyncio` to `src/cs/tagging/runner.py`'s imports.
+
+In `src/cs/tagging/prompts.py`, update `SYSTEM` so the model knows what multiple images mean for a carousel (currently only explains this for video keyframes):
+
+```python
+SYSTEM = (
+    "You are a senior performance-creative analyst. You decompose paid social ad creatives into "
+    "structured elements so a team can learn which elements drive performance. Look at every image "
+    "carefully; for videos the images are keyframes in time order with timestamps and a "
+    "transcript; for carousels the images are the cards in swipe order, one image per card. For "
+    "each dimension listed, pick exactly one value from its allowed values (or "
+    "write a short free-text value where no values are listed), give a confidence between 0 and "
+    "1, and cite concrete visual or textual evidence. Emit one entry per dimension; do not skip "
+    "dimensions."
+)
+```
+
+- [ ] **Step 8: Run to verify they pass, then commit**
+
+Run: `uv run pytest tests/core/test_metrics.py tests/insights tests/api/test_accounts_and_creatives.py tests/ingest tests/tagging -v`
+Expected: PASS
+
+```bash
+git add src/cs/core/metrics.py src/cs/insights/patterns.py src/cs/api/routers/creatives.py \
+        src/cs/ingest/repo.py src/cs/tagging/runner.py src/cs/tagging/prompts.py \
+        tests/core/test_metrics.py tests/ingest/test_repo.py tests/tagging/test_runner.py
+git commit -m "fix(insights,tagging): shared derived-metrics formula, carousel multi-card tagging, ffmpeg off the event loop"
 ```
 
 ---
