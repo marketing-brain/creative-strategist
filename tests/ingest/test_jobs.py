@@ -1,7 +1,11 @@
+import json
+import re
 from datetime import date
 from decimal import Decimal
 
+import httpx
 import pytest
+import respx
 
 from cs.connectors.base import MetricRow, PlatformAd, PlatformCreative
 from cs.connectors.fakes import FakeConnector
@@ -145,3 +149,66 @@ async def test_raw_sink_shares_timestamp_across_pages():
     ts = suffix1.split("-")[0]
     assert suffix1 == f"{ts}-1.json"
     assert suffix2 == f"{ts}-2.json"
+
+
+async def test_raw_sink_scrubs_access_tokens_from_paging_urls(blobs):
+    sink = service._raw_sink(blobs, "org1", "act_1")
+    await sink(
+        "act_1/ads",
+        {
+            "data": [{"id": "1"}],
+            "paging": {
+                "next": "https://graph.facebook.com/v21.0/act_1/ads?after=x&access_token=SECRET"
+            },
+        },
+    )
+    written = list((blobs.root / "org1/raw/meta/act_1/act_1_ads").glob("*.json"))
+    assert len(written) == 1
+    body = written[0].read_text()
+    assert "SECRET" not in body and "access_token" not in body
+    assert "after=x" in json.loads(body)["paging"]["next"]
+
+
+@respx.mock
+async def test_default_connector_factory_uses_bearer_and_stores_raw_page(
+    db, blobs, settings, org_id, account_id
+):
+    account = await repo.get_ad_account(db, org_id, account_id)
+    route = respx.get("https://graph.facebook.com/v21.0/act_1/ads").mock(
+        return_value=httpx.Response(200, json={"data": []})
+    )
+    async with httpx.AsyncClient() as http:
+        connector = service.default_connector_factory(settings, account, http, blobs)
+        assert await connector.list_ads("1") == []
+
+    request = route.calls[0].request
+    assert request.headers["authorization"] == "Bearer tok"
+    assert "access_token=" not in str(request.url)
+
+    raw_dir = blobs.root / f"{org_id}/raw/meta/1/act_1_ads"
+    written = list(raw_dir.rglob("*"))
+    assert len(written) == 1 and re.fullmatch(r"\d+-1\.json", written[0].name)
+
+
+async def test_creative_is_fetched_once_per_sync(db, blobs, settings, org_id, account_id, fake):
+    fake.ads = [
+        PlatformAd("ad1", "A", "ACTIVE", "as1", "cp1", "c1"),
+        PlatformAd("ad2", "B", "ACTIVE", "as1", "cp1", "c1"),
+    ]
+    fetched: list[str] = []
+    original = fake.get_creative
+
+    async def counting_get_creative(creative_id):
+        fetched.append(creative_id)
+        return await original(creative_id)
+
+    fake.get_creative = counting_get_creative
+
+    await queue.enqueue(db, org_id, "meta.backfill", {"ad_account_id": str(account_id)})
+    await _drain(db, blobs, settings)
+
+    assert fetched == ["c1"]
+    assert await db.fetchval("SELECT count(*) FROM creative") == 1
+    assert await db.fetchval("SELECT count(*) FROM ad") == 2
+    raw = list((blobs.root / f"{org_id}/raw/meta/1/creative").glob("*.json"))
+    assert [f.name for f in raw] == ["c1.json"]

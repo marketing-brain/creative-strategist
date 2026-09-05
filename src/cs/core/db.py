@@ -5,6 +5,7 @@ import decimal
 import functools
 import json
 import uuid
+from collections.abc import Iterable, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -62,6 +63,9 @@ class Database:
 
     async def execute(self, sql: str, *args: Any) -> str:
         return await self._target().execute(sql, *args)
+
+    async def executemany(self, sql: str, args: Iterable[Sequence[Any]]) -> None:
+        await self._target().executemany(sql, args)
 
     @asynccontextmanager
     async def transaction(self):

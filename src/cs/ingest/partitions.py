@@ -1,5 +1,7 @@
 from datetime import date
 
+import asyncpg
+
 from cs.core.db import Database
 
 
@@ -16,7 +18,12 @@ def _month_bounds(day: date) -> tuple[date, date]:
 async def ensure_metric_partition(db: Database, day: date) -> None:
     start, end = _month_bounds(day)
     name = f"metric_daily_{start:%Y%m}"
-    await db.execute(
-        f"CREATE TABLE IF NOT EXISTS {name} PARTITION OF metric_daily "
-        f"FOR VALUES FROM ('{start.isoformat()}') TO ('{end.isoformat()}')"
-    )
+    try:
+        await db.execute(
+            f"CREATE TABLE IF NOT EXISTS {name} PARTITION OF metric_daily "
+            f"FOR VALUES FROM ('{start.isoformat()}') TO ('{end.isoformat()}')"
+        )
+    except (asyncpg.exceptions.DuplicateTableError, asyncpg.exceptions.UniqueViolationError):
+        # Concurrent syncs race here on the first day of a month: IF NOT EXISTS does not
+        # protect against another transaction creating the same partition in parallel.
+        pass

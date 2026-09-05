@@ -9,9 +9,10 @@ from uuid import UUID
 import asyncpg
 import httpx
 
-from cs.connectors.base import AdPlatformConnector
+from cs.connectors.base import AdPlatformConnector, PlatformCreative
 from cs.connectors.meta.client import GraphClient
 from cs.connectors.meta.connector import MetaConnector
+from cs.connectors.meta.scrub import strip_access_tokens
 from cs.core import queue
 from cs.core.blobs import BlobStore, sha256_hex
 from cs.core.config import Settings
@@ -33,7 +34,9 @@ def _raw_sink(blobs: BlobStore, org_id: UUID, account: str):
         nonlocal n
         n += 1
         key = f"{org_id}/raw/meta/{account}/{endpoint.replace('/', '_')}/{ts}-{n}.json"
-        await blobs.put(key, json.dumps(page).encode(), "application/json")
+        # Raw blobs are org-readable; Meta echoes the access token back in paging URLs.
+        body = json.dumps(strip_access_tokens(page)).encode()
+        await blobs.put(key, body, "application/json")
 
     return sink
 
@@ -60,16 +63,23 @@ async def sync_account(
     ads = await connector.list_ads(account["platform_account_id"])
     new_creatives = 0
     failed_creatives = 0
+    # Many ads share one creative; fetch and store each distinct creative once per sync.
+    seen: dict[str, PlatformCreative] = {}
     for ad in ads:
         try:
-            c = await connector.get_creative(ad.platform_creative_id)
+            c = seen.get(ad.platform_creative_id)
+            first_fetch = c is None
+            if c is None:
+                c = await connector.get_creative(ad.platform_creative_id)
+                seen[ad.platform_creative_id] = c
             raw_key = (
                 f"{org_id}/raw/meta/{account['platform_account_id']}/creative/"
                 f"{c.platform_creative_id}.json"
             )
-            await ctx.blobs.put(
-                raw_key, json.dumps(c.raw, default=str).encode(), "application/json"
-            )
+            if first_fetch:
+                await ctx.blobs.put(
+                    raw_key, json.dumps(c.raw, default=str).encode(), "application/json"
+                )
             creative_id, created = await repo.upsert_creative(ctx.db, org_id, acct_id, c, raw_key)
             new_creatives += int(created)
             await repo.upsert_ad(ctx.db, org_id, acct_id, ad, creative_id)
@@ -93,7 +103,7 @@ async def sync_account(
                 },
             )
     rows = await connector.fetch_metrics(account["platform_account_id"], since, until)
-    n_metrics = await repo.upsert_metrics(ctx.db, org_id, acct_id, rows)
+    n_metrics, n_skipped = await repo.upsert_metrics(ctx.db, org_id, acct_id, rows)
     cursor = dict(account["sync_cursor"])
     cursor.update(
         {
@@ -107,6 +117,7 @@ async def sync_account(
         "ads": len(ads),
         "new_creatives": new_creatives,
         "metrics": n_metrics,
+        "metrics_skipped": n_skipped,
         "failed_creatives": failed_creatives,
     }
 

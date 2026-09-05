@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date
 
 from cs.connectors.base import MetricRow, PlatformAd, PlatformCreative
 from cs.connectors.meta import parse
 from cs.connectors.meta.client import GraphClient
+
+log = logging.getLogger("cs.meta")
 
 AD_FIELDS = "id,name,status,adset_id,campaign_id,creative{id}"
 CREATIVE_FIELDS = (
@@ -27,7 +30,7 @@ class MetaConnector:
         rows = await self.client.get_all(
             f"act_{account_id}/ads", {"fields": AD_FIELDS, "limit": 200}
         )
-        return [
+        ads = [
             PlatformAd(
                 str(r["id"]),
                 r.get("name", ""),
@@ -39,6 +42,13 @@ class MetaConnector:
             for r in rows
             if r.get("creative")
         ]
+        dropped = len(rows) - len(ads)
+        if dropped:
+            log.warning(
+                "meta ads dropped without creative",
+                extra={"account_id": account_id, "dropped": dropped},
+            )
+        return ads
 
     async def get_creative(self, creative_id: str) -> PlatformCreative:
         obj = await self.client.get(creative_id, {"fields": CREATIVE_FIELDS})

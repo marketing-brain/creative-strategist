@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 import httpx
@@ -10,6 +11,8 @@ from cs.core.db import Database
 from cs.ingest import repo, service
 from cs.jobs.registry import JobContext, handler
 from cs.jobs.scheduler import register_schedule
+
+log = logging.getLogger("cs.ingest")
 
 
 async def _account(ctx: JobContext):
@@ -25,7 +28,8 @@ async def backfill(ctx: JobContext) -> None:
     since, until = service.window(service.BACKFILL_DAYS)
     async with httpx.AsyncClient(timeout=60) as http:
         connector = service.CONNECTOR_FACTORY(ctx.settings, acct, http, ctx.blobs)
-        await service.sync_account(ctx, acct, connector, since, until)
+        result = await service.sync_account(ctx, acct, connector, since, until)
+    log.info("sync complete", extra={**result, "ad_account_id": str(acct["id"])})
 
 
 @handler("meta.sync_incremental")
@@ -34,7 +38,8 @@ async def sync_incremental(ctx: JobContext) -> None:
     since, until = service.window(service.INCREMENTAL_DAYS)
     async with httpx.AsyncClient(timeout=60) as http:
         connector = service.CONNECTOR_FACTORY(ctx.settings, acct, http, ctx.blobs)
-        await service.sync_account(ctx, acct, connector, since, until)
+        result = await service.sync_account(ctx, acct, connector, since, until)
+    log.info("sync complete", extra={**result, "ad_account_id": str(acct["id"])})
 
 
 @handler("meta.download_creative")
@@ -52,6 +57,10 @@ async def download_creative(ctx: JobContext) -> None:
     async with httpx.AsyncClient(timeout=120) as http:
         connector = service.CONNECTOR_FACTORY(ctx.settings, acct, http, ctx.blobs)
         await service.download_creative(ctx, connector, creative_id, p["asset_url"], p["kind"])
+    log.info(
+        "creative downloaded",
+        extra={"creative_id": str(creative_id), "ad_account_id": str(acct["id"])},
+    )
 
 
 @register_schedule("ingest.nightly_sync", every_seconds=86400)
