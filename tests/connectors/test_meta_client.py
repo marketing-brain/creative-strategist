@@ -37,6 +37,72 @@ async def test_get_all_follows_paging_and_sinks_raw(settings):
 
 
 @respx.mock
+async def test_token_travels_in_the_authorization_header(settings):
+    route = respx.get(f"{G}/act_1/ads").mock(return_value=httpx.Response(200, json={"data": []}))
+    async with httpx.AsyncClient() as http:
+        await GraphClient(settings, "tok", http).get_all("act_1/ads", {"fields": "id"})
+    request = route.calls[0].request
+    assert request.headers["authorization"] == "Bearer tok"
+    assert "access_token" not in request.url.params
+    assert "access_token=" not in str(request.url)
+
+
+@respx.mock
+async def test_paging_next_request_also_uses_the_header(settings):
+    nxt = f"{G}/act_1/ads?after=x"
+    route = respx.get(f"{G}/act_1/ads").mock(
+        side_effect=[
+            httpx.Response(200, json={"data": [], "paging": {"next": nxt}}),
+            httpx.Response(200, json={"data": []}),
+        ]
+    )
+    async with httpx.AsyncClient() as http:
+        await GraphClient(settings, "tok", http).get_all("act_1/ads", {"fields": "id"})
+    assert [c.request.headers["authorization"] for c in route.calls] == [
+        "Bearer tok",
+        "Bearer tok",
+    ]
+
+
+@respx.mock
+async def test_header_backoff_is_capped_and_jittered(settings, monkeypatch):
+    import cs.connectors.meta.client as mod
+
+    calls: list[float] = []
+
+    async def fake_sleep(s):
+        calls.append(s)
+
+    monkeypatch.setattr(mod.asyncio, "sleep", fake_sleep)
+
+    def _rate_limited(minutes: int) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={"error": {"code": 17, "message": "limit"}},
+            headers={
+                "x-business-use-case-usage": json.dumps(
+                    {"123": [{"estimated_time_to_regain_access": minutes}]}
+                )
+            },
+        )
+
+    respx.get(f"{G}/act_1/ads").mock(
+        side_effect=[_rate_limited(120), httpx.Response(200, json={"data": []})]
+    )
+    async with httpx.AsyncClient() as http:
+        await GraphClient(settings, "tok", http).get_all("act_1/ads", {})
+    assert 900 <= calls[0] <= 905
+
+    calls.clear()
+    respx.get(f"{G}/act_2/ads").mock(
+        side_effect=[_rate_limited(2), httpx.Response(200, json={"data": []})]
+    )
+    async with httpx.AsyncClient() as http:
+        await GraphClient(settings, "tok", http).get_all("act_2/ads", {})
+    assert 120 <= calls[0] <= 125
+
+
+@respx.mock
 async def test_rate_limit_retries(settings, monkeypatch):
     calls = []
     respx.get(f"{G}/act_1/ads").mock(

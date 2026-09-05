@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 from collections.abc import Awaitable, Callable
 
 import httpx
@@ -11,6 +12,7 @@ from cs.core.config import Settings
 
 log = logging.getLogger("cs.meta")
 RETRYABLE_CODES = {4, 17, 32, 613}
+MAX_BACKOFF_SECONDS = 900
 RawSink = Callable[[str, dict], Awaitable[None]]
 
 
@@ -38,15 +40,22 @@ class GraphClient:
                 for entries in json.loads(usage).values():
                     for e in entries:
                         if e.get("estimated_time_to_regain_access"):
-                            return float(e["estimated_time_to_regain_access"]) * 60
+                            minutes = float(e["estimated_time_to_regain_access"])
+                            # Meta can report hours of cooldown; cap the wait and jitter it so
+                            # concurrent syncs do not all resume in the same instant.
+                            return min(minutes * 60, MAX_BACKOFF_SECONDS) + random.uniform(0, 5)
             except (ValueError, AttributeError):
                 pass
-        return float(min(30 * (2**attempt), 900))
+        return float(min(30 * (2**attempt), MAX_BACKOFF_SECONDS))
 
     async def get(self, path: str, params: dict | None = None, url: str | None = None) -> dict:
-        params = {**(params or {}), "access_token": self.token}
+        # The token travels in the Authorization header, never in the URL: request URLs end up
+        # in logs, error messages and Meta's own `paging.next` echoes.
+        headers = {"Authorization": f"Bearer {self.token}"}
         for attempt in range(6):
-            resp = await self.http.get(url or f"{self.base}/{path}", params=None if url else params)
+            resp = await self.http.get(
+                url or f"{self.base}/{path}", params=None if url else params, headers=headers
+            )
             if resp.status_code == 200:
                 return resp.json()
             body = (

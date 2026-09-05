@@ -16,31 +16,15 @@ import os
 import sys
 from datetime import date, timedelta
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
 from cs.connectors.meta.client import GraphClient
 from cs.connectors.meta.connector import MetaConnector
+from cs.connectors.meta.scrub import strip_access_tokens
 from cs.core.config import Settings
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "tests/fixtures/meta"
-
-
-def _strip_access_token(value):
-    if isinstance(value, dict):
-        return {k: _strip_access_token(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_strip_access_token(v) for v in value]
-    if isinstance(value, str) and "access_token=" in value:
-        parts = urlsplit(value)
-        query = [
-            (k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != "access_token"
-        ]
-        return urlunsplit(
-            (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
-        )
-    return value
 
 
 def _merge_pages(pages: dict[str, list[dict]], endpoint_suffix: str) -> dict:
@@ -59,7 +43,7 @@ def _merge_pages(pages: dict[str, list[dict]], endpoint_suffix: str) -> dict:
 
 
 def _write_json(path: Path, payload: dict) -> None:
-    path.write_text(json.dumps(_strip_access_token(payload), indent=2) + "\n")
+    path.write_text(json.dumps(strip_access_tokens(payload), indent=2) + "\n")
 
 
 async def _run(token: str, account_id: str) -> None:

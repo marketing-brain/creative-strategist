@@ -1,4 +1,5 @@
 import httpx
+import pytest
 import respx
 
 from cs.connectors.meta import oauth
@@ -21,7 +22,7 @@ def test_authorize_url(settings):
 @respx.mock
 async def test_exchange_code_returns_long_lived_token(settings):
     s = _settings(settings)
-    respx.get("https://graph.facebook.com/v21.0/oauth/access_token").mock(
+    route = respx.post("https://graph.facebook.com/v21.0/oauth/access_token").mock(
         side_effect=[
             httpx.Response(200, json={"access_token": "short"}),
             httpx.Response(200, json={"access_token": "long", "expires_in": 5184000}),
@@ -30,11 +31,30 @@ async def test_exchange_code_returns_long_lived_token(settings):
     async with httpx.AsyncClient() as http:
         token, expires = await oauth.exchange_code(s, "code123", http)
     assert token == "long" and expires is not None
+    for call in route.calls:
+        assert "client_secret" not in str(call.request.url)
+        assert b"client_secret=sec" in call.request.content
+
+
+@respx.mock
+async def test_exchange_code_error_hides_the_app_secret(settings, monkeypatch):
+    s = _settings(settings)
+    monkeypatch.setattr(s, "meta_app_secret", "supersecretvalue")
+    respx.post("https://graph.facebook.com/v21.0/oauth/access_token").mock(
+        return_value=httpx.Response(400, json={"error": {"message": "code expired", "code": 100}})
+    )
+    async with httpx.AsyncClient() as http:
+        with pytest.raises(oauth.OAuthError) as excinfo:
+            await oauth.exchange_code(s, "code123", http)
+    message = str(excinfo.value)
+    assert "400" in message and "code expired" in message
+    assert "client_secret" not in message and "supersecretvalue" not in message
+    assert "graph.facebook.com" not in message
 
 
 @respx.mock
 async def test_list_ad_accounts(settings):
-    respx.get("https://graph.facebook.com/v21.0/me/adaccounts").mock(
+    route = respx.get("https://graph.facebook.com/v21.0/me/adaccounts").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -45,3 +65,17 @@ async def test_list_ad_accounts(settings):
     async with httpx.AsyncClient() as http:
         accts = await oauth.list_ad_accounts(_settings(settings), "tok", http)
     assert accts == [{"account_id": "123", "name": "Main", "currency": "USD"}]
+    request = route.calls[0].request
+    assert request.headers["authorization"] == "Bearer tok"
+    assert "access_token=" not in str(request.url)
+
+
+@respx.mock
+async def test_list_ad_accounts_error_hides_the_token(settings):
+    respx.get("https://graph.facebook.com/v21.0/me/adaccounts").mock(
+        return_value=httpx.Response(401, json={"error": {"message": "token expired"}})
+    )
+    async with httpx.AsyncClient() as http:
+        with pytest.raises(oauth.OAuthError) as excinfo:
+            await oauth.list_ad_accounts(_settings(settings), "sekrit", http)
+    assert "sekrit" not in str(excinfo.value) and "401" in str(excinfo.value)

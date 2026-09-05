@@ -1,5 +1,4 @@
 import asyncio
-import logging
 
 import uvicorn
 
@@ -7,6 +6,7 @@ from cs.api.app import create_app
 from cs.core.blobs import blob_store_from_settings
 from cs.core.config import get_settings
 from cs.core.db import Database
+from cs.core.logging import configure_logging
 
 
 async def _serve() -> None:
@@ -19,5 +19,5 @@ async def _serve() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    configure_logging()
     asyncio.run(_serve())
