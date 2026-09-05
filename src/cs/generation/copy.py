@@ -43,7 +43,7 @@ class CopyWriter(Protocol):
 
 class ClaudeCopyWriter:
     def __init__(self, settings: Settings, client: anthropic.AsyncAnthropic | None = None):
-        self.client = client or anthropic.AsyncAnthropic()
+        self.client = client or anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key or None)
         self.model = settings.claude_model_copy
 
     async def _call(self, system: str, user: str, schema: dict) -> dict:
