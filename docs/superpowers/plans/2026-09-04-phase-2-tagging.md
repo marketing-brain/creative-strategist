@@ -53,7 +53,7 @@ tests/tagging/...
 
 **Files:**
 - Create: `db/migrations/20260904000004_tagging.sql`, `src/cs/tagging/__init__.py`, `src/cs/tagging/taxonomy.yaml`, `src/cs/tagging/taxonomy.py`
-- Test: `tests/tagging/test_taxonomy.py`
+- Test: `tests/tagging/__init__.py` (empty — every other test subpackage, e.g. `tests/ingest/`, has one; pytest's default "prepend" import mode needs it), `tests/tagging/test_taxonomy.py`
 
 **Interfaces:**
 - Tables: `taxonomy_version(id, version TEXT, yaml_sha256, created_at)`, `tag_run(id, org_id, creative_id, taxonomy_version_id, model, status, prompt_sha256, input_tokens, output_tokens, error, created_at, finished_at)`, `tag(id, org_id, tag_run_id, creative_id, dimension, value, confidence, evidence)`, `creative_embedding(creative_id PK, org_id, tag_run_id, embedding vector(1536), created_at)`.
@@ -450,7 +450,7 @@ Expected: PASS
 - [ ] **Step 7: Commit**
 
 ```bash
-git add db/migrations/20260904000004_tagging.sql src/cs/tagging pyproject.toml uv.lock tests/tagging/test_taxonomy.py
+git add db/migrations/20260904000004_tagging.sql src/cs/tagging pyproject.toml uv.lock tests/tagging
 git commit -m "feat(tagging): taxonomy v1.0, schema compilation, and tagging tables"
 ```
 
@@ -1844,7 +1844,7 @@ git commit -m "feat(tagging): gateway embeddings and pgvector similarity"
 - `BatchTagger` Protocol: `async submit(requests: list[dict]) -> str` where each request is `{"custom_id": str, "images": [(bytes, mime)], "user_text": str, "schema": dict}`; `async poll(batch_id) -> tuple[bool, list[dict]]` with results `{"custom_id", "ok": bool, "tags": list, "input_tokens", "output_tokens", "error": str | None}`.
 - `ClaudeBatchTagger(settings, client=None)` using `client.messages.batches.create/retrieve/results` (no `fallbacks`, no `betas`).
 - repo: `untagged_creative_ids(db, org_id, taxonomy_version_id, model, limit) -> list[UUID]` (creatives with a primary asset and no `done` run).
-- Jobs: `tagging.batch_submit` payload `{"ad_account_id"?: str, "limit": int}` — prepares inputs for up to `limit` untagged creatives (image only in batches; videos still go through `tagging.tag_creative` because of the per-creative ffmpeg work), creates `running` tag runs, submits, records `tag_batch`, enqueues `tagging.batch_poll` with `run_after = now + 60s`. `tagging.batch_poll` payload `{"tag_batch_id"}` — polls; if not ended, re-enqueues itself in 120s; if ended, finishes/fails each run and enqueues embeddings.
+- Jobs: `tagging.batch_submit` payload `{"ad_account_id"?: str, "limit": int}` — prepares inputs for up to `limit` untagged creatives (image and carousel only in batches — both use the single primary-asset image path; videos still go through `tagging.tag_creative` because of the per-creative ffmpeg work), creates `running` tag runs, submits, records `tag_batch`, enqueues `tagging.batch_poll` with `run_after = now + 60s`. `tagging.batch_poll` payload `{"tag_batch_id"}` — polls; if not ended, re-enqueues itself in 120s; if ended, finishes/fails each run and enqueues embeddings.
 - API trigger (Task 8): `POST /tagging/backfill`.
 
 - [ ] **Step 1: Migration**
@@ -2029,7 +2029,7 @@ Append to `src/cs/tagging/repo.py`:
 
 ```python
 async def untagged_creative_ids(db: Database, org_id: UUID, taxonomy_version_id: UUID, model: str, limit: int,
-                                formats: tuple[str, ...] = ("image",)) -> list[UUID]:
+                                formats: tuple[str, ...] = ("image", "carousel")) -> list[UUID]:
     rows = await db.fetch(
         """
         SELECT c.id FROM creative c
