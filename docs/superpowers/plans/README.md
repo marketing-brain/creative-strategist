@@ -34,3 +34,17 @@ Shared conventions for every phase:
 - `AUTH_MODE` defaults to `clerk` and requires `CLERK_JWKS_URL`; `.env.example` and the test fixtures set `dev` explicitly.
 - Scheduler last-run times persist in `schedule_state`; schedules registered in later phases should still use period-scoped dedup keys where a duplicate run would be costly.
 - Local blob URLs (`/blobs/{key}`) require an auth header, so Phase 5 must not use them as bare `<img src>`; fetch bytes through the authenticated API client, or use S3 presigned URLs in non-dev environments.
+
+## Execution status
+
+- Phase 0: complete, merged to `main` on 2026-09-04 (54 tests). Executed with `superpowers:subagent-driven-development`.
+- Phase 1: not started. Start it with: "Use superpowers:subagent-driven-development to execute docs/superpowers/plans/2026-09-04-phase-1-meta-ingest.md on a new branch from main."
+
+## Local environment notes (this machine)
+
+- Docker is not installed. Postgres 16.2 + pgvector 0.6.2 runs from the `pgserver` wheel's bundled binaries: data dir `~/.local/share/cs-pg16`, listening on 127.0.0.1:5432, user `cs`, trust auth, databases `cs` and `cs_test`.
+  Start: `.venv/lib/python3.12/site-packages/pgserver/pginstall/bin/pg_ctl -D ~/.local/share/cs-pg16 -o "-p 5432 -k /tmp -c listen_addresses=127.0.0.1" -l ~/.local/share/cs-pg16.log start`
+  Check: `pg_isready -h 127.0.0.1 -p 5432`
+- `dbmate` binary is at `~/.local/bin/dbmate` (tests resolve it via `shutil.which` or that path).
+- A Homebrew install of `postgresql@16 pgvector dbmate` was started but takes hours on this macOS; if it finishes, either server works. Do not run both on 5432.
+- `.env` exists (gitignored) with `AUTH_MODE=dev` and 127.0.0.1 database URLs. Meta app credentials (`META_APP_ID`, `META_APP_SECRET`) are not set yet; Phase 1 tests do not need them.
