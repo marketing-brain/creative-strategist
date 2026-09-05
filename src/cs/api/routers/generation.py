@@ -103,6 +103,8 @@ async def reject(aid: UUID, auth: AuthContext = Depends(current_auth), db: Datab
 async def publish(aid: UUID, body: PublishBody, auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)) -> dict:
     from cs.core.ids import new_id
 
+    from cs.ingest import repo as ingest_repo
+
     a = await repo.get_generated_asset(db, auth.org_id, aid)
     if not a:
         raise HTTPException(404)
@@ -110,6 +112,8 @@ async def publish(aid: UUID, body: PublishBody, auth: AuthContext = Depends(curr
         raise HTTPException(409, "asset must be approved before publishing")
     if body.status not in ("PAUSED", "ACTIVE"):
         raise HTTPException(400, "status must be PAUSED or ACTIVE")
+    if not await ingest_repo.get_ad_account(db, auth.org_id, body.ad_account_id):
+        raise HTTPException(404, "ad_account not found")
     pj = new_id()
     form = body.model_dump(mode="json")
     await db.execute(

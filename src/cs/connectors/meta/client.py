@@ -85,9 +85,13 @@ class GraphClient:
             page = await self.get(path, url=nxt)
 
     async def post(self, path: str, data: dict | None = None, files: dict | None = None) -> dict:
-        payload = {**(data or {}), "access_token": self.token}
+        # Same invariant as get(): the token travels in the Authorization header, never in the
+        # request body or URL.
+        headers = {"Authorization": f"Bearer {self.token}"}
         for attempt in range(6):
-            resp = await self.http.post(f"{self.base}/{path}", data=payload, files=files, timeout=300)
+            resp = await self.http.post(
+                f"{self.base}/{path}", data=data, files=files, headers=headers, timeout=300
+            )
             if resp.status_code == 200:
                 return resp.json()
             body = (
