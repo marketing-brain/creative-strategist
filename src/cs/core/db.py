@@ -1,18 +1,36 @@
 from __future__ import annotations
 
+import datetime
+import decimal
+import functools
 import json
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
 import asyncpg
 
 
+def _json_default(o: Any) -> str:
+    """Encode the few non-JSON types that reach jsonb payloads."""
+    if isinstance(o, uuid.UUID):
+        return str(o)
+    if isinstance(o, datetime.datetime | datetime.date):
+        return o.isoformat()
+    if isinstance(o, decimal.Decimal):
+        return str(o)
+    raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
+
+
+_json_dumps = functools.partial(json.dumps, default=_json_default)
+
+
 async def _init_conn(conn: asyncpg.Connection) -> None:
     await conn.set_type_codec(
-        "jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog", format="text"
+        "jsonb", encoder=_json_dumps, decoder=json.loads, schema="pg_catalog", format="text"
     )
     await conn.set_type_codec(
-        "json", encoder=json.dumps, decoder=json.loads, schema="pg_catalog", format="text"
+        "json", encoder=_json_dumps, decoder=json.loads, schema="pg_catalog", format="text"
     )
 
 

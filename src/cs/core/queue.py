@@ -29,6 +29,8 @@ async def enqueue(
     max_attempts: int = 5,
 ) -> UUID | None:
     jid = new_id()
+    body = dict(payload or {})
+    body.setdefault("schema_version", 1)  # spec section 4: every payload is versioned
     row = await db.fetchrow(
         """
         INSERT INTO job (id, org_id, job_type, dedup_key, payload, status, run_after, max_attempts)
@@ -42,7 +44,7 @@ async def enqueue(
         org_id,
         job_type,
         dedup_key,
-        payload or {},
+        body,
         run_after,
         max_attempts,
     )

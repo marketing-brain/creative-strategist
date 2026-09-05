@@ -1,12 +1,14 @@
 from datetime import UTC, datetime, timedelta
 
 from cs.core import queue
+from cs.core.ids import new_id
 
 
 async def test_enqueue_claim_complete(db, org_id):
     jid = await queue.enqueue(db, org_id, "echo", {"x": 1})
     job = await queue.claim(db, "w1")
-    assert job is not None and job.id == jid and job.payload == {"x": 1}
+    assert job is not None and job.id == jid
+    assert job.payload == {"x": 1, "schema_version": 1}
     assert await queue.claim(db, "w2") is None  # locked
     await queue.complete(db, jid, "w1")
     assert await db.fetchval("SELECT status FROM job WHERE id=$1", jid) == "done"
@@ -102,3 +104,19 @@ async def test_reclaim_stale_dead_letters_exhausted_jobs(db, org_id):
     assert row["error"] == "lease expired"
     assert row["finished_at"] is not None
     assert await queue.claim(db, "w2") is None
+
+
+async def test_enqueue_stamps_schema_version_and_encodes_uuids(db, org_id):
+    account = new_id()
+    payload = {"ad_account_id": account}
+    jid = await queue.enqueue(db, org_id, "sync.insights", payload)
+    job = await queue.claim(db, "w1")
+    assert job.id == jid
+    assert job.payload == {"ad_account_id": str(account), "schema_version": 1}
+    assert payload == {"ad_account_id": account}  # the caller's dict is left alone
+
+
+async def test_enqueue_keeps_an_explicit_schema_version(db, org_id):
+    jid = await queue.enqueue(db, org_id, "sync.insights", {"schema_version": 2})
+    stored = await db.fetchval("SELECT payload FROM job WHERE id=$1", jid)
+    assert stored["schema_version"] == 2
