@@ -52,7 +52,7 @@ Shared conventions for every phase:
 ## Execution status
 
 - Phase 0: complete, merged to `main` on 2026-09-04 (54 tests). Executed with `superpowers:subagent-driven-development`.
-- Phase 1: implemented on branch `feat/phase-1-meta-ingest` on 2026-09-05 (98 tests, 1 expected skip). Executed with `superpowers:subagent-driven-development`; six tasks, one final-review fix wave. Merge to `main` when the final re-review is clean.
+- Phase 1: complete, merged to `main` on 2026-09-05 (98 tests, 1 expected skip). Executed with `superpowers:subagent-driven-development`; six tasks, one final-review fix wave.
 - Phase 2: not started. Start it with: "Use superpowers:subagent-driven-development to execute docs/superpowers/plans/2026-09-04-phase-2-tagging.md on a new branch from main."
 
 ## Local environment notes (this machine)
