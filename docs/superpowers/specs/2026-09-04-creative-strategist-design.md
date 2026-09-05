@@ -90,6 +90,7 @@ Conventions follow `../db-design.md`: singular table names, UUIDv7 app-generated
 ### Append-only lineage
 
 - `creative(id, org_id, ad_account_id, platform_creative_id, format CHECK IN ('image','video','carousel'), headline, primary_text, description, cta_type, link_url, primary_asset_id, generated_asset_id NULL, raw_path, first_seen_at, last_seen_at, schema_version)` — one row per Meta ad creative. `raw_path` points at the stored API response.
+- `ad(id, org_id, ad_account_id, platform_ad_id, creative_id, adset_id, campaign_id, name, status, first_seen_at, last_seen_at)` — one row per Meta ad. Metrics arrive per ad and map to creatives through it; many ads can share one creative.
 - `asset(id, org_id, creative_id, kind CHECK IN ('original_image','original_video','keyframe','audio','transcript','thumbnail'), path, sha256, mime, width, height, duration_ms, seq, created_at)`
 - `metric_daily(org_id, ad_account_id, creative_id, ad_id, day, placement, spend, impressions, clicks, link_clicks, conversions, conversion_value, video_3s_views, video_thruplay, video_p50, video_p100, raw JSONB)` — partitioned by month on `day`. Primary key `(creative_id, ad_id, day, placement)`. Derived metrics (CTR, CPA, ROAS, thumbstop, hold rate) are computed in views, not stored.
 - `tag_run(id, org_id, creative_id, taxonomy_version_id, model, status, prompt_sha256, input_tokens, output_tokens, created_at, finished_at)` — unique on `(creative_id, taxonomy_version_id, model)`.

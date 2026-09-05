@@ -91,3 +91,21 @@ async def test_other_org_cannot_see_creatives(client, db, settings):
     _, _, cid, _ = await _seed(db, settings, client)
     r = await client.get(f"/creatives/{cid}", headers=dev_headers(org="org_other"))
     assert r.status_code == 404
+
+
+async def test_creatives_limit_is_validated(client, db, settings):
+    await _seed(db, settings, client)
+    assert (await client.get("/creatives?limit=-1", headers=H)).status_code == 422
+    assert (await client.get("/creatives?limit=201", headers=H)).status_code == 422
+    assert (await client.get("/creatives?offset=-1", headers=H)).status_code == 422
+    assert (await client.get("/creatives?limit=200", headers=H)).status_code == 200
+
+
+async def test_creative_metrics_counts_are_integers(client, db, settings):
+    _, _, cid, _ = await _seed(db, settings, client)
+    r = await client.get(f"/creatives/{cid}/metrics?since=2026-08-01&until=2026-09-30", headers=H)
+    row = r.json()[0]
+    for field in ("impressions", "clicks", "link_clicks", "video_3s_views", "video_thruplay"):
+        assert isinstance(row[field], int), field
+    assert row["impressions"] == 1000 and row["clicks"] == 20
+    assert row["spend"] == 10.0

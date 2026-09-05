@@ -1,7 +1,7 @@
 from datetime import date
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from cs.api.auth import AuthContext, current_auth
 from cs.api.deps import get_blobs, get_db
@@ -10,6 +10,10 @@ from cs.core.db import Database
 from cs.ingest import repo
 
 router = APIRouter(prefix="/creatives")
+
+
+# Postgres sums bigint columns into numeric; these are counts and must stay integers.
+COUNT_FIELDS = ("impressions", "clicks", "link_clicks", "video_3s_views", "video_thruplay")
 
 
 def _derived(r) -> dict:
@@ -23,6 +27,7 @@ def _derived(r) -> dict:
             k: (float(v) if hasattr(v, "as_integer_ratio") and not isinstance(v, int) else v)
             for k, v in dict(r).items()
         },
+        **{k: int(r[k] or 0) for k in COUNT_FIELDS if k in r},
         "day": r["day"].isoformat(),
         "ctr": round(clicks / impressions, 4) if impressions else 0.0,
         "cpa": round(spend / conversions, 2) if conversions else None,
@@ -34,13 +39,13 @@ def _derived(r) -> dict:
 async def list_creatives(
     account_id: UUID | None = None,
     format: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     auth: AuthContext = Depends(current_auth),
     db: Database = Depends(get_db),
     blobs: BlobStore = Depends(get_blobs),
 ) -> list[dict]:
-    rows = await repo.list_creatives(db, auth.org_id, account_id, format, min(limit, 200), offset)
+    rows = await repo.list_creatives(db, auth.org_id, account_id, format, limit, offset)
     out = []
     for r in rows:
         d = {**dict(r), "id": str(r["id"]), "ad_account_id": str(r["ad_account_id"])}
