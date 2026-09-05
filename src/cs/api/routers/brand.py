@@ -36,7 +36,7 @@ async def create_kit(body: KitBody, auth: AuthContext = Depends(require_admin), 
                      blobs: BlobStore = Depends(get_blobs)) -> dict:
     prev = await brand.get_active_brand_kit(db, auth.org_id)
     k = await brand.create_brand_kit(db, auth.org_id, body.colors, body.fonts, body.voice_rules, body.prohibited_claims,
-                                     prev.logo_path if prev else None, None)
+                                     prev.logo_path if prev else None, prev.logo_sha256 if prev else None)
     return await _ser(k, blobs)
 
 
@@ -47,9 +47,10 @@ async def upload_logo(file: UploadFile, auth: AuthContext = Depends(require_admi
         raise HTTPException(400, "logo must be PNG or SVG")
     data = await file.read()
     ext = "png" if file.content_type == "image/png" else "svg"
-    key = f"{auth.org_id}/brand/logo.{ext}"
+    content_hash = sha256_hex(data)
+    key = f"{auth.org_id}/brand/{content_hash}/logo.{ext}"
     await blobs.put(key, data, file.content_type)
     prev = await brand.get_active_brand_kit(db, auth.org_id)
     k = await brand.create_brand_kit(db, auth.org_id, prev.colors if prev else [], prev.fonts if prev else [],
-                                     prev.voice_rules if prev else "", prev.prohibited_claims if prev else [], key, sha256_hex(data))
+                                     prev.voice_rules if prev else "", prev.prohibited_claims if prev else [], key, content_hash)
     return await _ser(k, blobs)

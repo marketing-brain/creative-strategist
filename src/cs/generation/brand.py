@@ -15,13 +15,14 @@ class BrandKit:
     colors: list[str]
     fonts: list[str]
     logo_path: str | None
+    logo_sha256: str | None
     voice_rules: str
     prohibited_claims: list[str]
 
 
 def _from_row(r) -> BrandKit:
     return BrandKit(r["id"], r["org_id"], r["version"], list(r["colors"]), list(r["fonts"]), r["logo_path"],
-                    r["voice_rules"], list(r["prohibited_claims"]))
+                    r["logo_sha256"], r["voice_rules"], list(r["prohibited_claims"]))
 
 
 async def create_brand_kit(db: Database, org_id: UUID, colors: list[str], fonts: list[str], voice_rules: str,
