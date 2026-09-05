@@ -3,6 +3,8 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 from cs.connectors.meta import parse
 
 FX = Path(__file__).resolve().parents[1] / "fixtures/meta"
@@ -28,3 +30,9 @@ def test_metric_from_insight():
     assert m.placement == "facebook:feed" and m.spend == Decimal("12.50")
     assert m.conversions == Decimal("2") and m.conversion_value == Decimal("90.00")
     assert (m.video_3s_views, m.video_thruplay, m.video_p50, m.video_p100) == (400, 120, 150, 60)
+
+
+@pytest.mark.parametrize("name", [p.name for p in FX.glob("recorded_creative_*.json")])
+def test_recorded_creatives_parse(name):
+    c = parse.creative_from_graph(json.loads((FX / name).read_text()))
+    assert c.format in ("image", "video", "carousel") and c.platform_creative_id
