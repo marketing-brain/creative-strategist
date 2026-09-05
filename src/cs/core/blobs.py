@@ -43,7 +43,7 @@ class LocalBlobStore:
         return await asyncio.to_thread(self._path(key).read_bytes)
 
     async def exists(self, key: str) -> bool:
-        return await asyncio.to_thread(self._path(key).exists)
+        return await asyncio.to_thread(self._path(key).is_file)
 
     async def url_for(self, key: str, expires_seconds: int = 3600) -> str:
         _check_key(key)

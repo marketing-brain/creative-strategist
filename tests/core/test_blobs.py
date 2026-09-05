@@ -14,6 +14,13 @@ async def test_local_put_get_exists_url(tmp_path):
     assert sha256_hex(b"hello").startswith("2cf24dba")
 
 
+async def test_local_exists_is_false_for_directories(tmp_path):
+    store = LocalBlobStore(tmp_path)
+    await store.put("org1/creatives/abc.png", b"x", "image/png")
+    assert await store.exists("org1/creatives") is False
+    assert await store.exists("org1/creatives/abc.png") is True
+
+
 async def test_local_rejects_path_traversal(tmp_path):
     store = LocalBlobStore(tmp_path)
 
