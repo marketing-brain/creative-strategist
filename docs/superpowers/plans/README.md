@@ -33,3 +33,4 @@ Shared conventions for every phase:
 - The JSON codec encodes `UUID`, `datetime`/`date`, and `Decimal` automatically; job payloads may contain UUIDs directly.
 - `AUTH_MODE` defaults to `clerk` and requires `CLERK_JWKS_URL`; `.env.example` and the test fixtures set `dev` explicitly.
 - Scheduler last-run times persist in `schedule_state`; schedules registered in later phases should still use period-scoped dedup keys where a duplicate run would be costly.
+- Local blob URLs (`/blobs/{key}`) require an auth header, so Phase 5 must not use them as bare `<img src>`; fetch bytes through the authenticated API client, or use S3 presigned URLs in non-dev environments.
