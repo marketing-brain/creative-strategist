@@ -229,3 +229,31 @@ async def test_backfill_downloads_carousel_cards_and_sets_primary(db, blobs, set
     primary_path = await db.fetchval(
         "SELECT a.path FROM creative c JOIN asset a ON a.id = c.primary_asset_id WHERE c.id=$1", cid)
     assert primary_path is not None and "card_00" in primary_path
+
+
+async def test_carousel_download_retry_does_not_duplicate_cards(
+    db, blobs, settings, org_id, account_id, fake
+):
+    fake.add_creative(
+        PlatformCreative(
+            "c4", "carousel", "Swipe2", "P4", None, "SHOP_NOW", "https://z2", None, None, {},
+            child_asset_urls=["https://img/card2_0", "https://img/card2_1"],
+        ),
+        child_assets=[b"CARD0DATA2", b"CARD1DATA2"],
+    )
+    fake.add_ad(PlatformAd("ad4", "D", "ACTIVE", "as1", "cp1", "c4"))
+    fake.fail_downloads.add("https://img/card2_1")
+    await queue.enqueue(db, org_id, "meta.backfill", {"ad_account_id": str(account_id)})
+    await _drain(db, blobs, settings)
+    cid = await db.fetchval("SELECT id FROM creative WHERE platform_creative_id='c4'")
+    assert await db.fetchval("SELECT count(*) FROM asset WHERE creative_id=$1 AND seq=0", cid) == 1
+    fake.fail_downloads.discard("https://img/card2_1")
+    await db.execute(
+        "UPDATE job SET run_after = now() WHERE job_type = 'meta.download_carousel'"
+        " AND status = 'pending'"
+    )
+    await _drain(db, blobs, settings)
+    assets = await db.fetch(
+        "SELECT seq, count(*) AS n FROM asset WHERE creative_id=$1 GROUP BY seq ORDER BY seq", cid
+    )
+    assert [(a["seq"], a["n"]) for a in assets] == [(0, 1), (1, 1)]

@@ -156,13 +156,17 @@ async def download_carousel(
     org_id = ctx.job.org_id
     primary_id = None
     for i, url in enumerate(asset_urls):
-        data, mime = await connector.download_asset(url)
-        ext = {"image/png": "png", "image/jpeg": "jpg"}.get(mime, "jpg")
-        key = f"{org_id}/creatives/{creative_id}/card_{i:02d}.{ext}"
-        await ctx.blobs.put(key, data, mime)
-        asset_id = await repo.insert_asset(
-            ctx.db, org_id, creative_id, "original_image", key, sha256_hex(data), mime, seq=i
-        )
+        existing = await repo.get_asset_by_seq(ctx.db, org_id, creative_id, "original_image", i)
+        if existing is not None:
+            asset_id = existing["id"]
+        else:
+            data, mime = await connector.download_asset(url)
+            ext = {"image/png": "png", "image/jpeg": "jpg"}.get(mime, "jpg")
+            key = f"{org_id}/creatives/{creative_id}/card_{i:02d}.{ext}"
+            await ctx.blobs.put(key, data, mime)
+            asset_id = await repo.insert_asset(
+                ctx.db, org_id, creative_id, "original_image", key, sha256_hex(data), mime, seq=i
+            )
         if i == 0:
             primary_id = asset_id
     if primary_id is not None:
