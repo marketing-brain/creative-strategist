@@ -27,8 +27,8 @@ def tiny_mp4(seconds: int = 2) -> bytes:
 
 class FakeCopyWriter:
     def __init__(self, sets: list[CopySet] | None = None):
-        self.sets = sets or [CopySet("Sleep deeper", "Tired of waking up tired?", "SHOP_NOW"),
-                             CopySet("Rest easy", "Wind down in minutes.", "LEARN_MORE")]
+        self.sets = sets if sets is not None else [CopySet("Sleep deeper", "Tired of waking up tired?", "SHOP_NOW"),
+                                                   CopySet("Rest easy", "Wind down in minutes.", "LEARN_MORE")]
         self.briefs: list[str] = []
 
     async def write(self, brief, kit, n) -> list[CopySet]:
