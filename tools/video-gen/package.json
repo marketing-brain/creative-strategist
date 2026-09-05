@@ -1,0 +1,9 @@
+{
+  "name": "video-gen",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@ai-sdk/gateway": "latest",
+    "ai": "latest"
+  }
+}
