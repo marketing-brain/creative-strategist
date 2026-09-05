@@ -79,28 +79,49 @@ async def claim(db: Database, worker_id: str, job_types: list[str] | None = None
     )
 
 
-async def complete(db: Database, job_id: UUID) -> None:
+async def complete(db: Database, job_id: UUID, worker_id: str) -> None:
+    """Mark a job done. Only the worker that holds the lease may do so."""
     await db.execute(
         "UPDATE job SET status='done', finished_at=now(), locked_by=NULL"
-        " WHERE id=$1 AND status='running'",
+        " WHERE id=$1 AND status='running' AND locked_by=$2",
         job_id,
+        worker_id,
     )
 
 
-async def fail(db: Database, job_id: UUID, error: str) -> None:
+async def fail(db: Database, job_id: UUID, worker_id: str, error: str) -> None:
+    """Record a handler failure, retrying with backoff until max_attempts.
+
+    Only the worker that holds the lease may fail the job. The persisted
+    statuses are 'pending', 'running', 'done' and 'dead' -- 'failed' is a
+    transient notion only, a failed attempt goes straight back to 'pending'
+    (or to 'dead' once attempts reach max_attempts). ``error`` is truncated to
+    4000 characters before it is stored.
+    """
     await db.execute(
         """
         UPDATE job SET
-          error = $2,
+          error = $3,
           locked_by = NULL,
           status = CASE WHEN attempts >= max_attempts THEN 'dead' ELSE 'pending' END,
           finished_at = CASE WHEN attempts >= max_attempts THEN now() ELSE NULL END,
           run_after = now() + make_interval(secs => LEAST(power(2, attempts), 300))
-        WHERE id = $1 AND status = 'running'
+        WHERE id = $1 AND status = 'running' AND locked_by = $2
         """,
         job_id,
+        worker_id,
         error[:4000],
     )
+
+
+async def heartbeat(db: Database, job_id: UUID, worker_id: str) -> bool:
+    """Extend the lease on a running job. False means the lease is gone."""
+    result = await db.execute(
+        "UPDATE job SET locked_at = now() WHERE id=$1 AND status='running' AND locked_by=$2",
+        job_id,
+        worker_id,
+    )
+    return int(result.split()[-1]) == 1
 
 
 async def reclaim_stale(db: Database, lease_seconds: int) -> int:

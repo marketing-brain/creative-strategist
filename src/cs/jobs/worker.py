@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import socket
@@ -16,27 +17,55 @@ from cs.jobs.registry import HANDLERS, JobContext
 log = logging.getLogger("cs.worker")
 
 
+async def _keep_lease(
+    db: Database, job: queue.Job, worker_id: str, interval: float, task: asyncio.Task
+) -> bool:
+    """Heartbeat a running job until its lease is lost; then cancel the handler."""
+    while True:
+        await asyncio.sleep(interval)
+        if not await queue.heartbeat(db, job.id, worker_id):
+            log.warning(
+                "job lease lost, cancelling handler",
+                extra={"job_id": str(job.id), "job_type": job.job_type, "worker_id": worker_id},
+            )
+            task.cancel()
+            return False
+
+
 async def run_once(db: Database, blobs: BlobStore, settings: Settings, worker_id: str) -> bool:
     job = await queue.claim(db, worker_id)
     if job is None:
         return False
     fn = HANDLERS.get(job.job_type)
     if fn is None:
-        await queue.fail(db, job.id, f"no handler registered for {job.job_type}")
+        await queue.fail(db, job.id, worker_id, f"no handler registered for {job.job_type}")
         return True
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=job)
+    task = asyncio.create_task(fn(ctx))
+    lease = asyncio.create_task(
+        _keep_lease(db, job, worker_id, max(5, settings.job_lease_seconds // 3), task)
+    )
     try:
-        await fn(JobContext(db=db, blobs=blobs, settings=settings, job=job))
-        await queue.complete(db, job.id)
+        await task
+        await queue.complete(db, job.id, worker_id)
         log.info(
             "job done",
             extra={"job_id": str(job.id), "job_type": job.job_type, "org_id": str(job.org_id)},
         )
+    except asyncio.CancelledError:
+        if not lease.done():
+            raise  # the worker itself is being shut down
+        await queue.fail(db, job.id, worker_id, "lease expired while the handler was running")
     except Exception as exc:  # noqa: BLE001 - worker must survive any handler failure
-        await queue.fail(db, job.id, f"{exc}\n{traceback.format_exc()}")
+        await queue.fail(db, job.id, worker_id, f"{exc}\n{traceback.format_exc()}")
         log.exception(
             "job failed",
             extra={"job_id": str(job.id), "job_type": job.job_type, "org_id": str(job.org_id)},
         )
+    finally:
+        lease.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await lease
     return True
 
 
