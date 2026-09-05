@@ -45,13 +45,10 @@ async def run_once(db: Database, blobs: BlobStore, settings: Settings, worker_id
     lease = asyncio.create_task(
         _keep_lease(db, job, worker_id, max(5, settings.job_lease_seconds // 3), task)
     )
+    succeeded = False
     try:
         await task
-        await queue.complete(db, job.id, worker_id)
-        log.info(
-            "job done",
-            extra={"job_id": str(job.id), "job_type": job.job_type, "org_id": str(job.org_id)},
-        )
+        succeeded = True
     except asyncio.CancelledError:
         if not lease.done():
             raise  # the worker itself is being shut down
@@ -66,6 +63,14 @@ async def run_once(db: Database, blobs: BlobStore, settings: Settings, worker_id
         lease.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await lease
+    if succeeded:
+        # Outside the guard above: a failure to record success is a worker
+        # problem for run_worker to back off on, not a job failure.
+        await queue.complete(db, job.id, worker_id)
+        log.info(
+            "job done",
+            extra={"job_id": str(job.id), "job_type": job.job_type, "org_id": str(job.org_id)},
+        )
     return True
 
 
@@ -77,9 +82,20 @@ async def run_worker(settings: Settings | None = None) -> None:
     blobs = blob_store_from_settings(settings)
     worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
     log.info("worker started", extra={"worker_id": worker_id})
+    failures = 0
     try:
         while True:
-            ran = await run_once(db, blobs, settings, worker_id)
+            try:
+                ran = await run_once(db, blobs, settings, worker_id)
+            except Exception:  # noqa: BLE001 - the loop must outlive transient outages
+                failures += 1
+                log.exception(
+                    "worker iteration failed",
+                    extra={"worker_id": worker_id, "consecutive_failures": failures},
+                )
+                await asyncio.sleep(min(30, 2**failures))
+                continue
+            failures = 0
             if not ran:
                 await asyncio.sleep(settings.worker_poll_seconds)
     finally:
