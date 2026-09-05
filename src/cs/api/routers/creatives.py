@@ -7,6 +7,7 @@ from cs.api.auth import AuthContext, current_auth
 from cs.api.deps import get_blobs, get_db
 from cs.core.blobs import BlobStore
 from cs.core.db import Database
+from cs.core.metrics import derived_metrics
 from cs.ingest import repo
 
 router = APIRouter(prefix="/creatives")
@@ -17,22 +18,18 @@ COUNT_FIELDS = ("impressions", "clicks", "link_clicks", "video_3s_views", "video
 
 
 def _derived(r) -> dict:
-    spend = float(r["spend"])
-    impressions = int(r["impressions"])
-    clicks = int(r["clicks"])
-    conversions = float(r["conversions"])
-    conversion_value = float(r["conversion_value"])
-    return {
+    out = {
         **{
             k: (float(v) if hasattr(v, "as_integer_ratio") and not isinstance(v, int) else v)
             for k, v in dict(r).items()
         },
         **{k: int(r[k] or 0) for k in COUNT_FIELDS if k in r},
-        "day": r["day"].isoformat(),
-        "ctr": round(clicks / impressions, 4) if impressions else 0.0,
-        "cpa": round(spend / conversions, 2) if conversions else None,
-        "roas": round(conversion_value / spend, 2) if spend else None,
     }
+    out["day"] = r["day"].isoformat()
+    out.update(
+        derived_metrics(r["spend"], int(r["impressions"]), int(r["clicks"]), r["conversions"], r["conversion_value"])
+    )
+    return out
 
 
 @router.get("")

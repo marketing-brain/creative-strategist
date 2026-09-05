@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from uuid import UUID
 
 from cs.core import queue
@@ -16,12 +17,22 @@ from cs.tagging.video import Transcriber, extract_audio, extract_keyframes, prob
 
 async def _prepare_inputs(ctx: JobContext, creative, transcriber: Transcriber):
     org_id = ctx.job.org_id
+    if creative["format"] == "carousel":
+        cards = await ingest_repo.list_assets_by_kind(
+            ctx.db, org_id, creative["id"], "original_image"
+        )
+        images = []
+        for card in cards:
+            raw = await ctx.blobs.get(card["path"])
+            jpeg, _, _ = prepare_image(raw)
+            images.append((jpeg, "image/jpeg"))
+        return images, None, None
     data = await ctx.blobs.get(creative["primary_asset_path"])
     if creative["format"] == "video":
         await ingest_repo.delete_assets_by_kind(
             ctx.db, org_id, creative["id"], ("keyframe", "transcript")
         )
-        frames = extract_keyframes(data)
+        frames = await asyncio.to_thread(extract_keyframes, data)
         images = [(f.jpeg, "image/jpeg") for f in frames]
         stamps = [f.timestamp for f in frames]
         for i, f in enumerate(frames):
@@ -40,7 +51,7 @@ async def _prepare_inputs(ctx: JobContext, creative, transcriber: Transcriber):
                 int(f.timestamp * 1000),
                 seq=i,
             )
-        audio = extract_audio(data)
+        audio = await asyncio.to_thread(extract_audio, data)
         transcript = await transcriber.transcribe(audio, "audio/mpeg") if audio else ""
         tkey = f"{org_id}/creatives/{creative['id']}/transcript.txt"
         await ctx.blobs.put(tkey, transcript.encode(), "text/plain")
@@ -52,7 +63,7 @@ async def _prepare_inputs(ctx: JobContext, creative, transcriber: Transcriber):
             tkey,
             sha256_hex(transcript.encode()),
             "text/plain",
-            duration_ms=probe_duration_ms(data),
+            duration_ms=await asyncio.to_thread(probe_duration_ms, data),
         )
         return images, transcript, stamps
     jpeg, _, _ = prepare_image(data)

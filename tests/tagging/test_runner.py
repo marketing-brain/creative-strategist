@@ -185,3 +185,60 @@ async def test_job_handler_uses_factories(db, blobs, settings, org_id, image_cre
     await queue.enqueue(db, org_id, "tagging.tag_creative", {"creative_id": str(image_creative)})
     await run_once(db, blobs, settings, "w")
     assert await db.fetchval("SELECT status FROM tag_run") == "done"
+
+
+@pytest.fixture
+async def carousel_creative(db, org_id, settings, blobs):
+    acct = await ingest_repo.upsert_ad_account(
+        db, org_id, "1", "M", "USD", encrypt_str(settings, "t"), None
+    )
+    cid, _ = await ingest_repo.upsert_creative(
+        db,
+        org_id,
+        acct,
+        PlatformCreative("cx", "carousel", "H", "P", None, "SHOP_NOW", "u", None, None, {}),
+        "raw",
+    )
+    asset_ids = []
+    for i in range(3):
+        key = f"{org_id}/creatives/{cid}/card_{i:02d}.png"
+        await blobs.put(key, _png(), "image/png")
+        aid = await ingest_repo.insert_asset(
+            db, org_id, cid, "original_image", key, "sha", "image/png", seq=i
+        )
+        asset_ids.append(aid)
+    await ingest_repo.set_primary_asset(db, org_id, cid, asset_ids[0])
+    return cid
+
+
+async def test_tag_carousel_creative_uses_all_cards(db, blobs, settings, org_id, carousel_creative):
+    tagger, tr = FakeTagger(), FakeTranscriber()
+    run_id = await runner.tag_creative(
+        _ctx(db, blobs, settings, org_id, {}), carousel_creative, tagger, tr
+    )
+    assert run_id is not None and tagger.calls[0]["n_images"] == 3 and tr.calls == 0
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+async def test_ffmpeg_calls_run_off_the_event_loop_thread(db, blobs, settings, org_id, tmp_path, monkeypatch):
+    import threading
+
+    from cs.tagging import runner as runner_mod
+    from cs.tagging.video import Keyframe
+
+    cid = await _make_video_creative(db, blobs, settings, org_id, tmp_path)
+    seen_threads = []
+
+    def fake_extract_keyframes(data):
+        seen_threads.append(threading.current_thread())
+        return [Keyframe(0.0, _png(), 64, 64)]
+
+    def fake_extract_audio(data):
+        seen_threads.append(threading.current_thread())
+        return None
+
+    monkeypatch.setattr(runner_mod, "extract_keyframes", fake_extract_keyframes)
+    monkeypatch.setattr(runner_mod, "extract_audio", fake_extract_audio)
+    await runner.tag_creative(_ctx(db, blobs, settings, org_id, {}), cid, FakeTagger(), FakeTranscriber())
+    assert len(seen_threads) == 2
+    assert all(t is not threading.current_thread() for t in seen_threads)

@@ -217,6 +217,17 @@ async def get_asset_by_seq(
     )
 
 
+async def list_assets_by_kind(
+    db: Database, org_id: UUID, creative_id: UUID, kind: str
+) -> list[asyncpg.Record]:
+    return await db.fetch(
+        "SELECT * FROM asset WHERE org_id=$1 AND creative_id=$2 AND kind=$3 ORDER BY seq",
+        org_id,
+        creative_id,
+        kind,
+    )
+
+
 async def upsert_metrics(
     db: Database, org_id: UUID, ad_account_id: UUID, rows: list[MetricRow]
 ) -> tuple[int, int]:

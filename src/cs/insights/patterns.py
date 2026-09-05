@@ -5,20 +5,10 @@ from decimal import Decimal
 from uuid import UUID
 
 from cs.core.db import Database
+from cs.core.metrics import derived_metrics as metrics_from_sums
 from cs.insights.types import InsightDraft
 
 METRICS = ("ctr", "cpa", "roas")
-
-
-def metrics_from_sums(
-    spend: Decimal, impressions: int, clicks: int, conversions: Decimal, conversion_value: Decimal
-) -> dict:
-    spend_f, conv_f, val_f = float(spend), float(conversions), float(conversion_value)
-    return {
-        "ctr": round(clicks / impressions, 6) if impressions else None,
-        "cpa": round(spend_f / conv_f, 4) if conv_f else None,
-        "roas": round(val_f / spend_f, 4) if spend_f else None,
-    }
 
 
 def signed_lift(metric: str, observed: float | None, baseline: float | None) -> float | None:
