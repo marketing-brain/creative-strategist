@@ -21,4 +21,4 @@ async def test_generate_without_references_uses_generations(settings):
     out = await gen.generate("a bottle", [], n=1)
     assert out[0][:8] == b"\x89PNG\r\n\x1a\n" and calls["generate"]["model"] == settings.image_model
     out = await gen.generate("a bottle", [solid_png(32, 32)], n=1)
-    assert "edit" in calls and calls["edit"]["prompt"] == "a bottle"
+    assert "edit" in calls and calls["edit"]["prompt"] == "a bottle" and calls["edit"]["response_format"] == "b64_json"

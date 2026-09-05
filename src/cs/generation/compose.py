@@ -47,7 +47,7 @@ def video_with_end_card(video: bytes, caption: str, logo_png: bytes | None, end_
     with tempfile.TemporaryDirectory() as d:
         dd = Path(d)
         (dd / "in.mp4").write_bytes(video)
-        safe = caption.replace("'", "").replace(":", "\\:")
+        safe = caption.replace("'", "").replace(":", "\\:").replace(",", "\\,")
         vf = (f"scale={tw}:{th}:force_original_aspect_ratio=increase,crop={tw}:{th},"
               f"drawtext=text='{safe}':fontcolor=white:fontsize={th // 22}:box=1:boxcolor=black@0.5:boxborderw=16:"
               f"x=(w-text_w)/2:y=h-text_h-{th // 12}")

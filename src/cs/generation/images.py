@@ -24,7 +24,7 @@ class GatewayImageGenerator:
             files = []
             for i, data in enumerate(reference_images[:4]):
                 f = io.BytesIO(data); f.name = f"ref{i}.png"; files.append(f)
-            result = await self.client.images.edit(model=self.model, image=files, prompt=prompt, n=n)
+            result = await self.client.images.edit(model=self.model, image=files, prompt=prompt, n=n, response_format="b64_json")
         else:
             result = await self.client.images.generate(model=self.model, prompt=prompt, n=n, response_format="b64_json")
         return [base64.b64decode(d.b64_json) for d in result.data if getattr(d, "b64_json", None)]
