@@ -71,7 +71,12 @@ class Taxonomy:
                     "evidence": str(t.get("evidence", ""))[:500],
                 }
             )
-        return out
+        best: dict[str, dict] = {}
+        for tag in out:
+            existing = best.get(tag["dimension"])
+            if existing is None or tag["confidence"] > existing["confidence"]:
+                best[tag["dimension"]] = tag
+        return [best[name] for name in dict.fromkeys(t["dimension"] for t in out)]
 
 
 @lru_cache

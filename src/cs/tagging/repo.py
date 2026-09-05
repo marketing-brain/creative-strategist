@@ -64,6 +64,7 @@ async def finish_tag_run(
 ) -> None:
     creative_id = await db.fetchval("SELECT creative_id FROM tag_run WHERE id=$1", run_id)
     async with db.transaction() as tx:
+        await tx.execute("DELETE FROM tag WHERE tag_run_id=$1", run_id)
         for t in tags:
             await tx.execute(
                 "INSERT INTO tag (id, org_id, tag_run_id, creative_id, dimension, value, "

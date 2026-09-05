@@ -36,6 +36,21 @@ def test_validate_coerces_and_drops():
     )
     assert [(o["dimension"], o["value"], o["confidence"]) for o in out] == [
         ("hook_type", "question", 1.0),
-        ("hook_type", "other", 0.5),
         ("hook_summary", "Opens with a question", 0.9),
+    ]
+
+
+def test_validate_dedupes_repeated_dimension_keeping_highest_confidence():
+    t = load_taxonomy()
+    out = t.validate(
+        [
+            {"dimension": "hook_type", "value": "question", "confidence": 0.4, "evidence": "e1"},
+            {"dimension": "tone", "value": "warm", "confidence": 0.8, "evidence": "e2"},
+            {"dimension": "hook_type", "value": "statistic", "confidence": 0.9, "evidence": "e3"},
+        ],
+        "image",
+    )
+    assert [(o["dimension"], o["value"], o["confidence"]) for o in out] == [
+        ("hook_type", "statistic", 0.9),
+        ("tone", "warm", 0.8),
     ]
