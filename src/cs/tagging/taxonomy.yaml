@@ -1,0 +1,176 @@
+version: "1.0"
+dimensions:
+  # ---- hook ----
+  - name: hook_type
+    group: hook
+    applies_to: [image, video, carousel]
+    values: [problem_statement, question, bold_claim, statistic, social_proof, before_after, curiosity_gap, offer_led, demo_first, ugc_reaction, other]
+    description: The attention device used in the first moment (first frame / first 3 seconds / headline).
+  - name: first_3s_content
+    group: hook
+    applies_to: [video]
+    values: [product_closeup, person_talking, text_overlay, problem_scene, result_scene, brand_logo, other]
+    description: What dominates the first three seconds of the video.
+  - name: hook_text_present
+    group: hook
+    applies_to: [image, video, carousel]
+    values: ["yes", "no"]
+    description: Whether on-asset text functions as a hook.
+  # ---- message ----
+  - name: message_angle
+    group: message
+    applies_to: [image, video, carousel]
+    values: [pain_relief, aspiration, convenience, savings, quality, status, fear_of_missing_out, community, health, novelty, other]
+    description: The primary persuasive angle.
+  - name: offer_type
+    group: message
+    applies_to: [image, video, carousel]
+    values: [none, discount_percent, discount_amount, free_trial, free_shipping, bundle, limited_time, gift, other]
+    description: The explicit offer, if any.
+  - name: urgency
+    group: message
+    applies_to: [image, video, carousel]
+    values: [none, mild, strong]
+    description: Degree of urgency or scarcity language.
+  - name: proof_type
+    group: message
+    applies_to: [image, video, carousel]
+    values: [none, testimonial, review_stars, expert, press, numbers, comparison, guarantee, other]
+    description: Kind of proof shown.
+  - name: claim_specificity
+    group: message
+    applies_to: [image, video, carousel]
+    values: [vague, moderate, specific]
+    description: How concrete the main claim is.
+  # ---- cta ----
+  - name: cta_style
+    group: cta
+    applies_to: [image, video, carousel]
+    values: [none, button_only, spoken, on_asset_text, spoken_and_text, other]
+    description: How the call to action is delivered.
+  - name: cta_verb
+    group: cta
+    applies_to: [image, video, carousel]
+    values: [shop, learn, try, get, start, sign_up, download, book, other, none]
+    description: The imperative verb of the CTA.
+  # ---- visual ----
+  - name: visual_style
+    group: visual
+    applies_to: [image, video, carousel]
+    values: [ugc, studio_product, lifestyle, animation, screenshot_ui, text_only, meme, collage, illustration, other]
+    description: The overall production style.
+  - name: color_palette
+    group: visual
+    applies_to: [image, video, carousel]
+    values: [bright, muted, dark, monochrome, brand_colors, pastel, high_contrast, other]
+    description: Dominant palette.
+  - name: text_density
+    group: visual
+    applies_to: [image, video, carousel]
+    values: [none, low, medium, high]
+    description: Amount of on-asset text.
+  - name: layout
+    group: visual
+    applies_to: [image, carousel]
+    values: [single_focus, split, grid, text_top_image_bottom, image_top_text_bottom, overlay_center, other]
+    description: Spatial arrangement.
+  - name: brand_presence
+    group: visual
+    applies_to: [image, video, carousel]
+    values: [none, subtle, prominent]
+    description: Logo/brand visibility.
+  - name: product_visible
+    group: visual
+    applies_to: [image, video, carousel]
+    values: ["yes", "no"]
+    description: Whether the product itself is shown.
+  - name: product_timing
+    group: visual
+    applies_to: [video]
+    values: [first_3s, 3_to_10s, after_10s, never]
+    description: When the product first appears.
+  # ---- people ----
+  - name: people_present
+    group: people
+    applies_to: [image, video, carousel]
+    values: [none, one, two_plus]
+    description: Number of people visible.
+  - name: face_closeup
+    group: people
+    applies_to: [image, video, carousel]
+    values: ["yes", "no"]
+    description: A face fills a large share of the frame at some point.
+  - name: presenter_type
+    group: people
+    applies_to: [video]
+    values: [none, creator_ugc, founder, actor, customer, expert, other]
+    description: Who presents, if anyone.
+  - name: demographic_signal
+    group: people
+    applies_to: [image, video, carousel]
+    values: [none, young_adult, adult, senior, family, other]
+    description: Apparent target demographic shown.
+  # ---- tone ----
+  - name: tone
+    group: tone
+    applies_to: [image, video, carousel]
+    values: [playful, serious, urgent, warm, authoritative, humorous, inspirational, neutral, other]
+    description: Emotional register.
+  - name: humor_present
+    group: tone
+    applies_to: [image, video, carousel]
+    values: ["yes", "no"]
+    description: Any humor.
+  # ---- format ----
+  - name: aspect_ratio
+    group: format
+    applies_to: [image, video, carousel]
+    values: ["1:1", "4:5", "9:16", "16:9", other]
+    description: Aspect ratio of the asset.
+  - name: format_subtype
+    group: format
+    applies_to: [image, video, carousel]
+    values: [static, gif_like, talking_head, montage, tutorial, unboxing, testimonial, comparison, listicle, other]
+    description: Recognizable ad sub-format.
+  # ---- video only ----
+  - name: pacing
+    group: video
+    applies_to: [video]
+    values: [slow, medium, fast]
+    description: Cut frequency and motion.
+  - name: music_present
+    group: video
+    applies_to: [video]
+    values: ["yes", "no", unknown]
+    description: Whether music is audible in the transcript/audio.
+  - name: voiceover
+    group: video
+    applies_to: [video]
+    values: [none, on_camera, off_camera, both]
+    description: Spoken narration type.
+  - name: caption_style
+    group: video
+    applies_to: [video]
+    values: [none, subtitles, kinetic_text, headline_cards, mixed]
+    description: On-screen text treatment.
+  - name: storyline
+    group: video
+    applies_to: [video]
+    values: [problem_solution, day_in_life, testimonial, demo, before_after, listicle, narrative, other]
+    description: Overall story structure.
+  - name: ending
+    group: video
+    applies_to: [video]
+    values: [cta_card, product_shot, logo, loop, abrupt, other]
+    description: How the video ends.
+  # ---- free text summaries ----
+  - name: hook_summary
+    group: summary
+    applies_to: [image, video, carousel]
+    values: null
+    description: One sentence describing the hook verbatim or paraphrased.
+  - name: message_summary
+    group: summary
+    applies_to: [image, video, carousel]
+    values: null
+    description: One sentence describing the main message.
