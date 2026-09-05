@@ -212,3 +212,20 @@ async def test_creative_is_fetched_once_per_sync(db, blobs, settings, org_id, ac
     assert await db.fetchval("SELECT count(*) FROM ad") == 2
     raw = list((blobs.root / f"{org_id}/raw/meta/1/creative").glob("*.json"))
     assert [f.name for f in raw] == ["c1.json"]
+
+
+async def test_backfill_downloads_carousel_cards_and_sets_primary(db, blobs, settings, org_id, account_id, fake):
+    fake.add_creative(
+        PlatformCreative("c3", "carousel", "Swipe", "P3", None, "SHOP_NOW", "https://z", None, None, {},
+                         child_asset_urls=["https://img/card0", "https://img/card1"]),
+        child_assets=[b"CARD0DATA", b"CARD1DATA"],
+    )
+    fake.add_ad(PlatformAd("ad3", "C", "ACTIVE", "as1", "cp1", "c3"))
+    await queue.enqueue(db, org_id, "meta.backfill", {"ad_account_id": str(account_id)})
+    await _drain(db, blobs, settings)
+    cid = await db.fetchval("SELECT id FROM creative WHERE platform_creative_id='c3'")
+    assets = await db.fetch("SELECT kind, seq FROM asset WHERE creative_id=$1 ORDER BY seq", cid)
+    assert [(a["kind"], a["seq"]) for a in assets] == [("original_image", 0), ("original_image", 1)]
+    primary_path = await db.fetchval(
+        "SELECT a.path FROM creative c JOIN asset a ON a.id = c.primary_asset_id WHERE c.id=$1", cid)
+    assert primary_path is not None and "card_00" in primary_path

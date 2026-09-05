@@ -27,6 +27,12 @@ def _video_count(items: list[dict] | None) -> int:
     return int(sum(Decimal(str(i["value"])) for i in (items or [])))
 
 
+def _carousel_card_urls(link: dict) -> list[str] | None:
+    cards = link.get("child_attachments") or []
+    urls = [c["picture"] for c in cards if c.get("picture")]
+    return urls or None
+
+
 def creative_from_graph(obj: dict) -> PlatformCreative:
     spec = obj.get("object_story_spec") or {}
     link = spec.get("link_data") or {}
@@ -42,7 +48,7 @@ def creative_from_graph(obj: dict) -> PlatformCreative:
 
     cta = link.get("call_to_action") or video.get("call_to_action") or {}
     link_url = link.get("link") or (cta.get("value") or {}).get("link") or obj.get("link_url")
-    asset_url = None if fmt == "video" else obj.get("image_url")
+    asset_url = None if fmt in ("video", "carousel") else obj.get("image_url")
     return PlatformCreative(
         platform_creative_id=str(obj["id"]),
         format=fmt,
@@ -53,6 +59,7 @@ def creative_from_graph(obj: dict) -> PlatformCreative:
         link_url=link_url,
         asset_url=asset_url,
         asset_mime="image/jpeg" if asset_url else None,
+        child_asset_urls=_carousel_card_urls(link) if fmt == "carousel" else None,
         raw={
             "video_id": obj.get("video_id") or video.get("video_id"),
             "thumbnail_url": obj.get("thumbnail_url"),

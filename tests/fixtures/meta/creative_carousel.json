@@ -1,0 +1,7 @@
+{"id": "5003", "name": "Carousel C",
+ "object_story_spec": {"link_data": {"message": "Swipe to see more", "link": "https://example.com/c",
+   "call_to_action": {"type": "SHOP_NOW"},
+   "child_attachments": [
+     {"link": "https://example.com/c1", "name": "Card 1", "picture": "https://scontent.example/card1.jpg"},
+     {"link": "https://example.com/c2", "name": "Card 2", "picture": "https://scontent.example/card2.jpg"}
+   ]}}}

@@ -30,6 +30,7 @@ class PlatformCreative:
     asset_url: str | None
     asset_mime: str | None
     raw: dict = field(default_factory=dict)
+    child_asset_urls: list[str] | None = None
 
 
 @dataclass

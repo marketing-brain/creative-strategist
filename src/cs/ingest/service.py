@@ -84,7 +84,14 @@ async def sync_account(
             new_creatives += int(created)
             await repo.upsert_ad(ctx.db, org_id, acct_id, ad, creative_id)
             kind = "original_video" if c.format == "video" else "original_image"
-            if c.asset_url and not await repo.creative_has_asset(ctx.db, org_id, creative_id, kind):
+            if c.format == "carousel" and c.child_asset_urls:
+                if not await repo.creative_has_asset(ctx.db, org_id, creative_id, "original_image"):
+                    await queue.enqueue(
+                        ctx.db, org_id, "meta.download_carousel",
+                        {"creative_id": str(creative_id), "asset_urls": c.child_asset_urls},
+                        dedup_key=str(creative_id),
+                    )
+            elif c.asset_url and not await repo.creative_has_asset(ctx.db, org_id, creative_id, kind):
                 await queue.enqueue(
                     ctx.db,
                     org_id,
@@ -141,6 +148,29 @@ async def download_creative(
         {"creative_id": str(creative_id)},
         dedup_key=f"tag:{creative_id}",
     )
+
+
+async def download_carousel(
+    ctx: JobContext, connector: AdPlatformConnector, creative_id: UUID, asset_urls: list[str]
+) -> None:
+    org_id = ctx.job.org_id
+    primary_id = None
+    for i, url in enumerate(asset_urls):
+        data, mime = await connector.download_asset(url)
+        ext = {"image/png": "png", "image/jpeg": "jpg"}.get(mime, "jpg")
+        key = f"{org_id}/creatives/{creative_id}/card_{i:02d}.{ext}"
+        await ctx.blobs.put(key, data, mime)
+        asset_id = await repo.insert_asset(
+            ctx.db, org_id, creative_id, "original_image", key, sha256_hex(data), mime, seq=i
+        )
+        if i == 0:
+            primary_id = asset_id
+    if primary_id is not None:
+        await repo.set_primary_asset(ctx.db, org_id, creative_id, primary_id)
+        await queue.enqueue(
+            ctx.db, org_id, "tagging.tag_creative", {"creative_id": str(creative_id)},
+            dedup_key=f"tag:{creative_id}",
+        )
 
 
 def window(days: int, today: date | None = None) -> tuple[date, date]:

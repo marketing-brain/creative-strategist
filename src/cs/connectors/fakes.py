@@ -16,10 +16,14 @@ class FakeConnector:
         self.fail_downloads: set[str] = set()
         self.fail_creatives: set[str] = set()
 
-    def add_creative(self, c: PlatformCreative, asset_bytes: bytes | None = None) -> None:
+    def add_creative(self, c: PlatformCreative, asset_bytes: bytes | None = None,
+                      child_assets: list[bytes] | None = None) -> None:
         self.creatives[c.platform_creative_id] = c
         if asset_bytes is not None and c.asset_url:
             self.assets[c.asset_url] = (asset_bytes, c.asset_mime or "application/octet-stream")
+        if child_assets and c.child_asset_urls:
+            for url, data in zip(c.child_asset_urls, child_assets):
+                self.assets[url] = (data, "image/jpeg")
 
     def add_ad(self, a: PlatformAd) -> None:
         self.ads.append(a)

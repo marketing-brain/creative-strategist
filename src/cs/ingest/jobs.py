@@ -63,6 +63,27 @@ async def download_creative(ctx: JobContext) -> None:
     )
 
 
+@handler("meta.download_carousel")
+async def download_carousel(ctx: JobContext) -> None:
+    p = ctx.job.payload
+    creative_id = UUID(p["creative_id"])
+    acct = await ctx.db.fetchrow(
+        "SELECT a.* FROM ad_account a JOIN creative c ON c.ad_account_id = a.id "
+        "WHERE c.id = $1 AND c.org_id = $2",
+        creative_id,
+        ctx.job.org_id,
+    )
+    if acct is None:
+        raise RuntimeError("ad_account not found for creative")
+    async with httpx.AsyncClient(timeout=120) as http:
+        connector = service.CONNECTOR_FACTORY(ctx.settings, acct, http, ctx.blobs)
+        await service.download_carousel(ctx, connector, creative_id, p["asset_urls"])
+    log.info(
+        "carousel downloaded",
+        extra={"creative_id": str(creative_id), "cards": len(p["asset_urls"])},
+    )
+
+
 @register_schedule("ingest.nightly_sync", every_seconds=86400)
 async def nightly_sync(db: Database, settings: Settings) -> None:
     accounts = await db.fetch("SELECT id, org_id FROM ad_account WHERE status = 'active'")

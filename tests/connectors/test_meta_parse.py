@@ -36,3 +36,10 @@ def test_metric_from_insight():
 def test_recorded_creatives_parse(name):
     c = parse.creative_from_graph(json.loads((FX / name).read_text()))
     assert c.format in ("image", "video", "carousel") and c.platform_creative_id
+
+
+def test_creative_carousel_extracts_card_urls():
+    c = parse.creative_from_graph(json.loads((FX / "creative_carousel.json").read_text()))
+    assert c.format == "carousel" and c.asset_url is None
+    assert c.child_asset_urls == [
+        "https://scontent.example/card1.jpg", "https://scontent.example/card2.jpg"]
