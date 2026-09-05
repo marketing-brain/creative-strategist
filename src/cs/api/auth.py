@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from functools import lru_cache
 from uuid import UUID
@@ -11,6 +12,8 @@ from cs.api.deps import get_db, get_settings_dep
 from cs.core.config import Settings
 from cs.core.db import Database
 from cs.orgs.repo import ensure_membership, get_or_create_org
+
+log = logging.getLogger("cs.auth")
 
 
 @dataclass
@@ -35,11 +38,17 @@ def _clerk_claims(request: Request, settings: Settings) -> tuple[str, str, str]:
         claims = jwt.decode(token, key, algorithms=["RS256"], issuer=settings.clerk_issuer or None)
     except jwt.PyJWTError as exc:
         raise HTTPException(401, f"invalid token: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001 - JWKS fetch failures are not the caller's fault
+        log.warning("jwks lookup failed: %s", exc)
+        raise HTTPException(503, "auth provider unavailable") from exc
     org = claims.get("org_id")
     if not org:
         raise HTTPException(403, "no active organization")
+    sub = claims.get("sub")
+    if not sub:
+        raise HTTPException(401, "token missing sub")
     role = "admin" if str(claims.get("org_role", "")).endswith("admin") else "member"
-    return claims["sub"], org, role
+    return sub, org, role
 
 
 def _dev_claims(request: Request) -> tuple[str, str, str]:
