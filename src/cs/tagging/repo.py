@@ -113,3 +113,40 @@ async def latest_tags(db: Database, org_id: UUID, creative_id: UUID) -> list[asy
         "WHERE tag_run_id=$1 ORDER BY dimension",
         rid,
     )
+
+
+async def upsert_embedding(
+    db: Database, org_id: UUID, creative_id: UUID, tag_run_id: UUID, vector: list[float]
+) -> None:
+    literal = "[" + ",".join(f"{x:.7f}" for x in vector) + "]"
+    await db.execute(
+        """
+        INSERT INTO creative_embedding (creative_id, org_id, tag_run_id, embedding)
+        VALUES ($1, $2, $3, $4::vector)
+        ON CONFLICT (creative_id) DO UPDATE SET tag_run_id = EXCLUDED.tag_run_id,
+        embedding = EXCLUDED.embedding, created_at = now()
+        """,
+        creative_id,
+        org_id,
+        tag_run_id,
+        literal,
+    )
+
+
+async def similar_creatives(
+    db: Database, org_id: UUID, creative_id: UUID, k: int = 10
+) -> list[asyncpg.Record]:
+    return await db.fetch(
+        """
+        SELECT c.id, c.headline, c.format, (e.embedding <=> ref.embedding) AS distance
+        FROM creative_embedding ref
+        JOIN creative_embedding e ON e.org_id = ref.org_id
+        AND e.creative_id <> ref.creative_id
+        JOIN creative c ON c.id = e.creative_id
+        WHERE ref.creative_id = $2 AND ref.org_id = $1
+        ORDER BY e.embedding <=> ref.embedding LIMIT $3
+        """,
+        org_id,
+        creative_id,
+        k,
+    )
