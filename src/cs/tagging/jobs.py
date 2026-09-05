@@ -63,3 +63,137 @@ async def embed_creative(ctx: JobContext) -> None:
     async with httpx.AsyncClient() as http:
         [vec] = await EMBEDDER_FACTORY(ctx.settings, http).embed([text])
     await tag_repo.upsert_embedding(ctx.db, org_id, creative_id, run_id, vec)
+
+
+from datetime import UTC, datetime, timedelta  # noqa: E402
+
+from cs.core import queue  # noqa: E402
+from cs.core.ids import new_id  # noqa: E402
+from cs.tagging.batch import BatchTagger, ClaudeBatchTagger  # noqa: E402
+from cs.tagging.images import prepare_image  # noqa: E402
+from cs.tagging.prompts import SYSTEM, prompt_sha, user_text  # noqa: E402
+from cs.tagging.taxonomy import load_taxonomy  # noqa: E402
+
+
+def default_batch_factory(settings: Settings) -> BatchTagger:
+    return ClaudeBatchTagger(settings)
+
+
+BATCH_FACTORY = default_batch_factory
+
+
+@handler("tagging.batch_submit")
+async def batch_submit(ctx: JobContext) -> None:
+    org_id = ctx.job.org_id
+    taxonomy = load_taxonomy()
+    tv = await tag_repo.ensure_taxonomy_version(ctx.db, taxonomy)
+    model = ctx.settings.claude_model_tagging
+    ids = await tag_repo.untagged_creative_ids(
+        ctx.db, org_id, tv, model, int(ctx.job.payload.get("limit", 500))
+    )
+    if not ids:
+        return
+    requests, items = [], []
+    for cid in ids:
+        creative = await ingest_repo.get_creative(ctx.db, org_id, cid)
+        run_id = await tag_repo.start_tag_run(ctx.db, org_id, cid, tv, model)
+        if run_id is None:
+            continue
+        jpeg, _, _ = prepare_image(await ctx.blobs.get(creative["primary_asset_path"]))
+        copy = {
+            k: creative[k]
+            for k in ("headline", "primary_text", "description", "cta_type", "link_url")
+        }
+        text = user_text(taxonomy, "image", copy, None, None)
+        schema = taxonomy.json_schema("image")
+        requests.append(
+            {
+                "custom_id": str(run_id),
+                "images": [(jpeg, "image/jpeg")],
+                "user_text": text,
+                "schema": schema,
+            }
+        )
+        items.append((run_id, prompt_sha(SYSTEM, text, schema)))
+    provider_id = await BATCH_FACTORY(ctx.settings).submit(requests)
+    batch_id = new_id()
+    await ctx.db.execute(
+        "INSERT INTO tag_batch (id, org_id, provider_batch_id, taxonomy_version_id, model, "
+        "status, request_count) VALUES ($1,$2,$3,$4,$5,'submitted',$6)",
+        batch_id,
+        org_id,
+        provider_id,
+        tv,
+        model,
+        len(requests),
+    )
+    for run_id, sha in items:
+        await ctx.db.execute(
+            "INSERT INTO tag_batch_item (tag_batch_id, custom_id, tag_run_id) VALUES ($1,$2,$3)",
+            batch_id,
+            str(run_id),
+            run_id,
+        )
+        await ctx.db.execute("UPDATE tag_run SET prompt_sha256=$2 WHERE id=$1", run_id, sha)
+    await queue.enqueue(
+        ctx.db,
+        org_id,
+        "tagging.batch_poll",
+        {"tag_batch_id": str(batch_id)},
+        dedup_key=f"poll:{batch_id}",
+        run_after=datetime.now(UTC) + timedelta(seconds=60),
+    )
+
+
+@handler("tagging.batch_poll")
+async def batch_poll(ctx: JobContext) -> None:
+    org_id = ctx.job.org_id
+    batch_id = UUID(ctx.job.payload["tag_batch_id"])
+    batch = await ctx.db.fetchrow(
+        "SELECT * FROM tag_batch WHERE id=$1 AND org_id=$2", batch_id, org_id
+    )
+    if batch["status"] == "ended":
+        return  # already finished by an earlier poll; nothing left to do
+    ended, results = await BATCH_FACTORY(ctx.settings).poll(batch["provider_batch_id"])
+    if not ended:
+        # No dedup_key here: the job currently executing this handler is still
+        # 'running' under dedup_key f"poll:{batch_id}" (set by batch_submit, or
+        # by a prior iteration of this same reschedule), so re-using that key
+        # would collide with our own row and silently drop the reschedule.
+        await queue.enqueue(
+            ctx.db,
+            org_id,
+            "tagging.batch_poll",
+            {"tag_batch_id": str(batch_id)},
+            run_after=datetime.now(UTC) + timedelta(seconds=120),
+        )
+        return
+    taxonomy = load_taxonomy()
+    for res in results:
+        run_id = UUID(res["custom_id"])
+        if res["ok"]:
+            creative_id = await ctx.db.fetchval(
+                "SELECT creative_id FROM tag_run WHERE id=$1", run_id
+            )
+            sha = await ctx.db.fetchval("SELECT prompt_sha256 FROM tag_run WHERE id=$1", run_id)
+            await tag_repo.finish_tag_run(
+                ctx.db,
+                org_id,
+                run_id,
+                taxonomy.validate(res["tags"], "image"),
+                sha or "",
+                res["input_tokens"],
+                res["output_tokens"],
+            )
+            await queue.enqueue(
+                ctx.db,
+                org_id,
+                "tagging.embed_creative",
+                {"creative_id": str(creative_id)},
+                dedup_key=f"embed:{creative_id}",
+            )
+        else:
+            await tag_repo.fail_tag_run(ctx.db, org_id, run_id, res["error"] or "batch item failed")
+    await ctx.db.execute(
+        "UPDATE tag_batch SET status='ended', ended_at=now() WHERE id=$1", batch_id
+    )

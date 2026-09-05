@@ -150,3 +150,30 @@ async def similar_creatives(
         creative_id,
         k,
     )
+
+
+async def untagged_creative_ids(
+    db: Database,
+    org_id: UUID,
+    taxonomy_version_id: UUID,
+    model: str,
+    limit: int,
+    formats: tuple[str, ...] = ("image", "carousel"),
+) -> list[UUID]:
+    rows = await db.fetch(
+        """
+        SELECT c.id FROM creative c
+        WHERE c.org_id = $1 AND c.primary_asset_id IS NOT NULL AND c.format = ANY($4)
+          AND NOT EXISTS (
+            SELECT 1 FROM tag_run r WHERE r.creative_id = c.id AND r.taxonomy_version_id = $2
+              AND r.model = $3 AND r.status IN ('done', 'running')
+          )
+        ORDER BY c.first_seen_at LIMIT $5
+        """,
+        org_id,
+        taxonomy_version_id,
+        model,
+        list(formats),
+        limit,
+    )
+    return [r["id"] for r in rows]
