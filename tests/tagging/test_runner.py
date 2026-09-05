@@ -90,10 +90,7 @@ async def test_refusal_marks_run_failed(db, blobs, settings, org_id, image_creat
     assert await db.fetchval("SELECT status FROM tag_run") == "failed"
 
 
-@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
-async def test_tag_video_creative_uses_keyframes_and_transcript(
-    db, blobs, settings, org_id, tmp_path
-):
+async def _make_video_creative(db, blobs, settings, org_id, tmp_path):
     acct = await ingest_repo.upsert_ad_account(
         db, org_id, "1", "M", "USD", encrypt_str(settings, "t"), None
     )
@@ -134,6 +131,14 @@ async def test_tag_video_creative_uses_keyframes_and_transcript(
     await blobs.put(key, p.read_bytes(), "video/mp4")
     aid = await ingest_repo.insert_asset(db, org_id, cid, "original_video", key, "sha", "video/mp4")
     await ingest_repo.set_primary_asset(db, org_id, cid, aid)
+    return cid
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+async def test_tag_video_creative_uses_keyframes_and_transcript(
+    db, blobs, settings, org_id, tmp_path
+):
+    cid = await _make_video_creative(db, blobs, settings, org_id, tmp_path)
 
     tagger, tr = FakeTagger(), FakeTranscriber("buy now")
     await runner.tag_creative(_ctx(db, blobs, settings, org_id, {}), cid, tagger, tr)
@@ -147,6 +152,29 @@ async def test_tag_video_creative_uses_keyframes_and_transcript(
     )
     by = {r["kind"]: r["n"] for r in kinds}
     assert by["keyframe"] >= 3 and by["transcript"] == 1
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+async def test_video_retry_does_not_duplicate_keyframe_assets(
+    db, blobs, settings, org_id, tmp_path
+):
+    cid = await _make_video_creative(db, blobs, settings, org_id, tmp_path)
+    ctx = _ctx(db, blobs, settings, org_id, {})
+
+    with pytest.raises(RuntimeError):
+        await runner.tag_creative(ctx, cid, FakeTagger(refuse=True), FakeTranscriber())
+    first_count = await db.fetchval(
+        "SELECT count(*) FROM asset WHERE creative_id=$1 AND kind IN ('keyframe','transcript')",
+        cid,
+    )
+    assert first_count > 0
+
+    await runner.tag_creative(ctx, cid, FakeTagger(), FakeTranscriber())
+    second_count = await db.fetchval(
+        "SELECT count(*) FROM asset WHERE creative_id=$1 AND kind IN ('keyframe','transcript')",
+        cid,
+    )
+    assert second_count == first_count
 
 
 async def test_job_handler_uses_factories(db, blobs, settings, org_id, image_creative, monkeypatch):

@@ -173,6 +173,17 @@ async def set_primary_asset(db: Database, org_id: UUID, creative_id: UUID, asset
     )
 
 
+async def delete_assets_by_kind(
+    db: Database, org_id: UUID, creative_id: UUID, kinds: tuple[str, ...]
+) -> None:
+    await db.execute(
+        "DELETE FROM asset WHERE org_id=$1 AND creative_id=$2 AND kind = ANY($3)",
+        org_id,
+        creative_id,
+        list(kinds),
+    )
+
+
 async def creative_has_asset(db: Database, org_id: UUID, creative_id: UUID, kind: str) -> bool:
     return bool(
         await db.fetchval(

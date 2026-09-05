@@ -18,6 +18,9 @@ async def _prepare_inputs(ctx: JobContext, creative, transcriber: Transcriber):
     org_id = ctx.job.org_id
     data = await ctx.blobs.get(creative["primary_asset_path"])
     if creative["format"] == "video":
+        await ingest_repo.delete_assets_by_kind(
+            ctx.db, org_id, creative["id"], ("keyframe", "transcript")
+        )
         frames = extract_keyframes(data)
         images = [(f.jpeg, "image/jpeg") for f in frames]
         stamps = [f.timestamp for f in frames]
