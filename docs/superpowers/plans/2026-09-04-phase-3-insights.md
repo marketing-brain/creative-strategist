@@ -19,13 +19,16 @@
 - Copilot tools are read-only repo calls; no model-generated SQL.
 - Models from `settings.claude_model_insights` and `settings.claude_model_copilot` (default `claude-opus-5`).
 - All earlier constraints apply.
+- Phase 2 final-review follow-ups this phase must close: `taxonomy.validate()` deduplicating repeated dimensions and `finish_tag_run` idempotency (both Task 0, ahead of the pattern-aggregation SQL that groups `tag` rows by `(dimension, value)`), and the missing `asset(creative_id, kind, seq)` unique constraint (added in Task 1's migration). Carousel-tagged-via-first-card-only is a documented, deliberate limitation carried forward, not fixed this phase.
 
 ---
 
 ## File structure
 
 ```
-db/migrations/20260904000006_insights.sql   # insight, brief, copilot_conversation, copilot_message, view creative_latest_tag
+src/cs/tagging/taxonomy.py         # modified: validate() dedupes repeated dimensions (Task 0)
+src/cs/tagging/repo.py             # modified: finish_tag_run idempotent tag insert (Task 0)
+db/migrations/20260904000006_insights.sql   # insight, brief, copilot_conversation, copilot_message, view creative_latest_tag, asset unique index
 src/cs/insights/__init__.py
 src/cs/insights/types.py          # InsightDraft dataclass
 src/cs/insights/patterns.py       # compute_pattern_insights()
@@ -43,6 +46,134 @@ tests/insights/...
 
 ---
 
+### Task 0: Tagging hardening required before pattern aggregation (Phase 2 follow-ups)
+
+**Why this task exists:** the Phase 2 final review flagged that `taxonomy.validate()` does not deduplicate repeated dimensions, and that Task 2's pattern-aggregation SQL (grouping `tag` rows by `(dimension, value)` through `creative_latest_tag`) would double-count or split a creative's contribution if the model ever emits the same dimension twice in one `tag_run`. The same review flagged `finish_tag_run`'s tag inserts as non-idempotent under job retry. Both are cheap to close now, before Task 2 depends on clean per-dimension tag data.
+
+**Files:**
+- Modify: `src/cs/tagging/taxonomy.py`, `src/cs/tagging/repo.py`
+- Test: `tests/tagging/test_taxonomy.py`, `tests/tagging/test_repo.py` (new)
+
+**Interfaces:**
+- `Taxonomy.validate(tags, fmt)`: after the existing per-tag coercion/drop logic, deduplicate by `dimension`, keeping only the highest-`confidence` entry for each dimension (first occurrence wins on an exact tie). Output order otherwise unchanged (first-seen order of the kept dimensions).
+- `finish_tag_run(db, org_id, run_id, tags, prompt_sha, input_tokens, output_tokens)`: inside its existing transaction, `DELETE FROM tag WHERE tag_run_id=$1` before inserting the new rows, so a job that crashes mid-insert and is retried (reclaimed) does not double-insert `tag` rows for the same run.
+
+- [ ] **Step 1: Write failing tests**
+
+Add to `tests/tagging/test_taxonomy.py`:
+
+```python
+def test_validate_dedupes_repeated_dimension_keeping_highest_confidence():
+    t = load_taxonomy()
+    out = t.validate(
+        [
+            {"dimension": "hook_type", "value": "question", "confidence": 0.4, "evidence": "e1"},
+            {"dimension": "tone", "value": "warm", "confidence": 0.8, "evidence": "e2"},
+            {"dimension": "hook_type", "value": "statistic", "confidence": 0.9, "evidence": "e3"},
+        ],
+        "image",
+    )
+    assert [(o["dimension"], o["value"], o["confidence"]) for o in out] == [
+        ("hook_type", "statistic", 0.9),
+        ("tone", "warm", 0.8),
+    ]
+```
+
+`tests/tagging/test_repo.py` (new file):
+
+```python
+from cs.connectors.base import PlatformCreative
+from cs.core.crypto import encrypt_str
+from cs.ingest import repo as ingest_repo
+from cs.tagging import repo
+from cs.tagging.taxonomy import load_taxonomy
+
+
+async def test_finish_tag_run_is_idempotent_on_retry(db, org_id, settings):
+    acct = await ingest_repo.upsert_ad_account(db, org_id, "1", "M", "USD", encrypt_str(settings, "t"), None)
+    cid, _ = await ingest_repo.upsert_creative(
+        db, org_id, acct, PlatformCreative("c", "image", "H", "P", None, None, "u", None, None, {}), "raw"
+    )
+    tv = await repo.ensure_taxonomy_version(db, load_taxonomy())
+    rid = await repo.start_tag_run(db, org_id, cid, tv, "fake")
+    tags = [{"dimension": "hook_type", "value": "question", "confidence": 0.9, "evidence": "e"}]
+    await repo.finish_tag_run(db, org_id, rid, tags, "sha", 1, 1)
+    await repo.finish_tag_run(db, org_id, rid, tags, "sha", 1, 1)  # simulates a reclaimed/retried job
+    rows = await db.fetch("SELECT dimension, value FROM tag WHERE tag_run_id=$1", rid)
+    assert len(rows) == 1
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `uv run pytest tests/tagging/test_taxonomy.py tests/tagging/test_repo.py -v`
+Expected: FAIL (dedup test and idempotency test)
+
+- [ ] **Step 3: Implement**
+
+In `src/cs/tagging/taxonomy.py`, change `Taxonomy.validate` to dedupe after building `out`:
+
+```python
+    def validate(self, tags: list[dict], fmt: str) -> list[dict]:
+        by_name = {d.name: d for d in self.for_format(fmt)}
+        out: list[dict] = []
+        for t in tags:
+            d = by_name.get(t.get("dimension"))
+            if d is None:
+                continue
+            value = str(t.get("value", "")).strip()
+            if d.values is not None and value not in d.values:
+                value = "other" if "other" in d.values else d.values[0]
+            conf = float(t.get("confidence", 0.0))
+            out.append(
+                {
+                    "dimension": d.name,
+                    "value": value,
+                    "confidence": max(0.0, min(1.0, conf)),
+                    "evidence": str(t.get("evidence", ""))[:500],
+                }
+            )
+        best: dict[str, dict] = {}
+        for tag in out:
+            existing = best.get(tag["dimension"])
+            if existing is None or tag["confidence"] > existing["confidence"]:
+                best[tag["dimension"]] = tag
+        return [best[name] for name in dict.fromkeys(t["dimension"] for t in out)]
+```
+
+In `src/cs/tagging/repo.py`, add the delete as the first statement inside `finish_tag_run`'s transaction:
+
+```python
+    async with db.transaction() as tx:
+        await tx.execute("DELETE FROM tag WHERE tag_run_id=$1", run_id)
+        for t in tags:
+            await tx.execute(
+                "INSERT INTO tag (id, org_id, tag_run_id, creative_id, dimension, value, "
+                "confidence, evidence) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+                new_id(),
+                org_id,
+                run_id,
+                creative_id,
+                t["dimension"],
+                t["value"],
+                t["confidence"],
+                t["evidence"],
+            )
+```
+
+(the rest of `finish_tag_run` — the `tag_run` status update — is unchanged.)
+
+- [ ] **Step 4: Run to verify it passes, then commit**
+
+Run: `uv run pytest tests/tagging -v`
+Expected: PASS
+
+```bash
+git add src/cs/tagging/taxonomy.py src/cs/tagging/repo.py tests/tagging/test_taxonomy.py tests/tagging/test_repo.py
+git commit -m "fix(tagging): dedupe repeated tag dimensions and make finish_tag_run idempotent"
+```
+
+---
+
 ### Task 1: Migration, view, and InsightDraft
 
 **Files:**
@@ -52,6 +183,7 @@ tests/insights/...
 **Interfaces:**
 - View `creative_latest_tag(org_id, creative_id, dimension, value, confidence)`.
 - Tables: `insight`, `brief`, `copilot_conversation(id, org_id, user_id, title, created_at)`, `copilot_message(id, org_id, conversation_id, role, content JSONB, created_at)`.
+- Unique index `asset(creative_id, kind, seq)`, closing the Phase 2 final-review follow-up (this is a defense-in-depth constraint on top of the existing check-then-insert/delete-then-insert application logic, which already keeps this invariant for sequential retries).
 - `@dataclass InsightDraft(kind: str, dimension: str, value: str, metric: str, window_start: date, window_end: date, sample_creatives: int, sample_spend: Decimal, baseline: float, observed: float, lift: float, creative_id: UUID | None = None, ad_account_id: UUID | None = None)`
 - repo: `insert_insight(db, org_id, draft, explanation: str, suggested_test: str) -> UUID | None`; `list_insights(db, org_id, kind: str | None, ad_account_id=None, limit=50) -> list[Record]`; `unexplained_insights` is not needed (explanation is written at insert). `insert_brief(db, org_id, week_start, content_md, insight_ids) -> UUID`; `list_briefs(db, org_id, limit=12)`.
 
@@ -121,13 +253,18 @@ CREATE TABLE copilot_message (
 );
 CREATE INDEX copilot_message_conv_idx ON copilot_message (conversation_id, created_at);
 
+CREATE UNIQUE INDEX asset_creative_kind_seq_uidx ON asset (creative_id, kind, seq);
+
 -- migrate:down
+DROP INDEX asset_creative_kind_seq_uidx;
 DROP TABLE copilot_message;
 DROP TABLE copilot_conversation;
 DROP TABLE brief;
 DROP TABLE insight;
 DROP VIEW creative_latest_tag;
 ```
+
+Note: if any pre-existing dev data violates this constraint (a duplicate `(creative_id, kind, seq)` from before the application-level check-then-insert logic was added), the migration will fail on `migrate:up`; if that happens, deduplicate the offending rows (keep the newest by `created_at`) before re-running, and record what was found in the ledger.
 
 - [ ] **Step 2: Write failing test**
 
