@@ -120,8 +120,7 @@ class BlobStoreFailingOnCall:
     """Wraps a real BlobStore and raises on the Nth call to get(), simulating a
     corrupt/unreadable blob for one creative partway through batch_submit's
     per-creative loop -- after start_tag_run() has already flipped that run's
-    (and any earlier run's) status to 'running', but before it reaches
-    `items`."""
+    status to 'running', but before it reaches `items`."""
 
     def __init__(self, real, fail_at_call: int):
         self._real = real
@@ -138,35 +137,44 @@ class BlobStoreFailingOnCall:
         return getattr(self._real, name)
 
 
-async def test_batch_submit_fails_run_started_but_not_yet_in_items(
+async def test_batch_submit_isolates_one_bad_creative(
     db, blobs, settings, org_id, three_images, monkeypatch
 ):
-    """Covers the residual gap: a failure during per-creative processing (not
-    inside submit()) for one creative partway through a multi-creative batch
-    must still fail that creative's tag_run, even though it never made it
-    into `items`. Only tracking started runs via start_tag_run's return value
-    (not `items`) closes this."""
+    """A single corrupt/unreadable creative partway through batch_submit's
+    per-creative loop must not abort the whole batch (Global Constraint:
+    per-creative failures are isolated, never abort a whole batch). Only that
+    creative's tag_run is failed; the other creatives are submitted normally
+    and the batch proceeds."""
     fake = FakeBatchTagger()
     monkeypatch.setattr(tagging_jobs, "BATCH_FACTORY", lambda s: fake)
     failing_blobs = BlobStoreFailingOnCall(blobs, fail_at_call=2)
     await queue.enqueue(db, org_id, "tagging.batch_submit", {"limit": 100})
-    await run_once(db, failing_blobs, settings, "w")  # handler raises; run_once fails the job
+    await run_once(db, failing_blobs, settings, "w")  # handler succeeds; job completes
 
-    # The first creative's run was fully prepared into `items` before the
-    # second creative's blob read raised; the second creative's run was only
-    # started via start_tag_run and never reached `items`. Neither may be
-    # left stuck at 'running' -- both must be marked 'failed'. (The third
-    # creative was never reached at all, so it has no tag_run row.)
-    assert await db.fetchval("SELECT count(*) FROM tag_run WHERE status='running'") == 0
-    assert await db.fetchval("SELECT count(*) FROM tag_run WHERE status='failed'") == 2
-    assert await db.fetchval("SELECT count(*) FROM tag_run") == 2
-    assert await db.fetchval("SELECT count(*) FROM tag_batch") == 0
+    # The second creative's blob read raised; its tag_run is failed and the
+    # loop moved on. The other two creatives were prepared and submitted
+    # normally -- neither stuck at 'running' nor failed.
+    assert await db.fetchval("SELECT count(*) FROM tag_run WHERE status='failed'") == 1
+    assert await db.fetchval("SELECT count(*) FROM tag_run WHERE status='running'") == 2
+    assert await db.fetchval("SELECT count(*) FROM tag_run") == 3
+
+    # The batch is NOT aborted: a tag_batch row is created covering the
+    # creatives that succeeded.
+    batch = await db.fetchrow("SELECT status, request_count FROM tag_batch")
+    assert batch is not None
+    assert batch["status"] == "submitted"
+    assert batch["request_count"] == 2
 
     job = await db.fetchrow(
         "SELECT status, attempts FROM job WHERE job_type='tagging.batch_submit'"
     )
-    assert job["status"] == "pending"  # requeued for retry, not dead yet
-    assert job["attempts"] == 1
+    assert job["status"] == "done"
+
+    # The failed creative is retryable on a future batch_submit.
+    taxonomy = load_taxonomy()
+    tv = await tag_repo.ensure_taxonomy_version(db, taxonomy)
+    ids = await tag_repo.untagged_creative_ids(db, org_id, tv, settings.claude_model_tagging, 100)
+    assert len(ids) == 1
 
 
 async def test_batch_poll_noop_when_already_ended(db, blobs, settings, org_id):

@@ -252,6 +252,59 @@ async def test_backfill_downloads_carousel_cards_and_sets_primary(
     assert primary_path is not None and "card_00" in primary_path
 
 
+async def test_stranded_partial_carousel_is_reenqueued(
+    db, blobs, settings, org_id, account_id, fake
+):
+    """If card 0 of a carousel downloads but card 1's job exhausts its retries
+    and dies, the creative permanently satisfies creative_has_asset(...,
+    'original_image') even though primary_asset_id is still NULL and the full
+    card set was never downloaded. A subsequent sync must still re-enqueue
+    meta.download_carousel for it (Fix C: gate re-enqueue on primary_asset_id,
+    not on the mere presence of an original_image asset)."""
+    fake.add_creative(
+        PlatformCreative(
+            "c5",
+            "carousel",
+            "Stranded",
+            "P5",
+            None,
+            "SHOP_NOW",
+            "https://z5",
+            None,
+            None,
+            {},
+            child_asset_urls=["https://img/card5_0", "https://img/card5_1"],
+        ),
+        child_assets=[b"CARD0DATA5", b"CARD1DATA5"],
+    )
+    fake.add_ad(PlatformAd("ad5", "E", "ACTIVE", "as1", "cp1", "c5"))
+    fake.fail_downloads.add("https://img/card5_1")
+
+    await queue.enqueue(db, org_id, "meta.backfill", {"ad_account_id": str(account_id)})
+    await _drain(db, blobs, settings)
+
+    cid = await db.fetchval("SELECT id FROM creative WHERE platform_creative_id='c5'")
+    assert await db.fetchval("SELECT count(*) FROM asset WHERE creative_id=$1", cid) == 1
+    assert await db.fetchval("SELECT primary_asset_id FROM creative WHERE id=$1", cid) is None
+
+    # Simulate the download_carousel job dying after exhausting max_attempts
+    # on card 1, without waiting out the real backoff schedule.
+    await db.execute(
+        "UPDATE job SET status='dead', attempts=max_attempts "
+        "WHERE job_type='meta.download_carousel' AND status='pending'"
+    )
+
+    fake.fail_downloads.discard("https://img/card5_1")
+    await queue.enqueue(db, org_id, "meta.backfill", {"ad_account_id": str(account_id)})
+    await _drain(db, blobs, settings)
+
+    assets = await db.fetch(
+        "SELECT seq, count(*) AS n FROM asset WHERE creative_id=$1 GROUP BY seq ORDER BY seq", cid
+    )
+    assert [(a["seq"], a["n"]) for a in assets] == [(0, 1), (1, 1)]
+    assert await db.fetchval("SELECT primary_asset_id FROM creative WHERE id=$1", cid) is not None
+
+
 async def test_carousel_download_retry_does_not_duplicate_cards(
     db, blobs, settings, org_id, account_id, fake
 ):

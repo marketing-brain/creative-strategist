@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 import httpx
@@ -9,6 +10,8 @@ from cs.jobs.registry import JobContext, handler
 from cs.tagging import runner
 from cs.tagging.tagger import ClaudeTagger, Tagger
 from cs.tagging.video import GatewayTranscriber, Transcriber
+
+log = logging.getLogger("cs.tagging")
 
 
 def default_tagger_factory(settings: Settings) -> Tagger:
@@ -94,20 +97,22 @@ async def batch_submit(ctx: JobContext) -> None:
     if not ids:
         return
     requests, items, started_run_ids = [], [], []
-    try:
-        for cid in ids:
+    for cid in ids:
+        run_id = None
+        try:
             creative = await ingest_repo.get_creative(ctx.db, org_id, cid)
             run_id = await tag_repo.start_tag_run(ctx.db, org_id, cid, tv, model)
             if run_id is None:
                 continue
             started_run_ids.append(run_id)
+            fmt = creative["format"]
             jpeg, _, _ = prepare_image(await ctx.blobs.get(creative["primary_asset_path"]))
             copy = {
                 k: creative[k]
                 for k in ("headline", "primary_text", "description", "cta_type", "link_url")
             }
-            text = user_text(taxonomy, "image", copy, None, None)
-            schema = taxonomy.json_schema("image")
+            text = user_text(taxonomy, fmt, copy, None, None)
+            schema = taxonomy.json_schema(fmt)
             requests.append(
                 {
                     "custom_id": str(run_id),
@@ -117,11 +122,22 @@ async def batch_submit(ctx: JobContext) -> None:
                 }
             )
             items.append((run_id, prompt_sha(SYSTEM, text, schema)))
+        except Exception as exc:
+            # A single corrupt/unreadable creative must not abort the whole
+            # batch (Global Constraint: per-creative failures are isolated).
+            # Only fail the run that was actually started for this creative,
+            # then move on to the next one.
+            log.warning("batch_submit: creative %s failed to prepare: %s", cid, exc)
+            if run_id is not None:
+                await tag_repo.fail_tag_run(ctx.db, org_id, run_id, str(exc))
+            continue
+    if not requests:
+        return
+    try:
         provider_id = await BATCH_FACTORY(ctx.settings).submit(requests)
     except Exception as exc:
-        # Any run already flipped to 'running' above must not be left stuck:
-        # mark it failed so untagged_creative_ids() picks the creative up again
-        # on a future batch_submit, then let the job fail/retry normally.
+        # A submit()-level failure legitimately means the whole batch failed:
+        # every run started above must not be left stuck, so fail them all.
         for run_id in started_run_ids:
             await tag_repo.fail_tag_run(ctx.db, org_id, run_id, str(exc))
         raise
@@ -188,15 +204,19 @@ async def batch_poll(ctx: JobContext) -> None:
     for res in results:
         run_id = UUID(res["custom_id"])
         if res["ok"]:
-            creative_id = await ctx.db.fetchval(
-                "SELECT creative_id FROM tag_run WHERE id=$1", run_id
+            row = await ctx.db.fetchrow(
+                "SELECT tr.creative_id AS creative_id, tr.prompt_sha256 AS prompt_sha256, "
+                "c.format AS format FROM tag_run tr JOIN creative c ON c.id = tr.creative_id "
+                "WHERE tr.id=$1",
+                run_id,
             )
-            sha = await ctx.db.fetchval("SELECT prompt_sha256 FROM tag_run WHERE id=$1", run_id)
+            creative_id = row["creative_id"]
+            sha = row["prompt_sha256"]
             await tag_repo.finish_tag_run(
                 ctx.db,
                 org_id,
                 run_id,
-                taxonomy.validate(res["tags"], "image"),
+                taxonomy.validate(res["tags"], row["format"]),
                 sha or "",
                 res["input_tokens"],
                 res["output_tokens"],

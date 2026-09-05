@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -12,6 +13,8 @@ import httpx
 
 from cs.core.config import Settings
 from cs.tagging.images import prepare_image
+
+log = logging.getLogger("cs.tagging")
 
 FIXED_TIMESTAMPS = (0.0, 1.0, 3.0)
 
@@ -57,6 +60,12 @@ def _scene_timestamps(path: str, threshold: float) -> list[float]:
         capture_output=True,
         text=True,
     )
+    if proc.returncode != 0:
+        # Graceful degradation: a failed scene-detection pass shouldn't kill
+        # the whole tagging job when the FIXED_TIMESTAMPS frames are still
+        # usable -- but it should not fail silently either.
+        log.warning("ffmpeg scene detection failed: %s", proc.stderr[-500:])
+        return []
     out: list[float] = []
     for line in proc.stderr.splitlines():
         if "showinfo" in line and "pts_time:" in line:

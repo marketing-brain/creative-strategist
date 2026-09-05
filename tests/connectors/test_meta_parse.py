@@ -45,3 +45,10 @@ def test_creative_carousel_extracts_card_urls():
         "https://scontent.example/card1.jpg",
         "https://scontent.example/card2.jpg",
     ]
+
+
+def test_creative_dynamic_carousel_falls_back_to_top_level_image():
+    c = parse.creative_from_graph(json.loads((FX / "creative_carousel_dynamic.json").read_text()))
+    assert c.format == "carousel"
+    assert c.child_asset_urls is None
+    assert c.asset_url == "https://scontent.example/dyn_cover.jpg"

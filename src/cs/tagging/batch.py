@@ -17,7 +17,7 @@ class BatchTagger(Protocol):
 
 class ClaudeBatchTagger:
     def __init__(self, settings: Settings, client: anthropic.AsyncAnthropic | None = None):
-        self.client = client or anthropic.AsyncAnthropic()
+        self.client = client or anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key or None)
         self.model = settings.claude_model_tagging
 
     async def submit(self, requests: list[dict]) -> str:

@@ -1,7 +1,7 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from cs.api.auth import AuthContext, current_auth, require_admin
 from cs.api.deps import get_db
@@ -15,7 +15,7 @@ router = APIRouter()
 
 
 class BackfillBody(BaseModel):
-    limit: int = 500
+    limit: int = Field(500, ge=1, le=5000)
 
 
 @router.get("/creatives/{creative_id}/tags")
@@ -33,11 +33,13 @@ async def creative_tags(
 @router.get("/creatives/{creative_id}/similar")
 async def similar(
     creative_id: UUID,
-    k: int = 10,
+    k: int = Query(10, ge=1, le=50),
     auth: AuthContext = Depends(current_auth),
     db: Database = Depends(get_db),
 ) -> list[dict]:
-    rows = await repo.similar_creatives(db, auth.org_id, creative_id, min(k, 50))
+    if not await ingest_repo.get_creative(db, auth.org_id, creative_id):
+        raise HTTPException(404)
+    rows = await repo.similar_creatives(db, auth.org_id, creative_id, k)
     return [{**dict(r), "id": str(r["id"]), "distance": float(r["distance"])} for r in rows]
 
 

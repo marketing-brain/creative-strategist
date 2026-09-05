@@ -195,6 +195,16 @@ async def creative_has_asset(db: Database, org_id: UUID, creative_id: UUID, kind
     )
 
 
+async def creative_has_primary_asset(db: Database, org_id: UUID, creative_id: UUID) -> bool:
+    return bool(
+        await db.fetchval(
+            "SELECT 1 FROM creative WHERE org_id=$1 AND id=$2 AND primary_asset_id IS NOT NULL",
+            org_id,
+            creative_id,
+        )
+    )
+
+
 async def get_asset_by_seq(
     db: Database, org_id: UUID, creative_id: UUID, kind: str, seq: int
 ) -> asyncpg.Record | None:

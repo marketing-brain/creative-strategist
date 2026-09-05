@@ -85,7 +85,7 @@ async def sync_account(
             await repo.upsert_ad(ctx.db, org_id, acct_id, ad, creative_id)
             kind = "original_video" if c.format == "video" else "original_image"
             if c.format == "carousel" and c.child_asset_urls:
-                if not await repo.creative_has_asset(ctx.db, org_id, creative_id, "original_image"):
+                if not await repo.creative_has_primary_asset(ctx.db, org_id, creative_id):
                     await queue.enqueue(
                         ctx.db,
                         org_id,

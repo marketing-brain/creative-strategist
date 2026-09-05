@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from cs.connectors.base import PlatformCreative
 from cs.core.crypto import encrypt_str
 from cs.ingest import repo as ingest_repo
@@ -52,3 +54,25 @@ async def test_tags_endpoints(client, db, settings):
     )
     r = await client.get(f"/creatives/{cid}/similar", headers=H)
     assert r.status_code == 200 and r.json() == []
+
+
+async def test_similar_404_on_nonexistent_creative(client, db, settings):
+    await _seed(client, db, settings)
+    r = await client.get(f"/creatives/{uuid4()}/similar", headers=H)
+    assert r.status_code == 404
+
+
+async def test_similar_rejects_out_of_range_k(client, db, settings):
+    cid = await _seed(client, db, settings)
+    r = await client.get(f"/creatives/{cid}/similar?k=-1", headers=H)
+    assert r.status_code == 422
+    r = await client.get(f"/creatives/{cid}/similar?k=0", headers=H)
+    assert r.status_code == 422
+
+
+async def test_backfill_rejects_out_of_range_limit(client, db, settings):
+    await _seed(client, db, settings)
+    r = await client.post("/tagging/backfill", headers=H, json={"limit": -1})
+    assert r.status_code == 422
+    r = await client.post("/tagging/backfill", headers=H, json={"limit": 0})
+    assert r.status_code == 422

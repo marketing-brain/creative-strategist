@@ -48,7 +48,11 @@ def creative_from_graph(obj: dict) -> PlatformCreative:
 
     cta = link.get("call_to_action") or video.get("call_to_action") or {}
     link_url = link.get("link") or (cta.get("value") or {}).get("link") or obj.get("link_url")
-    asset_url = None if fmt in ("video", "carousel") else obj.get("image_url")
+    card_urls = _carousel_card_urls(link) if fmt == "carousel" else None
+    if fmt == "video" or (fmt == "carousel" and card_urls):
+        asset_url = None
+    else:
+        asset_url = obj.get("image_url")
     return PlatformCreative(
         platform_creative_id=str(obj["id"]),
         format=fmt,
@@ -59,7 +63,7 @@ def creative_from_graph(obj: dict) -> PlatformCreative:
         link_url=link_url,
         asset_url=asset_url,
         asset_mime="image/jpeg" if asset_url else None,
-        child_asset_urls=_carousel_card_urls(link) if fmt == "carousel" else None,
+        child_asset_urls=card_urls,
         raw={
             "video_id": obj.get("video_id") or video.get("video_id"),
             "thumbnail_url": obj.get("thumbnail_url"),

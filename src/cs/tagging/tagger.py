@@ -49,7 +49,7 @@ class ClaudeTagger:
         client: anthropic.AsyncAnthropic | None = None,
         model: str | None = None,
     ):
-        self.client = client or anthropic.AsyncAnthropic()
+        self.client = client or anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key or None)
         self.model = model or settings.claude_model_tagging
 
     async def tag(self, images: list[tuple[bytes, str]], user_text: str, schema: dict) -> TagResult:
