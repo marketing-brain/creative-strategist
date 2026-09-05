@@ -1,4 +1,4 @@
-.PHONY: install up down migrate migrate-test test lint dev api worker scheduler
+.PHONY: install up down migrate migrate-test test lint dev api worker scheduler evals
 
 install:
 	uv sync --extra dev
@@ -29,3 +29,6 @@ worker:
 
 scheduler:
 	uv run python -m cs.scheduler
+
+evals:
+	uv run python scripts/eval_tagging.py --min-agreement 0.7

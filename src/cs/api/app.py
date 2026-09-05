@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from cs.api.routers import accounts, blobs, creatives, health, meta_oauth
+from cs.api.routers import accounts, blobs, creatives, health, meta_oauth, tags
 from cs.core.blobs import BlobStore
 from cs.core.config import Settings
 from cs.core.db import Database
@@ -16,4 +16,5 @@ def create_app(settings: Settings, db: Database, blobs_store: BlobStore) -> Fast
     app.include_router(meta_oauth.router)
     app.include_router(accounts.router)
     app.include_router(creatives.router)
+    app.include_router(tags.router)
     return app
