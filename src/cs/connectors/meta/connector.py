@@ -80,10 +80,55 @@ class MetaConnector:
         return [parse.metric_from_insight(r) for r in rows]
 
     async def upload_image(self, account_id: str, data: bytes, name: str) -> str:
-        raise NotImplementedError("Phase 4")
+        res = await self.client.post(
+            f"act_{account_id}/adimages", files={"filename": (name, data, "image/jpeg")}
+        )
+        return next(iter(res["images"].values()))["hash"]
 
     async def upload_video(self, account_id: str, data: bytes, name: str) -> str:
-        raise NotImplementedError("Phase 4")
+        res = await self.client.post(
+            f"act_{account_id}/advideos", files={"source": (name, data, "video/mp4")}
+        )
+        return res["id"]
 
     async def create_ad(self, account_id, adset_id, name, creative_spec, status) -> tuple[str, str]:
-        raise NotImplementedError("Phase 4")
+        cr = await self.client.post(
+            f"act_{account_id}/adcreatives",
+            data={
+                "name": name,
+                **{
+                    k: json.dumps(v) if isinstance(v, dict) else v
+                    for k, v in creative_spec.items()
+                },
+            },
+        )
+        ad = await self.client.post(
+            f"act_{account_id}/ads",
+            data={
+                "name": name,
+                "adset_id": adset_id,
+                "status": status,
+                "creative": json.dumps({"creative_id": cr["id"]}),
+            },
+        )
+        return cr["id"], ad["id"]
+
+    async def list_campaigns(self, account_id: str) -> list[dict]:
+        rows = await self.client.get_all(
+            f"act_{account_id}/campaigns", {"fields": "id,name,status", "limit": 200}
+        )
+        return [{"id": r["id"], "name": r.get("name", ""), "status": r.get("status", "")} for r in rows]
+
+    async def list_adsets(self, account_id: str, campaign_id: str) -> list[dict]:
+        rows = await self.client.get_all(
+            f"{campaign_id}/adsets", {"fields": "id,name,status,campaign_id", "limit": 200}
+        )
+        return [
+            {
+                "id": r["id"],
+                "name": r.get("name", ""),
+                "status": r.get("status", ""),
+                "campaign_id": r.get("campaign_id"),
+            }
+            for r in rows
+        ]

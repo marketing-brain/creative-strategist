@@ -83,3 +83,21 @@ class GraphClient:
             if not nxt:
                 return out
             page = await self.get(path, url=nxt)
+
+    async def post(self, path: str, data: dict | None = None, files: dict | None = None) -> dict:
+        payload = {**(data or {}), "access_token": self.token}
+        for attempt in range(6):
+            resp = await self.http.post(f"{self.base}/{path}", data=payload, files=files, timeout=300)
+            if resp.status_code == 200:
+                return resp.json()
+            body = (
+                resp.json()
+                if resp.headers.get("content-type", "").startswith("application/json")
+                else {}
+            )
+            code = (body.get("error") or {}).get("code")
+            if resp.status_code == 429 or code in RETRYABLE_CODES:
+                await asyncio.sleep(self._backoff_seconds(resp, attempt))
+                continue
+            raise GraphError(f"{resp.status_code} POST {path}: {body.get('error') or resp.text[:200]}")
+        raise GraphError(f"rate limit retries exhausted for POST {path}")

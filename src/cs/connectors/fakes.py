@@ -71,3 +71,9 @@ class FakeConnector:
             }
         )
         return f"cr_new_{n}", f"ad_new_{n}"
+
+    async def list_campaigns(self, account_id: str) -> list[dict]:
+        return [{"id": "c1", "name": "Campaign 1", "status": "ACTIVE"}]
+
+    async def list_adsets(self, account_id: str, campaign_id: str) -> list[dict]:
+        return [{"id": "as1", "name": "Ad set 1", "status": "ACTIVE", "campaign_id": campaign_id}]

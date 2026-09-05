@@ -82,6 +82,17 @@ async def sync_account(
                 )
             creative_id, created = await repo.upsert_creative(ctx.db, org_id, acct_id, c, raw_key)
             new_creatives += int(created)
+            if created:
+                ga = await ctx.db.fetchval(
+                    "SELECT generated_asset_id FROM publish_job WHERE org_id=$1 AND platform_creative_id=$2 "
+                    "AND status='done' LIMIT 1",
+                    org_id,
+                    c.platform_creative_id,
+                )
+                if ga:
+                    await ctx.db.execute(
+                        "UPDATE creative SET generated_asset_id=$2 WHERE id=$1", creative_id, ga
+                    )
             await repo.upsert_ad(ctx.db, org_id, acct_id, ad, creative_id)
             kind = "original_video" if c.format == "video" else "original_image"
             if c.format == "carousel" and c.child_asset_urls:
