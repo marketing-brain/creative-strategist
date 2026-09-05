@@ -25,6 +25,8 @@
 ## File structure
 
 ```
+src/cs/tagging/reconcile.py          # reenqueue_untagged(db) -> int (Task 2: Phase 1 tagging debt)
+scripts/reenqueue_tagging.py         # CLI wrapper for reconcile.reenqueue_untagged
 db/migrations/20260904000004_tagging.sql
 src/cs/tagging/__init__.py
 src/cs/tagging/taxonomy.yaml         # the taxonomy (versioned by content hash)
@@ -41,7 +43,7 @@ src/cs/tagging/runner.py             # tag_creative(ctx, creative_id, tagger, tr
 src/cs/tagging/jobs.py               # tagging.tag_creative, tagging.embed_creative, tagging.batch_submit, tagging.batch_poll
 src/cs/api/routers/tags.py           # /creatives/{id}/tags, /tags/dimensions, /creatives/{id}/retag, /creatives/{id}/similar
 scripts/eval_tagging.py              # agreement vs tests/evals/labeled.jsonl (real API, opt-in)
-tests/evals/labeled.jsonl            # hand-labeled creatives from the real account (Task 7)
+tests/evals/labeled.jsonl            # hand-labeled creatives from the real account (Task 8)
 tests/tagging/...
 ```
 
@@ -454,7 +456,338 @@ git commit -m "feat(tagging): taxonomy v1.0, schema compilation, and tagging tab
 
 ---
 
-### Task 2: Image preparation, prompts, and the Tagger protocol with Claude implementation
+### Task 2: Reconcile Phase 1 tagging debt — carousel card downloads and dead-job re-enqueue
+
+**Context:** Per `docs/superpowers/plans/README.md`'s Phase 1 follow-ups: every `tagging.tag_creative`
+job Phase 1 enqueued has no handler yet and dead-letters after 5 attempts, and carousel creatives get
+the `carousel` format label but no asset download, so they are never tagged. This task closes both
+gaps before any tagging logic is built, so the moment Task 5 registers the `tagging.tag_creative`
+handler, every eligible creative — including carousels — already has a path to a tag run.
+
+**Files:**
+- Modify: `src/cs/connectors/base.py`, `src/cs/connectors/meta/parse.py`, `src/cs/connectors/fakes.py`, `src/cs/ingest/service.py`, `src/cs/ingest/jobs.py`
+- Create: `tests/fixtures/meta/creative_carousel.json`, `src/cs/tagging/reconcile.py`, `scripts/reenqueue_tagging.py`
+- Test: extend `tests/connectors/test_meta_parse.py`, extend `tests/ingest/test_jobs.py`, new `tests/tagging/test_reconcile.py`
+
+**Interfaces:**
+- `PlatformCreative.child_asset_urls: list[str] | None = None` (new field, default `None` so every
+  existing positional construction across Phase 1 tests keeps working).
+- `parse.creative_from_graph` sets `child_asset_urls` from `object_story_spec.link_data.child_attachments[].picture`
+  when `format == "carousel"`; `asset_url` becomes `None` for both `video` and `carousel` (carousels
+  never carry one usable top-level image).
+- `service.download_carousel(ctx, connector, creative_id, asset_urls) -> None`: downloads each card,
+  stores it as an `original_image` asset with `seq=i`, sets the primary asset to card 0, and enqueues
+  `tagging.tag_creative` — mirroring `download_creative`. Because the primary asset then points at a
+  normal `original_image` row, the Task 5 runner tags carousels exactly like single images with zero
+  changes to its code.
+- Job `meta.download_carousel` payload `{"creative_id", "asset_urls"}`, dedup key `str(creative_id)`.
+- `cs.tagging.reconcile.reenqueue_untagged(db) -> int`: finds every creative with a `primary_asset_id`
+  and no `done` `tag_run`, re-enqueues `tagging.tag_creative` (dedup key `f"tag:{creative_id}"`, so
+  it's a no-op against a job that's already pending/running and a fresh row against one that has gone
+  `dead`), returns the count enqueued.
+
+- [ ] **Step 1: Write failing tests**
+
+`tests/fixtures/meta/creative_carousel.json`:
+
+```json
+{"id": "5003", "name": "Carousel C",
+ "object_story_spec": {"link_data": {"message": "Swipe to see more", "link": "https://example.com/c",
+   "call_to_action": {"type": "SHOP_NOW"},
+   "child_attachments": [
+     {"link": "https://example.com/c1", "name": "Card 1", "picture": "https://scontent.example/card1.jpg"},
+     {"link": "https://example.com/c2", "name": "Card 2", "picture": "https://scontent.example/card2.jpg"}
+   ]}}}
+```
+
+Append to `tests/connectors/test_meta_parse.py`:
+
+```python
+def test_creative_carousel_extracts_card_urls():
+    c = parse.creative_from_graph(json.loads((FX / "creative_carousel.json").read_text()))
+    assert c.format == "carousel" and c.asset_url is None
+    assert c.child_asset_urls == [
+        "https://scontent.example/card1.jpg", "https://scontent.example/card2.jpg"]
+```
+
+Append to `tests/ingest/test_jobs.py`:
+
+```python
+async def test_backfill_downloads_carousel_cards_and_sets_primary(db, blobs, settings, org_id, account_id, fake):
+    fake.add_creative(
+        PlatformCreative("c3", "carousel", "Swipe", "P3", None, "SHOP_NOW", "https://z", None, None, {},
+                         child_asset_urls=["https://img/card0", "https://img/card1"]),
+        child_assets=[b"CARD0DATA", b"CARD1DATA"],
+    )
+    fake.add_ad(PlatformAd("ad3", "C", "ACTIVE", "as1", "cp1", "c3"))
+    await queue.enqueue(db, org_id, "meta.backfill", {"ad_account_id": str(account_id)})
+    await _drain(db, blobs, settings)
+    cid = await db.fetchval("SELECT id FROM creative WHERE platform_creative_id='c3'")
+    assets = await db.fetch("SELECT kind, seq FROM asset WHERE creative_id=$1 ORDER BY seq", cid)
+    assert [(a["kind"], a["seq"]) for a in assets] == [("original_image", 0), ("original_image", 1)]
+    primary_path = await db.fetchval(
+        "SELECT a.path FROM creative c JOIN asset a ON a.id = c.primary_asset_id WHERE c.id=$1", cid)
+    assert primary_path is not None and "card_00" in primary_path
+```
+
+`tests/tagging/test_reconcile.py`:
+
+```python
+import io
+
+import pytest
+from PIL import Image
+
+from cs.connectors.base import PlatformCreative
+from cs.core import queue
+from cs.core.crypto import encrypt_str
+from cs.core.ids import new_id
+from cs.ingest import repo as ingest_repo
+from cs.tagging.reconcile import reenqueue_untagged
+
+
+def _png() -> bytes:
+    b = io.BytesIO()
+    Image.new("RGB", (16, 16)).save(b, format="PNG")
+    return b.getvalue()
+
+
+@pytest.fixture
+async def untagged_and_tagged(db, org_id, settings, blobs):
+    acct = await ingest_repo.upsert_ad_account(db, org_id, "1", "M", "USD", encrypt_str(settings, "t"), None)
+    ids = []
+    for n in ("c1", "c2"):
+        cid, _ = await ingest_repo.upsert_creative(
+            db, org_id, acct, PlatformCreative(n, "image", "H", "P", None, None, "u", None, None, {}), "raw")
+        key = f"{org_id}/creatives/{cid}/original.png"
+        await blobs.put(key, _png(), "image/png")
+        aid = await ingest_repo.insert_asset(db, org_id, cid, "original_image", key, "sha", "image/png")
+        await ingest_repo.set_primary_asset(db, org_id, cid, aid)
+        ids.append(cid)
+    tv_id = new_id()
+    await db.execute("INSERT INTO taxonomy_version (id, version, yaml_sha256) VALUES ($1, '1.0', 'sha-x')", tv_id)
+    await db.execute(
+        "INSERT INTO tag_run (id, org_id, creative_id, taxonomy_version_id, model, status) "
+        "VALUES ($1,$2,$3,$4,'fake','done')", new_id(), org_id, ids[1], tv_id)
+    return ids  # (untagged, tagged)
+
+
+async def test_reenqueues_only_creatives_without_a_done_run(db, untagged_and_tagged):
+    untagged, _tagged = untagged_and_tagged
+    n = await reenqueue_untagged(db)
+    assert n == 1
+    job = await db.fetchrow("SELECT job_type, payload FROM job")
+    assert job["job_type"] == "tagging.tag_creative" and job["payload"]["creative_id"] == str(untagged)
+
+
+async def test_reenqueue_is_a_noop_against_a_pending_job(db, untagged_and_tagged):
+    await reenqueue_untagged(db)
+    n = await reenqueue_untagged(db)
+    assert n == 0
+    assert await db.fetchval("SELECT count(*) FROM job") == 1
+
+
+async def test_reenqueue_revives_a_dead_lettered_job(db, org_id, untagged_and_tagged):
+    untagged, _tagged = untagged_and_tagged
+    await queue.enqueue(db, org_id, "tagging.tag_creative", {"creative_id": str(untagged)},
+                        dedup_key=f"tag:{untagged}")
+    await db.execute("UPDATE job SET status='dead' WHERE job_type='tagging.tag_creative'")
+    n = await reenqueue_untagged(db)
+    assert n == 1
+    assert await db.fetchval("SELECT count(*) FROM job WHERE status='pending'") == 1
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `uv run pytest tests/connectors/test_meta_parse.py tests/ingest/test_jobs.py tests/tagging/test_reconcile.py -v`
+Expected: FAIL (`child_asset_urls` unexpected kwarg / `ModuleNotFoundError: cs.tagging.reconcile`)
+
+- [ ] **Step 3: Implement carousel parsing**
+
+Modify `src/cs/connectors/base.py` — add to `PlatformCreative`, after the `raw` field:
+
+```python
+    child_asset_urls: list[str] | None = None
+```
+
+Modify `src/cs/connectors/meta/parse.py` — add a helper and wire it into `creative_from_graph`:
+
+```python
+def _carousel_card_urls(link: dict) -> list[str] | None:
+    cards = link.get("child_attachments") or []
+    urls = [c["picture"] for c in cards if c.get("picture")]
+    return urls or None
+```
+
+Change the `asset_url` line to `asset_url = None if fmt in ("video", "carousel") else obj.get("image_url")`,
+and add `child_asset_urls=_carousel_card_urls(link) if fmt == "carousel" else None` to the returned
+`PlatformCreative(...)`.
+
+- [ ] **Step 4: Implement carousel download**
+
+Modify `src/cs/connectors/fakes.py` — extend `add_creative`:
+
+```python
+    def add_creative(self, c: PlatformCreative, asset_bytes: bytes | None = None,
+                      child_assets: list[bytes] | None = None) -> None:
+        self.creatives[c.platform_creative_id] = c
+        if asset_bytes is not None and c.asset_url:
+            self.assets[c.asset_url] = (asset_bytes, c.asset_mime or "application/octet-stream")
+        if child_assets and c.child_asset_urls:
+            for url, data in zip(c.child_asset_urls, child_assets):
+                self.assets[url] = (data, "image/jpeg")
+```
+
+Modify `src/cs/ingest/service.py` — in `sync_account`, replace the single asset-download block with:
+
+```python
+            kind = "original_video" if c.format == "video" else "original_image"
+            if c.format == "carousel" and c.child_asset_urls:
+                if not await repo.creative_has_asset(ctx.db, org_id, creative_id, "original_image"):
+                    await queue.enqueue(
+                        ctx.db, org_id, "meta.download_carousel",
+                        {"creative_id": str(creative_id), "asset_urls": c.child_asset_urls},
+                        dedup_key=str(creative_id),
+                    )
+            elif c.asset_url and not await repo.creative_has_asset(ctx.db, org_id, creative_id, kind):
+                await queue.enqueue(
+                    ctx.db, org_id, "meta.download_creative",
+                    {"creative_id": str(creative_id), "asset_url": c.asset_url, "kind": kind},
+                    dedup_key=str(creative_id),
+                )
+```
+
+and add, alongside `download_creative`:
+
+```python
+async def download_carousel(
+    ctx: JobContext, connector: AdPlatformConnector, creative_id: UUID, asset_urls: list[str]
+) -> None:
+    org_id = ctx.job.org_id
+    primary_id = None
+    for i, url in enumerate(asset_urls):
+        data, mime = await connector.download_asset(url)
+        ext = {"image/png": "png", "image/jpeg": "jpg"}.get(mime, "jpg")
+        key = f"{org_id}/creatives/{creative_id}/card_{i:02d}.{ext}"
+        await ctx.blobs.put(key, data, mime)
+        asset_id = await repo.insert_asset(
+            ctx.db, org_id, creative_id, "original_image", key, sha256_hex(data), mime, seq=i
+        )
+        if i == 0:
+            primary_id = asset_id
+    if primary_id is not None:
+        await repo.set_primary_asset(ctx.db, org_id, creative_id, primary_id)
+        await queue.enqueue(
+            ctx.db, org_id, "tagging.tag_creative", {"creative_id": str(creative_id)},
+            dedup_key=f"tag:{creative_id}",
+        )
+```
+
+Modify `src/cs/ingest/jobs.py` — add:
+
+```python
+@handler("meta.download_carousel")
+async def download_carousel(ctx: JobContext) -> None:
+    p = ctx.job.payload
+    creative_id = UUID(p["creative_id"])
+    acct = await ctx.db.fetchrow(
+        "SELECT a.* FROM ad_account a JOIN creative c ON c.ad_account_id = a.id "
+        "WHERE c.id = $1 AND c.org_id = $2",
+        creative_id,
+        ctx.job.org_id,
+    )
+    if acct is None:
+        raise RuntimeError("ad_account not found for creative")
+    async with httpx.AsyncClient(timeout=120) as http:
+        connector = service.CONNECTOR_FACTORY(ctx.settings, acct, http, ctx.blobs)
+        await service.download_carousel(ctx, connector, creative_id, p["asset_urls"])
+    log.info(
+        "carousel downloaded",
+        extra={"creative_id": str(creative_id), "cards": len(p["asset_urls"])},
+    )
+```
+
+- [ ] **Step 5: Implement the re-enqueue reconciliation**
+
+`src/cs/tagging/reconcile.py`:
+
+```python
+from __future__ import annotations
+
+from cs.core import queue
+from cs.core.db import Database
+
+
+async def reenqueue_untagged(db: Database) -> int:
+    """Re-enqueue tagging for every creative with a primary asset and no
+    completed tag_run. Idempotent: enqueue() no-ops against a job that is
+    already pending/running under the same dedup key, and inserts a fresh
+    pending row for one that has gone 'dead'."""
+    rows = await db.fetch(
+        """
+        SELECT c.id, c.org_id FROM creative c
+        WHERE c.primary_asset_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM tag_run r WHERE r.creative_id = c.id AND r.status = 'done')
+        """
+    )
+    n = 0
+    for r in rows:
+        jid = await queue.enqueue(
+            db, r["org_id"], "tagging.tag_creative", {"creative_id": str(r["id"])},
+            dedup_key=f"tag:{r['id']}",
+        )
+        n += int(jid is not None)
+    return n
+```
+
+`scripts/reenqueue_tagging.py`:
+
+```python
+"""Re-enqueue tagging for creatives Phase 1 left behind: their
+tagging.tag_creative job dead-lettered before this phase's handler existed,
+or (for carousels) they had no asset to tag at all until Task 2 added
+carousel card downloads.
+
+Usage: uv run python scripts/reenqueue_tagging.py
+"""
+import asyncio
+
+from cs.core.config import get_settings
+from cs.core.db import Database
+from cs.tagging.reconcile import reenqueue_untagged
+
+
+async def main() -> None:
+    settings = get_settings()
+    db = await Database.connect(settings.database_url)
+    try:
+        n = await reenqueue_untagged(db)
+        print(f"re-enqueued {n} tagging job(s)")
+    finally:
+        await db.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+- [ ] **Step 6: Run tests to verify they pass**
+
+Run: `uv run pytest tests/connectors tests/ingest tests/tagging -v`
+Expected: PASS
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/cs/connectors src/cs/ingest src/cs/tagging/reconcile.py scripts/reenqueue_tagging.py \
+        tests/connectors/test_meta_parse.py tests/fixtures/meta/creative_carousel.json \
+        tests/ingest/test_jobs.py tests/tagging/test_reconcile.py
+git commit -m "fix(tagging): carousel card downloads and re-enqueue Phase 1's orphaned tagging jobs"
+```
+
+---
+
+### Task 3: Image preparation, prompts, and the Tagger protocol with Claude implementation
 
 **Files:**
 - Create: `src/cs/tagging/images.py`, `src/cs/tagging/prompts.py`, `src/cs/tagging/tagger.py`, `src/cs/tagging/fakes.py`
@@ -786,7 +1119,7 @@ git commit -m "feat(tagging): image prep, prompts, Claude tagger with structured
 
 ---
 
-### Task 3: Video keyframes, audio, and transcription
+### Task 4: Video keyframes, audio, and transcription
 
 **Files:**
 - Create: `src/cs/tagging/video.py`
@@ -989,7 +1322,7 @@ git commit -m "feat(tagging): ffmpeg keyframes and audio extraction, gateway tra
 
 ---
 
-### Task 4: Tagging repository, runner, and job
+### Task 5: Tagging repository, runner, and job
 
 **Files:**
 - Create: `src/cs/tagging/repo.py`, `src/cs/tagging/runner.py`, `src/cs/tagging/jobs.py`
@@ -1306,7 +1639,7 @@ git commit -m "feat(tagging): tag runner with idempotent runs, video inputs, and
 
 ---
 
-### Task 5: Embeddings and similarity
+### Task 6: Embeddings and similarity
 
 **Files:**
 - Create: `src/cs/tagging/embed.py`
@@ -1499,7 +1832,7 @@ git commit -m "feat(tagging): gateway embeddings and pgvector similarity"
 
 ---
 
-### Task 6: Batch backfill through the Message Batches API
+### Task 7: Batch backfill through the Message Batches API
 
 **Files:**
 - Create: `src/cs/tagging/batch.py`
@@ -1512,7 +1845,7 @@ git commit -m "feat(tagging): gateway embeddings and pgvector similarity"
 - `ClaudeBatchTagger(settings, client=None)` using `client.messages.batches.create/retrieve/results` (no `fallbacks`, no `betas`).
 - repo: `untagged_creative_ids(db, org_id, taxonomy_version_id, model, limit) -> list[UUID]` (creatives with a primary asset and no `done` run).
 - Jobs: `tagging.batch_submit` payload `{"ad_account_id"?: str, "limit": int}` — prepares inputs for up to `limit` untagged creatives (image only in batches; videos still go through `tagging.tag_creative` because of the per-creative ffmpeg work), creates `running` tag runs, submits, records `tag_batch`, enqueues `tagging.batch_poll` with `run_after = now + 60s`. `tagging.batch_poll` payload `{"tag_batch_id"}` — polls; if not ended, re-enqueues itself in 120s; if ended, finishes/fails each run and enqueues embeddings.
-- API trigger (Task 7): `POST /tagging/backfill`.
+- API trigger (Task 8): `POST /tagging/backfill`.
 
 - [ ] **Step 1: Migration**
 
@@ -1803,7 +2136,7 @@ git commit -m "feat(tagging): message batches backfill with submit/poll jobs"
 
 ---
 
-### Task 7: Tags API, backfill trigger, and eval harness
+### Task 8: Tags API, backfill trigger, and eval harness
 
 **Files:**
 - Create: `src/cs/api/routers/tags.py`, `scripts/eval_tagging.py`, `tests/evals/README.md`, `tests/evals/labeled.jsonl` (seed with 0 rows; filled by hand from the real account)
@@ -2021,6 +2354,6 @@ git commit -m "feat(tagging): tags API, batch backfill trigger, and eval harness
 
 ## Self-review
 
-- **Spec coverage:** taxonomy ~40 dimensions with groups incl. video-only → Task 1 (33 dims, within the "around 40" spec language). Image single-call structured output → Task 2. Video keyframes 0/1/3s + scene change cap 24 + transcript → Task 3. Model default, adaptive thinking, refusal fallback, structured outputs → Task 2. Batches for backfills >50 → Task 6 (the threshold is the API caller's `limit`; the UI in Phase 5 triggers batch backfill only when the untagged count exceeds 50). Idempotency on `(creative, taxonomy, model)` → Task 4. Embeddings + similarity → Task 5. Evals on ~50 labeled creatives → Task 7.
+- **Spec coverage:** Phase 1's dead-lettered `tagging.tag_creative` jobs and carousels' missing assets (README Phase 1 follow-ups) → Task 2. taxonomy ~40 dimensions with groups incl. video-only → Task 1 (33 dims, within the "around 40" spec language). Image single-call structured output → Task 3. Video keyframes 0/1/3s + scene change cap 24 + transcript → Task 4. Model default, adaptive thinking, refusal fallback, structured outputs → Task 3. Batches for backfills >50 → Task 7 (the threshold is the API caller's `limit`; the UI in Phase 5 triggers batch backfill only when the untagged count exceeds 50). Idempotency on `(creative, taxonomy, model)` → Task 5. Embeddings + similarity → Task 6. Evals on ~50 labeled creatives → Task 8.
 - **Placeholder scan:** none. `labeled.jsonl` is intentionally empty until the real account is labeled; the harness handles zero rows.
 - **Type consistency:** `TagResult` fields, `Tagger.tag(images, user_text, schema)`, `FakeTagger.calls[i]["n_images"|"user_text"]`, seams `TAGGER_FACTORY(settings)`, `TRANSCRIBER_FACTORY(settings, http)`, `EMBEDDER_FACTORY(settings, http)`, `BATCH_FACTORY(settings)` are used with those exact signatures in tests and jobs. Job payload keys: `creative_id`, `limit`, `tag_batch_id`.
