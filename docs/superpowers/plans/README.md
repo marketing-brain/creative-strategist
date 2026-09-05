@@ -79,3 +79,4 @@ Shared conventions for every phase:
 - `dbmate` binary is at `~/.local/bin/dbmate` (tests resolve it via `shutil.which` or that path).
 - A Homebrew install of `postgresql@16 pgvector dbmate` finished on 2026-09-05 (it took hours on this macOS). It is not started; the pgserver instance above remains the one in use. Do not run both on 5432.
 - `.env` exists (gitignored) with `AUTH_MODE=dev` and 127.0.0.1 database URLs. Meta app credentials (`META_APP_ID`, `META_APP_SECRET`) are not set yet; Phase 1 tests do not need them.
+- Homebrew ffmpeg 8.1 installed but built without `libfreetype`/`libfontconfig` support — the `drawtext` filter is not available. Phase 4's `test_video_with_end_card_extends_duration` is skipped here and should run fine in CI or on a machine with a full ffmpeg build.

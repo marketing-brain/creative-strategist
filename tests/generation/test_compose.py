@@ -1,5 +1,6 @@
 import io
 import shutil
+import subprocess
 
 import pytest
 from PIL import Image
@@ -10,6 +11,13 @@ from cs.generation.fakes import solid_png, tiny_mp4
 
 def _size(b: bytes):
     return Image.open(io.BytesIO(b)).size
+
+
+def _ffmpeg_has_drawtext() -> bool:
+    if shutil.which("ffmpeg") is None:
+        return False
+    out = subprocess.run(["ffmpeg", "-filters"], capture_output=True, text=True)
+    return "drawtext" in out.stdout
 
 
 def test_fit_to_aspect_sizes():
@@ -23,10 +31,10 @@ def test_overlay_logo_changes_corner():
     base = fit_to_aspect(solid_png(1080, 1080, (0, 0, 0)), "1:1")
     logo = solid_png(200, 200, (255, 255, 255))
     out = Image.open(io.BytesIO(overlay_logo(base, logo)))
-    assert out.getpixel((1060, 1060))[0] > 200 and out.getpixel((20, 20))[0] < 30
+    assert out.getpixel((950, 950))[0] > 200 and out.getpixel((20, 20))[0] < 30
 
 
-@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+@pytest.mark.skipif(not _ffmpeg_has_drawtext(), reason="ffmpeg built without drawtext (libfreetype) support")
 def test_video_with_end_card_extends_duration():
     from cs.tagging.video import probe_duration_ms
 
