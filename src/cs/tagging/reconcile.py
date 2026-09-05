@@ -19,7 +19,10 @@ async def reenqueue_untagged(db: Database) -> int:
     n = 0
     for r in rows:
         jid = await queue.enqueue(
-            db, r["org_id"], "tagging.tag_creative", {"creative_id": str(r["id"])},
+            db,
+            r["org_id"],
+            "tagging.tag_creative",
+            {"creative_id": str(r["id"])},
             dedup_key=f"tag:{r['id']}",
         )
         n += int(jid is not None)

@@ -87,11 +87,15 @@ async def sync_account(
             if c.format == "carousel" and c.child_asset_urls:
                 if not await repo.creative_has_asset(ctx.db, org_id, creative_id, "original_image"):
                     await queue.enqueue(
-                        ctx.db, org_id, "meta.download_carousel",
+                        ctx.db,
+                        org_id,
+                        "meta.download_carousel",
                         {"creative_id": str(creative_id), "asset_urls": c.child_asset_urls},
                         dedup_key=str(creative_id),
                     )
-            elif c.asset_url and not await repo.creative_has_asset(ctx.db, org_id, creative_id, kind):
+            elif c.asset_url and not await repo.creative_has_asset(
+                ctx.db, org_id, creative_id, kind
+            ):
                 await queue.enqueue(
                     ctx.db,
                     org_id,
@@ -172,7 +176,10 @@ async def download_carousel(
     if primary_id is not None:
         await repo.set_primary_asset(ctx.db, org_id, creative_id, primary_id)
         await queue.enqueue(
-            ctx.db, org_id, "tagging.tag_creative", {"creative_id": str(creative_id)},
+            ctx.db,
+            org_id,
+            "tagging.tag_creative",
+            {"creative_id": str(creative_id)},
             dedup_key=f"tag:{creative_id}",
         )
 

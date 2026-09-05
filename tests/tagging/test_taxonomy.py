@@ -19,12 +19,23 @@ def test_json_schema_shape():
 
 def test_validate_coerces_and_drops():
     t = load_taxonomy()
-    out = t.validate([
-        {"dimension": "hook_type", "value": "question", "confidence": 1.4, "evidence": "e"},
-        {"dimension": "hook_type", "value": "made_up", "confidence": 0.5, "evidence": "e"},
-        {"dimension": "pacing", "value": "fast", "confidence": 0.9, "evidence": "e"},
-        {"dimension": "nope", "value": "x", "confidence": 0.9, "evidence": "e"},
-        {"dimension": "hook_summary", "value": "Opens with a question", "confidence": 0.9, "evidence": "e"},
-    ], "image")
+    out = t.validate(
+        [
+            {"dimension": "hook_type", "value": "question", "confidence": 1.4, "evidence": "e"},
+            {"dimension": "hook_type", "value": "made_up", "confidence": 0.5, "evidence": "e"},
+            {"dimension": "pacing", "value": "fast", "confidence": 0.9, "evidence": "e"},
+            {"dimension": "nope", "value": "x", "confidence": 0.9, "evidence": "e"},
+            {
+                "dimension": "hook_summary",
+                "value": "Opens with a question",
+                "confidence": 0.9,
+                "evidence": "e",
+            },
+        ],
+        "image",
+    )
     assert [(o["dimension"], o["value"], o["confidence"]) for o in out] == [
-        ("hook_type", "question", 1.0), ("hook_type", "other", 0.5), ("hook_summary", "Opens with a question", 0.9)]
+        ("hook_type", "question", 1.0),
+        ("hook_type", "other", 0.5),
+        ("hook_summary", "Opens with a question", 0.9),
+    ]

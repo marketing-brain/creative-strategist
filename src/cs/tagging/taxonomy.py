@@ -63,12 +63,14 @@ class Taxonomy:
             if d.values is not None and value not in d.values:
                 value = "other" if "other" in d.values else d.values[0]
             conf = float(t.get("confidence", 0.0))
-            out.append({
-                "dimension": d.name,
-                "value": value,
-                "confidence": max(0.0, min(1.0, conf)),
-                "evidence": str(t.get("evidence", ""))[:500],
-            })
+            out.append(
+                {
+                    "dimension": d.name,
+                    "value": value,
+                    "confidence": max(0.0, min(1.0, conf)),
+                    "evidence": str(t.get("evidence", ""))[:500],
+                }
+            )
         return out
 
 
@@ -79,10 +81,14 @@ def load_taxonomy(path: Path | None = None) -> Taxonomy:
     data = yaml.safe_load(raw)
     dims = tuple(
         Dimension(
-            name=d["name"], group=d["group"], applies_to=tuple(d["applies_to"]),
+            name=d["name"],
+            group=d["group"],
+            applies_to=tuple(d["applies_to"]),
             values=tuple(str(v) for v in d["values"]) if d.get("values") else None,
             description=d["description"],
         )
         for d in data["dimensions"]
     )
-    return Taxonomy(version=str(data["version"]), sha256=hashlib.sha256(raw).hexdigest(), dimensions=dims)
+    return Taxonomy(
+        version=str(data["version"]), sha256=hashlib.sha256(raw).hexdigest(), dimensions=dims
+    )

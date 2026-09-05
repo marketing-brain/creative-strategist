@@ -5,6 +5,7 @@ carousel card downloads.
 
 Usage: uv run python scripts/reenqueue_tagging.py
 """
+
 import asyncio
 
 from cs.core.config import get_settings
