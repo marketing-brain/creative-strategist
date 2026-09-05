@@ -1,0 +1,117 @@
+from __future__ import annotations
+
+import json
+import time
+from datetime import UTC, date, datetime, timedelta
+from uuid import UUID
+
+import asyncpg
+import httpx
+
+from cs.connectors.base import AdPlatformConnector
+from cs.connectors.meta.client import GraphClient
+from cs.connectors.meta.connector import MetaConnector
+from cs.core import queue
+from cs.core.blobs import BlobStore, sha256_hex
+from cs.core.config import Settings
+from cs.core.crypto import decrypt_str
+from cs.ingest import repo
+from cs.jobs.registry import JobContext
+
+BACKFILL_DAYS = 180
+INCREMENTAL_DAYS = 3
+
+
+def _raw_sink(blobs: BlobStore, org_id: UUID, account: str):
+    n = 0
+
+    async def sink(endpoint: str, page: dict) -> None:
+        nonlocal n
+        n += 1
+        key = (
+            f"{org_id}/raw/meta/{account}/{endpoint.replace('/', '_')}/"
+            f"{int(time.time() * 1000)}-{n}.json"
+        )
+        await blobs.put(key, json.dumps(page).encode(), "application/json")
+
+    return sink
+
+
+def default_connector_factory(
+    settings: Settings, account: asyncpg.Record, http: httpx.AsyncClient, blobs: BlobStore
+) -> AdPlatformConnector:
+    token = decrypt_str(settings, account["access_token_enc"])
+    sink = _raw_sink(blobs, account["org_id"], account["platform_account_id"])
+    return MetaConnector(GraphClient(settings, token, http, raw_sink=sink))
+
+
+CONNECTOR_FACTORY = default_connector_factory
+
+
+async def sync_account(
+    ctx: JobContext,
+    account: asyncpg.Record,
+    connector: AdPlatformConnector,
+    since: date,
+    until: date,
+) -> dict:
+    org_id, acct_id = account["org_id"], account["id"]
+    ads = await connector.list_ads(account["platform_account_id"])
+    new_creatives = 0
+    for ad in ads:
+        c = await connector.get_creative(ad.platform_creative_id)
+        raw_key = (
+            f"{org_id}/raw/meta/{account['platform_account_id']}/creative/"
+            f"{c.platform_creative_id}.json"
+        )
+        await ctx.blobs.put(raw_key, json.dumps(c.raw, default=str).encode(), "application/json")
+        creative_id, created = await repo.upsert_creative(ctx.db, org_id, acct_id, c, raw_key)
+        new_creatives += int(created)
+        await repo.upsert_ad(ctx.db, org_id, acct_id, ad, creative_id)
+        kind = "original_video" if c.format == "video" else "original_image"
+        if c.asset_url and not await repo.creative_has_asset(ctx.db, org_id, creative_id, kind):
+            await queue.enqueue(
+                ctx.db,
+                org_id,
+                "meta.download_creative",
+                {"creative_id": str(creative_id), "asset_url": c.asset_url, "kind": kind},
+                dedup_key=str(creative_id),
+            )
+    rows = await connector.fetch_metrics(account["platform_account_id"], since, until)
+    n_metrics = await repo.upsert_metrics(ctx.db, org_id, acct_id, rows)
+    cursor = dict(account["sync_cursor"])
+    cursor.update(
+        {
+            "schema_version": 1,
+            "last_synced_until": until.isoformat(),
+            "last_synced_at": datetime.now(UTC).isoformat(),
+        }
+    )
+    await ctx.db.execute("UPDATE ad_account SET sync_cursor=$2 WHERE id=$1", acct_id, cursor)
+    return {"ads": len(ads), "new_creatives": new_creatives, "metrics": n_metrics}
+
+
+async def download_creative(
+    ctx: JobContext, connector: AdPlatformConnector, creative_id: UUID, asset_url: str, kind: str
+) -> None:
+    org_id = ctx.job.org_id
+    data, mime = await connector.download_asset(asset_url)
+    ext = {"image/png": "png", "image/jpeg": "jpg", "video/mp4": "mp4"}.get(mime, "bin")
+    key = f"{org_id}/creatives/{creative_id}/original.{ext}"
+    await ctx.blobs.put(key, data, mime)
+    asset_id = await repo.insert_asset(
+        ctx.db, org_id, creative_id, kind, key, sha256_hex(data), mime
+    )
+    await repo.set_primary_asset(ctx.db, org_id, creative_id, asset_id)
+    await queue.enqueue(
+        ctx.db,
+        org_id,
+        "tagging.tag_creative",
+        {"creative_id": str(creative_id)},
+        dedup_key=f"tag:{creative_id}",
+    )
+
+
+def window(days: int, today: date | None = None) -> tuple[date, date]:
+    today = today or date.today()
+    return today - timedelta(days=days), today

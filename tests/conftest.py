@@ -6,6 +6,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+import cs.jobs.all_handlers  # noqa: F401
 from cs.api.app import create_app
 from cs.core.blobs import LocalBlobStore
 from cs.core.config import Settings
