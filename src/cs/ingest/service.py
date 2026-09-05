@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
@@ -18,20 +19,20 @@ from cs.core.crypto import decrypt_str
 from cs.ingest import repo
 from cs.jobs.registry import JobContext
 
+log = logging.getLogger("cs.ingest")
+
 BACKFILL_DAYS = 180
 INCREMENTAL_DAYS = 3
 
 
 def _raw_sink(blobs: BlobStore, org_id: UUID, account: str):
     n = 0
+    ts = int(time.time() * 1000)
 
     async def sink(endpoint: str, page: dict) -> None:
         nonlocal n
         n += 1
-        key = (
-            f"{org_id}/raw/meta/{account}/{endpoint.replace('/', '_')}/"
-            f"{int(time.time() * 1000)}-{n}.json"
-        )
+        key = f"{org_id}/raw/meta/{account}/{endpoint.replace('/', '_')}/{ts}-{n}.json"
         await blobs.put(key, json.dumps(page).encode(), "application/json")
 
     return sink
@@ -58,24 +59,38 @@ async def sync_account(
     org_id, acct_id = account["org_id"], account["id"]
     ads = await connector.list_ads(account["platform_account_id"])
     new_creatives = 0
+    failed_creatives = 0
     for ad in ads:
-        c = await connector.get_creative(ad.platform_creative_id)
-        raw_key = (
-            f"{org_id}/raw/meta/{account['platform_account_id']}/creative/"
-            f"{c.platform_creative_id}.json"
-        )
-        await ctx.blobs.put(raw_key, json.dumps(c.raw, default=str).encode(), "application/json")
-        creative_id, created = await repo.upsert_creative(ctx.db, org_id, acct_id, c, raw_key)
-        new_creatives += int(created)
-        await repo.upsert_ad(ctx.db, org_id, acct_id, ad, creative_id)
-        kind = "original_video" if c.format == "video" else "original_image"
-        if c.asset_url and not await repo.creative_has_asset(ctx.db, org_id, creative_id, kind):
-            await queue.enqueue(
-                ctx.db,
-                org_id,
-                "meta.download_creative",
-                {"creative_id": str(creative_id), "asset_url": c.asset_url, "kind": kind},
-                dedup_key=str(creative_id),
+        try:
+            c = await connector.get_creative(ad.platform_creative_id)
+            raw_key = (
+                f"{org_id}/raw/meta/{account['platform_account_id']}/creative/"
+                f"{c.platform_creative_id}.json"
+            )
+            await ctx.blobs.put(
+                raw_key, json.dumps(c.raw, default=str).encode(), "application/json"
+            )
+            creative_id, created = await repo.upsert_creative(ctx.db, org_id, acct_id, c, raw_key)
+            new_creatives += int(created)
+            await repo.upsert_ad(ctx.db, org_id, acct_id, ad, creative_id)
+            kind = "original_video" if c.format == "video" else "original_image"
+            if c.asset_url and not await repo.creative_has_asset(ctx.db, org_id, creative_id, kind):
+                await queue.enqueue(
+                    ctx.db,
+                    org_id,
+                    "meta.download_creative",
+                    {"creative_id": str(creative_id), "asset_url": c.asset_url, "kind": kind},
+                    dedup_key=str(creative_id),
+                )
+        except Exception:  # noqa: BLE001 - one bad creative must not abort the account sync
+            failed_creatives += 1
+            log.exception(
+                "creative sync failed",
+                extra={
+                    "org_id": str(org_id),
+                    "ad_account_id": str(acct_id),
+                    "platform_creative_id": ad.platform_creative_id,
+                },
             )
     rows = await connector.fetch_metrics(account["platform_account_id"], since, until)
     n_metrics = await repo.upsert_metrics(ctx.db, org_id, acct_id, rows)
@@ -88,7 +103,12 @@ async def sync_account(
         }
     )
     await ctx.db.execute("UPDATE ad_account SET sync_cursor=$2 WHERE id=$1", acct_id, cursor)
-    return {"ads": len(ads), "new_creatives": new_creatives, "metrics": n_metrics}
+    return {
+        "ads": len(ads),
+        "new_creatives": new_creatives,
+        "metrics": n_metrics,
+        "failed_creatives": failed_creatives,
+    }
 
 
 async def download_creative(

@@ -14,6 +14,7 @@ class FakeConnector:
         self.uploads: list[tuple[str, str, int]] = []
         self.created_ads: list[dict] = []
         self.fail_downloads: set[str] = set()
+        self.fail_creatives: set[str] = set()
 
     def add_creative(self, c: PlatformCreative, asset_bytes: bytes | None = None) -> None:
         self.creatives[c.platform_creative_id] = c
@@ -30,6 +31,8 @@ class FakeConnector:
         return list(self.ads)
 
     async def get_creative(self, creative_id: str) -> PlatformCreative:
+        if creative_id in self.fail_creatives:
+            raise RuntimeError(f"get_creative failed: {creative_id}")
         return self.creatives[creative_id]
 
     async def download_asset(self, url: str) -> tuple[bytes, str]:

@@ -111,3 +111,37 @@ async def test_nightly_schedule_enqueues_incremental(db, settings, org_id, accou
     await nightly_sync(db, settings)
     row = await db.fetchrow("SELECT job_type, dedup_key FROM job")
     assert row["job_type"] == "meta.sync_incremental" and row["dedup_key"] == str(account_id)
+
+
+async def test_creative_fetch_failure_is_isolated(db, blobs, settings, org_id, account_id, fake):
+    fake.fail_creatives.add("c2")
+    await queue.enqueue(db, org_id, "meta.backfill", {"ad_account_id": str(account_id)})
+    await _drain(db, blobs, settings)
+    creatives = await repo.list_creatives(db, org_id)
+    assert {c["platform_creative_id"] for c in creatives} == {"c1"}
+    assert await db.fetchval("SELECT count(*) FROM metric_daily") == 1
+    status = await db.fetchval("SELECT status FROM job WHERE job_type = 'meta.backfill'")
+    assert status == "done"
+    cursor = await db.fetchval("SELECT sync_cursor FROM ad_account WHERE id=$1", account_id)
+    assert cursor["last_synced_until"] == date.today().isoformat()
+
+
+async def test_raw_sink_shares_timestamp_across_pages():
+    class RecordingBlobs:
+        def __init__(self):
+            self.keys: list[str] = []
+
+        async def put(self, key, data, content_type):
+            self.keys.append(key)
+
+    blobs = RecordingBlobs()
+    sink = service._raw_sink(blobs, "org1", "act_1")
+    await sink("act_1/ads", {"data": [1]})
+    await sink("act_1/ads", {"data": [2]})
+    assert len(blobs.keys) == 2
+    prefix1, suffix1 = blobs.keys[0].rsplit("/", 1)
+    prefix2, suffix2 = blobs.keys[1].rsplit("/", 1)
+    assert prefix1 == prefix2
+    ts = suffix1.split("-")[0]
+    assert suffix1 == f"{ts}-1.json"
+    assert suffix2 == f"{ts}-2.json"

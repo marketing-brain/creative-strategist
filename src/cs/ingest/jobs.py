@@ -47,6 +47,8 @@ async def download_creative(ctx: JobContext) -> None:
         creative_id,
         ctx.job.org_id,
     )
+    if acct is None:
+        raise RuntimeError("ad_account not found for creative")
     async with httpx.AsyncClient(timeout=120) as http:
         connector = service.CONNECTOR_FACTORY(ctx.settings, acct, http, ctx.blobs)
         await service.download_creative(ctx, connector, creative_id, p["asset_url"], p["kind"])
