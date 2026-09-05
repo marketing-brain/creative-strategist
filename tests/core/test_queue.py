@@ -90,3 +90,15 @@ async def test_heartbeat_on_finished_job_returns_false(db, org_id):
     await queue.claim(db, "w1")
     await queue.complete(db, jid, "w1")
     assert await queue.heartbeat(db, jid, "w1") is False
+
+
+async def test_reclaim_stale_dead_letters_exhausted_jobs(db, org_id):
+    jid = await queue.enqueue(db, org_id, "poison", max_attempts=1)
+    await queue.claim(db, "w1")
+    await db.execute("UPDATE job SET locked_at = now() - interval '1 hour' WHERE id=$1", jid)
+    assert await queue.reclaim_stale(db, lease_seconds=600) == 1
+    row = await db.fetchrow("SELECT status, error, finished_at FROM job WHERE id=$1", jid)
+    assert row["status"] == "dead"
+    assert row["error"] == "lease expired"
+    assert row["finished_at"] is not None
+    assert await queue.claim(db, "w2") is None

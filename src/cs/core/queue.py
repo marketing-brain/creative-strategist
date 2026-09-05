@@ -125,9 +125,15 @@ async def heartbeat(db: Database, job_id: UUID, worker_id: str) -> bool:
 
 
 async def reclaim_stale(db: Database, lease_seconds: int) -> int:
+    """Release jobs whose lease expired, dead-lettering the ones out of attempts."""
     result = await db.execute(
         """
-        UPDATE job SET status='pending', locked_by=NULL, locked_at=NULL
+        UPDATE job SET
+          locked_by = NULL,
+          locked_at = NULL,
+          status = CASE WHEN attempts >= max_attempts THEN 'dead' ELSE 'pending' END,
+          error = CASE WHEN attempts >= max_attempts THEN 'lease expired' ELSE error END,
+          finished_at = CASE WHEN attempts >= max_attempts THEN now() ELSE finished_at END
         WHERE status='running' AND locked_at < now() - make_interval(secs => $1)
         """,
         lease_seconds,
