@@ -35,10 +35,25 @@ Shared conventions for every phase:
 - Scheduler last-run times persist in `schedule_state`; schedules registered in later phases should still use period-scoped dedup keys where a duplicate run would be costly.
 - Local blob URLs (`/blobs/{key}`) require an auth header, so Phase 5 must not use them as bare `<img src>`; fetch bytes through the authenticated API client, or use S3 presigned URLs in non-dev environments.
 
+## Conventions and follow-ups added by the Phase 1 final review (binding for Phases 2–5)
+
+- No secret ever travels in a URL: `GraphClient` sends the Meta token as `Authorization: Bearer`, OAuth exchanges POST the app secret in the form body, `cs.core.logging.configure_logging()` (called by every entrypoint) keeps `httpx`/`httpcore` at WARNING, and `cs.connectors.meta.scrub.strip_access_tokens` scrubs raw pages before they reach blob storage. Phase 4 uploads/publishes must keep this invariant.
+- Repository additions: `repo.upsert_metrics` returns `(written, skipped)`; `Database.executemany` exists for chunked writes; `ensure_metric_partition` tolerates concurrent creation.
+- `service.sync_account` returns `{ads, new_creatives, failed_creatives, metrics, metrics_skipped}` and the handlers log it. Per-creative failures never abort an account sync (Global Constraint); one bad creative is logged, counted, and retried on the next sync.
+- Spec deviations ruled during Phase 1 (see the branch's SDD ledger rulings, reproduced in the Phase 1 session summary): no 200-ad sub-job chunking for backfill; rate limits back off in-process (capped at 900s + jitter) under the job heartbeat instead of rescheduling the job; connector method names follow the plan (`list_ads`/`get_creative`/`upload_image`/`upload_video`), not the spec's `list_creatives`/`upload_asset`; derived CTR/CPA/ROAS are computed in `routers/creatives.py`, not a SQL view.
+- Known limitations to pick up in later phases:
+  - Carousel creatives get the `carousel` format label but no asset download and therefore no tagging (child attachments are not walked). Phase 2 should either add child-image downloads with `asset.seq` or exclude carousels explicitly.
+  - Every `tagging.tag_creative` job enqueued by Phase 1 has no handler yet and dead-letters after 5 attempts. Phase 2 must open with a "re-enqueue tagging for creatives that have an original asset and no tag_run" step.
+  - Monthly `metric_daily` partitions are created lazily in the sync hot path; a scheduled pre-creation job (current + next month) is a Phase 3 candidate.
+  - `POST /accounts/{id}/activate` re-enqueues a full backfill even for an already-active account.
+  - Phase 3 should introduce the derived-metrics SQL view spec §4 describes so insights and the API share one definition.
+  - `scripts/record_meta_fixtures.py` has not been run (no Meta token on this machine); run it once with `META_ACCESS_TOKEN`/`META_ACCOUNT_ID` set and commit the `tests/fixtures/meta/recorded_*.json` files to activate the parametrized parse test.
+
 ## Execution status
 
 - Phase 0: complete, merged to `main` on 2026-09-04 (54 tests). Executed with `superpowers:subagent-driven-development`.
-- Phase 1: not started. Start it with: "Use superpowers:subagent-driven-development to execute docs/superpowers/plans/2026-09-04-phase-1-meta-ingest.md on a new branch from main."
+- Phase 1: implemented on branch `feat/phase-1-meta-ingest` on 2026-09-05 (98 tests, 1 expected skip). Executed with `superpowers:subagent-driven-development`; six tasks, one final-review fix wave. Merge to `main` when the final re-review is clean.
+- Phase 2: not started. Start it with: "Use superpowers:subagent-driven-development to execute docs/superpowers/plans/2026-09-04-phase-2-tagging.md on a new branch from main."
 
 ## Local environment notes (this machine)
 
@@ -46,5 +61,5 @@ Shared conventions for every phase:
   Start: `.venv/lib/python3.12/site-packages/pgserver/pginstall/bin/pg_ctl -D ~/.local/share/cs-pg16 -o "-p 5432 -k /tmp -c listen_addresses=127.0.0.1" -l ~/.local/share/cs-pg16.log start`
   Check: `pg_isready -h 127.0.0.1 -p 5432`
 - `dbmate` binary is at `~/.local/bin/dbmate` (tests resolve it via `shutil.which` or that path).
-- A Homebrew install of `postgresql@16 pgvector dbmate` was started but takes hours on this macOS; if it finishes, either server works. Do not run both on 5432.
+- A Homebrew install of `postgresql@16 pgvector dbmate` finished on 2026-09-05 (it took hours on this macOS). It is not started; the pgserver instance above remains the one in use. Do not run both on 5432.
 - `.env` exists (gitignored) with `AUTH_MODE=dev` and 127.0.0.1 database URLs. Meta app credentials (`META_APP_ID`, `META_APP_SECRET`) are not set yet; Phase 1 tests do not need them.
