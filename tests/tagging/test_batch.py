@@ -1,3 +1,4 @@
+import asyncio
 import io
 from types import SimpleNamespace
 
@@ -7,11 +8,16 @@ from PIL import Image
 from cs.connectors.base import PlatformCreative
 from cs.core import queue
 from cs.core.crypto import encrypt_str
+from cs.core.ids import new_id
+from cs.core.queue import Job
 from cs.ingest import repo as ingest_repo
+from cs.jobs.registry import JobContext
 from cs.jobs.worker import run_once
 from cs.tagging import jobs as tagging_jobs
+from cs.tagging import repo as tag_repo
 from cs.tagging.batch import ClaudeBatchTagger
 from cs.tagging.fakes import FakeBatchTagger, FakeEmbedder
+from cs.tagging.taxonomy import load_taxonomy
 
 
 def _png():
@@ -66,6 +72,100 @@ async def test_batch_submit_and_poll_completes_runs(
     await db.execute("UPDATE job SET run_after = now() WHERE job_type='tagging.batch_poll'")
     await run_once(db, blobs, settings, "w")
     assert await db.fetchval("SELECT count(*) FROM tag_run WHERE status='done'") == 3
+    assert (
+        await db.fetchval("SELECT count(*) FROM job WHERE job_type='tagging.embed_creative'") == 3
+    )
+
+
+class FailingBatchTagger:
+    """A batch tagger whose submit() always raises, simulating a network/API
+    failure after tag_run rows for the batch have already been flipped to
+    'running'."""
+
+    async def submit(self, requests: list[dict]) -> str:
+        raise RuntimeError("boom: network error")
+
+    async def poll(self, batch_id: str) -> tuple[bool, list[dict]]:
+        raise AssertionError("poll should never be reached when submit fails")
+
+
+async def test_batch_submit_fails_runs_when_submit_raises(
+    db, blobs, settings, org_id, three_images, monkeypatch
+):
+    monkeypatch.setattr(tagging_jobs, "BATCH_FACTORY", lambda s: FailingBatchTagger())
+    await queue.enqueue(db, org_id, "tagging.batch_submit", {"limit": 100})
+    await run_once(db, blobs, settings, "w")  # handler raises; run_once fails the job
+
+    # No creative is left stuck at 'running' -- every run started before the
+    # failed submit() call is marked 'failed' instead.
+    assert await db.fetchval("SELECT count(*) FROM tag_run WHERE status='running'") == 0
+    assert await db.fetchval("SELECT count(*) FROM tag_run WHERE status='failed'") == 3
+    assert await db.fetchval("SELECT count(*) FROM tag_batch") == 0
+
+    job = await db.fetchrow(
+        "SELECT status, attempts FROM job WHERE job_type='tagging.batch_submit'"
+    )
+    assert job["status"] == "pending"  # requeued for retry, not dead yet
+    assert job["attempts"] == 1
+
+    # A failed (not running) tag_run makes the creative eligible again on the
+    # next batch_submit attempt.
+    taxonomy = load_taxonomy()
+    tv = await tag_repo.ensure_taxonomy_version(db, taxonomy)
+    ids = await tag_repo.untagged_creative_ids(db, org_id, tv, settings.claude_model_tagging, 100)
+    assert set(ids) == set(three_images)
+
+
+async def test_batch_poll_noop_when_already_ended(db, blobs, settings, org_id):
+    tv = await tag_repo.ensure_taxonomy_version(db, load_taxonomy())
+    batch_id = new_id()
+    await db.execute(
+        "INSERT INTO tag_batch (id, org_id, provider_batch_id, taxonomy_version_id, model, "
+        "status, request_count, ended_at) VALUES ($1,$2,$3,$4,$5,'ended',0,now())",
+        batch_id,
+        org_id,
+        "batch_already_done",
+        tv,
+        settings.claude_model_tagging,
+    )
+    await queue.enqueue(db, org_id, "tagging.batch_poll", {"tag_batch_id": str(batch_id)})
+    await run_once(db, blobs, settings, "w")
+    assert await db.fetchval("SELECT count(*) FROM tag_run") == 0
+    assert (
+        await db.fetchval("SELECT count(*) FROM job WHERE job_type='tagging.embed_creative'") == 0
+    )
+
+
+async def test_batch_poll_race_does_not_double_process(
+    db, blobs, settings, org_id, three_images, monkeypatch
+):
+    fake = FakeBatchTagger()
+    monkeypatch.setattr(tagging_jobs, "BATCH_FACTORY", lambda s: fake)
+    monkeypatch.setattr(tagging_jobs, "EMBEDDER_FACTORY", lambda s, http: FakeEmbedder())
+    await queue.enqueue(db, org_id, "tagging.batch_submit", {"limit": 100})
+    await run_once(db, blobs, settings, "w")
+    batch_id = await db.fetchval("SELECT id FROM tag_batch")
+    provider_id = await db.fetchval("SELECT provider_batch_id FROM tag_batch")
+    fake.ended.add(provider_id)
+
+    def _ctx(worker: str) -> JobContext:
+        job = Job(new_id(), org_id, "tagging.batch_poll", {"tag_batch_id": str(batch_id)}, 1, 5)
+        return JobContext(db=db, blobs=blobs, settings=settings, job=job)
+
+    # Two workers both claim a batch_poll job for the same batch and race:
+    # both should be able to observe status != 'ended' before either writes,
+    # so this exercises the atomic UPDATE ... WHERE status<>'ended' guard
+    # rather than just the cheap early-return short-circuit.
+    await asyncio.gather(
+        tagging_jobs.batch_poll(_ctx("w1")),
+        tagging_jobs.batch_poll(_ctx("w2")),
+    )
+
+    assert await db.fetchval("SELECT status FROM tag_batch WHERE id=$1", batch_id) == "ended"
+    # Exactly one of the two racing calls processed results: tag rows and
+    # embed jobs are not duplicated.
+    assert await db.fetchval("SELECT count(*) FROM tag_run WHERE status='done'") == 3
+    assert await db.fetchval("SELECT count(*) FROM tag") == 3 * 4  # 4 DEFAULT_TAGS per creative
     assert (
         await db.fetchval("SELECT count(*) FROM job WHERE job_type='tagging.embed_creative'") == 3
     )

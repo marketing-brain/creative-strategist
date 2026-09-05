@@ -94,28 +94,36 @@ async def batch_submit(ctx: JobContext) -> None:
     if not ids:
         return
     requests, items = [], []
-    for cid in ids:
-        creative = await ingest_repo.get_creative(ctx.db, org_id, cid)
-        run_id = await tag_repo.start_tag_run(ctx.db, org_id, cid, tv, model)
-        if run_id is None:
-            continue
-        jpeg, _, _ = prepare_image(await ctx.blobs.get(creative["primary_asset_path"]))
-        copy = {
-            k: creative[k]
-            for k in ("headline", "primary_text", "description", "cta_type", "link_url")
-        }
-        text = user_text(taxonomy, "image", copy, None, None)
-        schema = taxonomy.json_schema("image")
-        requests.append(
-            {
-                "custom_id": str(run_id),
-                "images": [(jpeg, "image/jpeg")],
-                "user_text": text,
-                "schema": schema,
+    try:
+        for cid in ids:
+            creative = await ingest_repo.get_creative(ctx.db, org_id, cid)
+            run_id = await tag_repo.start_tag_run(ctx.db, org_id, cid, tv, model)
+            if run_id is None:
+                continue
+            jpeg, _, _ = prepare_image(await ctx.blobs.get(creative["primary_asset_path"]))
+            copy = {
+                k: creative[k]
+                for k in ("headline", "primary_text", "description", "cta_type", "link_url")
             }
-        )
-        items.append((run_id, prompt_sha(SYSTEM, text, schema)))
-    provider_id = await BATCH_FACTORY(ctx.settings).submit(requests)
+            text = user_text(taxonomy, "image", copy, None, None)
+            schema = taxonomy.json_schema("image")
+            requests.append(
+                {
+                    "custom_id": str(run_id),
+                    "images": [(jpeg, "image/jpeg")],
+                    "user_text": text,
+                    "schema": schema,
+                }
+            )
+            items.append((run_id, prompt_sha(SYSTEM, text, schema)))
+        provider_id = await BATCH_FACTORY(ctx.settings).submit(requests)
+    except Exception as exc:
+        # Any run already flipped to 'running' above must not be left stuck:
+        # mark it failed so untagged_creative_ids() picks the creative up again
+        # on a future batch_submit, then let the job fail/retry normally.
+        for run_id, _ in items:
+            await tag_repo.fail_tag_run(ctx.db, org_id, run_id, str(exc))
+        raise
     batch_id = new_id()
     await ctx.db.execute(
         "INSERT INTO tag_batch (id, org_id, provider_batch_id, taxonomy_version_id, model, "
@@ -168,6 +176,13 @@ async def batch_poll(ctx: JobContext) -> None:
             run_after=datetime.now(UTC) + timedelta(seconds=120),
         )
         return
+    claimed = await ctx.db.fetchrow(
+        "UPDATE tag_batch SET status='ended', ended_at=now() WHERE id=$1 AND status<>'ended' "
+        "RETURNING id",
+        batch_id,
+    )
+    if claimed is None:
+        return  # another worker already finished this batch
     taxonomy = load_taxonomy()
     for res in results:
         run_id = UUID(res["custom_id"])
@@ -194,6 +209,3 @@ async def batch_poll(ctx: JobContext) -> None:
             )
         else:
             await tag_repo.fail_tag_run(ctx.db, org_id, run_id, res["error"] or "batch item failed")
-    await ctx.db.execute(
-        "UPDATE tag_batch SET status='ended', ended_at=now() WHERE id=$1", batch_id
-    )
