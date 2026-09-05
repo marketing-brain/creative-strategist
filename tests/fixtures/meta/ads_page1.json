@@ -1,0 +1,4 @@
+{"data": [
+  {"id": "1001", "name": "Ad A", "status": "ACTIVE", "adset_id": "2001", "campaign_id": "3001", "creative": {"id": "5001"}},
+  {"id": "1002", "name": "Ad B", "status": "PAUSED", "adset_id": "2001", "campaign_id": "3001", "creative": {"id": "5002"}}
+], "paging": {"cursors": {"after": "x"}}}
