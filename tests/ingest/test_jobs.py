@@ -13,6 +13,8 @@ from cs.core import queue
 from cs.core.crypto import encrypt_str
 from cs.ingest import repo, service
 from cs.jobs.worker import run_once
+from cs.tagging import jobs as tagging_jobs
+from cs.tagging.fakes import FakeTagger, FakeTranscriber
 
 
 @pytest.fixture
@@ -69,6 +71,11 @@ def fake(monkeypatch):
         )
     )
     monkeypatch.setattr(service, "CONNECTOR_FACTORY", lambda settings, acct, http, blobs: f)
+    # tagging.tag_creative now has a handler (Phase 2); keep these ingest tests
+    # from constructing a real ClaudeTagger/GatewayTranscriber (no API keys here,
+    # and no network calls should happen from this suite regardless).
+    monkeypatch.setattr(tagging_jobs, "TAGGER_FACTORY", lambda s: FakeTagger())
+    monkeypatch.setattr(tagging_jobs, "TRANSCRIBER_FACTORY", lambda s, http: FakeTranscriber())
     return f
 
 
