@@ -3,10 +3,25 @@ from __future__ import annotations
 from cs.tagging.tagger import TagResult
 
 DEFAULT_TAGS = [
-    {"dimension": "hook_type", "value": "question", "confidence": 0.9, "evidence": "opens with a question"},
-    {"dimension": "message_angle", "value": "pain_relief", "confidence": 0.8, "evidence": "mentions tiredness"},
+    {
+        "dimension": "hook_type",
+        "value": "question",
+        "confidence": 0.9,
+        "evidence": "opens with a question",
+    },
+    {
+        "dimension": "message_angle",
+        "value": "pain_relief",
+        "confidence": 0.8,
+        "evidence": "mentions tiredness",
+    },
     {"dimension": "visual_style", "value": "ugc", "confidence": 0.7, "evidence": "handheld look"},
-    {"dimension": "hook_summary", "value": "Asks if you are tired of waking up tired", "confidence": 0.9, "evidence": "headline"},
+    {
+        "dimension": "hook_summary",
+        "value": "Asks if you are tired of waking up tired",
+        "confidence": 0.9,
+        "evidence": "headline",
+    },
 ]
 
 
@@ -60,5 +75,13 @@ class FakeBatchTagger:
     async def poll(self, batch_id: str) -> tuple[bool, list[dict]]:
         if batch_id not in self.ended:
             return False, []
-        return True, [{"custom_id": r["custom_id"], "ok": True, "tags": DEFAULT_TAGS, "input_tokens": 1, "output_tokens": 1}
-                      for r in self.submitted[batch_id]]
+        return True, [
+            {
+                "custom_id": r["custom_id"],
+                "ok": True,
+                "tags": DEFAULT_TAGS,
+                "input_tokens": 1,
+                "output_tokens": 1,
+            }
+            for r in self.submitted[batch_id]
+        ]

@@ -20,20 +20,35 @@ class TagResult:
 
 
 class Tagger(Protocol):
-    async def tag(self, images: list[tuple[bytes, str]], user_text: str, schema: dict) -> TagResult: ...
+    async def tag(
+        self, images: list[tuple[bytes, str]], user_text: str, schema: dict
+    ) -> TagResult: ...
 
 
 def build_content(images: list[tuple[bytes, str]], user_text: str) -> list[dict]:
     content: list[dict] = []
-    for i, (data, mime) in enumerate(images):
-        content.append({"type": "image", "source": {"type": "base64", "media_type": mime,
-                                                     "data": base64.standard_b64encode(data).decode()}})
+    for data, mime in images:
+        content.append(
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": mime,
+                    "data": base64.standard_b64encode(data).decode(),
+                },
+            }
+        )
     content.append({"type": "text", "text": user_text})
     return content
 
 
 class ClaudeTagger:
-    def __init__(self, settings: Settings, client: anthropic.AsyncAnthropic | None = None, model: str | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        client: anthropic.AsyncAnthropic | None = None,
+        model: str | None = None,
+    ):
         self.client = client or anthropic.AsyncAnthropic()
         self.model = model or settings.claude_model_tagging
 
@@ -50,8 +65,11 @@ class ClaudeTagger:
             output_config={"format": {"type": "json_schema", "schema": schema}},
         )
         usage = getattr(resp, "usage", None)
-        result = TagResult(input_tokens=getattr(usage, "input_tokens", 0) or 0,
-                           output_tokens=getattr(usage, "output_tokens", 0) or 0, model=resp.model)
+        result = TagResult(
+            input_tokens=getattr(usage, "input_tokens", 0) or 0,
+            output_tokens=getattr(usage, "output_tokens", 0) or 0,
+            model=resp.model,
+        )
         if resp.stop_reason == "refusal":
             result.refused = True
             return result

@@ -30,7 +30,11 @@ def _response(text, stop="end_turn"):
 
 
 async def test_claude_tagger_sends_images_and_parses_json(settings):
-    payload = {"tags": [{"dimension": "hook_type", "value": "question", "confidence": 0.9, "evidence": "e"}]}
+    payload = {
+        "tags": [
+            {"dimension": "hook_type", "value": "question", "confidence": 0.9, "evidence": "e"}
+        ]
+    }
     client = _client(_response(json.dumps(payload)))
     tagger = ClaudeTagger(settings, client=client)
     schema = load_taxonomy().json_schema("image")
