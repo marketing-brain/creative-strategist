@@ -49,11 +49,19 @@ Shared conventions for every phase:
   - Phase 3 should introduce the derived-metrics SQL view spec §4 describes so insights and the API share one definition.
   - `scripts/record_meta_fixtures.py` has not been run (no Meta token on this machine); run it once with `META_ACCESS_TOKEN`/`META_ACCOUNT_ID` set and commit the `tests/fixtures/meta/recorded_*.json` files to activate the parametrized parse test.
 
+## Conventions and follow-ups added by the Phase 2 final review
+
+- Carousel creatives are tagged via their first card image only (not all cards) — a deliberate Phase 2 scope decision. This means `storyline`, `message_summary`, `offer_type`, and `proof_type` tags on a carousel reflect only card 0 and may be wrong for what's actually on cards 1+. A Phase 3+ candidate: send multiple cards to the same tagging call (the tagger already accepts a list of images — no interface change needed) or add a card-count/tagged-cards marker so insights can down-weight carousel tags accordingly.
+- `taxonomy.validate()` does not deduplicate repeated dimensions if the model emits the same `dimension` twice for one tag_run, and the `tag` table has no uniqueness constraint on `(tag_run_id, dimension)`. Phase 3's pattern/insight views are expected to aggregate `tag` rows grouped by `(dimension, value)` — a duplicated dimension would double-count or split that creative's contribution. Phase 3 should either add dedup logic (keep highest-confidence per dimension) to `validate()`, or a partial unique index, before writing the aggregation SQL.
+- `finish_tag_run`'s `tag` row inserts are not idempotent — if a `tagging.batch_poll` job crashes mid-results-loop after finishing some tag_runs but is reclaimed and retried, it will reprocess already-finished results and double-insert `tag` rows for them. A `DELETE FROM tag WHERE tag_run_id=$1` as the first statement inside `finish_tag_run`'s existing transaction would close this cheaply; not done in Phase 2.
+- The `asset` table has no unique constraint on `(creative_id, kind, seq)` — carousel-card and video-keyframe/transcript retry idempotency (both fixed during Phase 2 after real bugs were found) rely on application-level check-then-insert or delete-then-insert, not a DB guarantee. This is safe for sequential job retries (tested) but not for two truly concurrent workers processing the same job. This becomes reachable if `extract_keyframes`'s synchronous ffmpeg subprocess calls (not run via `asyncio.to_thread`) ever block the event loop long enough to starve the job's lease heartbeat past the reclaim window on an unusually long video. Recommend adding the unique index and moving ffmpeg calls to `asyncio.to_thread` as one hardening pair in a follow-up phase.
+- A `tag_run` left at `status='running'` by a dead/crashed job (never reaching `done` or `failed`) is invisible to both `untagged_creative_ids` (which excludes `running`) and `reenqueue_untagged` (which only targets creatives with no run at all). Consider registering `cs.tagging.reconcile.reenqueue_untagged` as a low-frequency scheduled job, and/or adding a sweep that resets stale `running` tag_runs (e.g. older than some threshold with no corresponding live job) back to a retryable state.
+
 ## Execution status
 
 - Phase 0: complete, merged to `main` on 2026-09-04 (54 tests). Executed with `superpowers:subagent-driven-development`.
 - Phase 1: complete, merged to `main` on 2026-09-05 (98 tests, 1 expected skip). Executed with `superpowers:subagent-driven-development`; six tasks, one final-review fix wave.
-- Phase 2: not started. Start it with: "Use superpowers:subagent-driven-development to execute docs/superpowers/plans/2026-09-04-phase-2-tagging.md on a new branch from main."
+- Phase 2: complete, merged to `main` on 2026-09-05 (136 tests, 1 expected skip). Executed with `superpowers:subagent-driven-development`; eight tasks, one final-review fix wave.
 
 ## Local environment notes (this machine)
 
