@@ -6,9 +6,19 @@ from cs.insights.types import InsightDraft
 
 
 def _draft(**kw):
-    base = dict(kind="pattern", dimension="hook_type", value="question", metric="ctr",
-                window_start=date(2026, 8, 1), window_end=date(2026, 8, 31), sample_creatives=6,
-                sample_spend=Decimal("1500"), baseline=0.01, observed=0.013, lift=0.3)
+    base = dict(
+        kind="pattern",
+        dimension="hook_type",
+        value="question",
+        metric="ctr",
+        window_start=date(2026, 8, 1),
+        window_end=date(2026, 8, 31),
+        sample_creatives=6,
+        sample_spend=Decimal("1500"),
+        baseline=0.01,
+        observed=0.013,
+        lift=0.3,
+    )
     base.update(kw)
     return InsightDraft(**base)
 

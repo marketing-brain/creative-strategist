@@ -84,7 +84,8 @@ class CopilotTools:
                    sum(m.impressions) AS imp, sum(m.clicks) AS clicks, sum(m.conversions) AS conv,
                    sum(m.conversion_value) AS val
             FROM creative_latest_tag lt JOIN creative c ON c.id = lt.creative_id
-            JOIN metric_daily m ON m.creative_id = c.id AND m.day BETWEEN $4 AND $5
+            JOIN metric_daily m ON m.creative_id = c.id AND m.org_id = $1
+                AND m.day BETWEEN $4 AND $5
             WHERE lt.org_id = $1 AND lt.dimension = $2 AND lt.value = $3
             GROUP BY c.id, c.headline, c.format
             """,
@@ -135,7 +136,7 @@ class Copilot(Protocol):
 
 class ClaudeCopilot:
     def __init__(self, settings: Settings, client: anthropic.AsyncAnthropic | None = None):
-        self.client = client or anthropic.AsyncAnthropic()
+        self.client = client or anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key or None)
         self.model = settings.claude_model_copilot
 
     def _tools(self, t: CopilotTools) -> list:
@@ -219,6 +220,7 @@ class ClaudeCopilot:
         runner = self.client.beta.messages.tool_runner(
             model=self.model,
             max_tokens=8000,
+            max_iterations=10,
             system=SYSTEM,
             tools=self._tools(tools),
             messages=[{"role": m["role"], "content": m["content"]} for m in history],

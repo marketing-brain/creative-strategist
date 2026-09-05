@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from cs.api.auth import AuthContext, current_auth
 from cs.api.deps import get_db, get_settings_dep
@@ -20,11 +20,11 @@ COPILOT_FACTORY = default_copilot_factory
 
 
 class NewConversation(BaseModel):
-    title: str = "New conversation"
+    title: str = Field("New conversation", max_length=200)
 
 
 class NewMessage(BaseModel):
-    content: str
+    content: str = Field(..., min_length=1, max_length=4000)
 
 
 @router.post("/conversations")

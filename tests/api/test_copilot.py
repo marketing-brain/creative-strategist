@@ -22,7 +22,13 @@ async def test_copilot_roundtrip(client, db, monkeypatch):
 
 async def test_conversation_is_scoped_to_owning_user(client, db, monkeypatch):
     monkeypatch.setattr(copilot_router, "COPILOT_FACTORY", lambda s: FakeCopilot())
-    conv = (await client.post("/copilot/conversations", headers=H, json={"title": "Q"})).json()["id"]
+    conv = (await client.post("/copilot/conversations", headers=H, json={"title": "Q"})).json()[
+        "id"
+    ]
     other = dev_headers(org="org_cp", user="u2")
     assert (await client.get(f"/copilot/conversations/{conv}", headers=other)).status_code == 404
-    assert (await client.post(f"/copilot/conversations/{conv}/messages", headers=other, json={"content": "hi"})).status_code == 404
+    assert (
+        await client.post(
+            f"/copilot/conversations/{conv}/messages", headers=other, json={"content": "hi"}
+        )
+    ).status_code == 404

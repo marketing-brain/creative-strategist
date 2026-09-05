@@ -10,8 +10,21 @@ H = dev_headers(org="org_ins")
 
 async def test_insights_and_briefs_routes(client, db):
     from uuid import UUID
+
     org_id = UUID((await client.get("/me", headers=H)).json()["org_id"])
-    d = InsightDraft("pattern", "hook_type", "question", "ctr", date(2026, 8, 1), date(2026, 8, 31), 6, Decimal("1500"), 0.02, 0.03, 0.5)
+    d = InsightDraft(
+        "pattern",
+        "hook_type",
+        "question",
+        "ctr",
+        date(2026, 8, 1),
+        date(2026, 8, 31),
+        6,
+        Decimal("1500"),
+        0.02,
+        0.03,
+        0.5,
+    )
     await repo.insert_insight(db, org_id, d, "E", "T")
     await repo.insert_brief(db, org_id, date(2026, 8, 31), "# B", [])
     r = await client.get("/insights?kind=pattern", headers=H)
