@@ -33,6 +33,23 @@ def register_schedule(name: str, every_seconds: int) -> Callable[[EnqueueFn], En
     return deco
 
 
+async def load_schedule_state(db: Database) -> dict[str, float]:
+    """Last run of every schedule, as epoch seconds, so restarts do not re-fire."""
+    rows = await db.fetch("SELECT name, last_run_at FROM schedule_state")
+    return {r["name"]: r["last_run_at"].timestamp() for r in rows}
+
+
+async def _record_run(db: Database, name: str, now: float) -> None:
+    await db.execute(
+        """
+        INSERT INTO schedule_state (name, last_run_at) VALUES ($1, to_timestamp($2))
+        ON CONFLICT (name) DO UPDATE SET last_run_at = EXCLUDED.last_run_at
+        """,
+        name,
+        now,
+    )
+
+
 async def run_scheduler_tick(
     db: Database, settings: Settings, state: dict[str, float], now: float
 ) -> list[str]:
@@ -46,6 +63,7 @@ async def run_scheduler_tick(
             except Exception:  # noqa: BLE001
                 log.exception("schedule failed", extra={"schedule": s.name})
             state[s.name] = now
+            await _record_run(db, s.name, now)
     return fired
 
 
@@ -61,7 +79,7 @@ async def run_scheduler(settings: Settings | None = None) -> None:
     import cs.jobs.all_handlers  # noqa: F401 - schedules live beside handlers
 
     db = await Database.connect(settings.database_url)
-    state: dict[str, float] = {}
+    state = await load_schedule_state(db)
     try:
         while True:
             await run_scheduler_tick(db, settings, state, time.time())
