@@ -93,13 +93,14 @@ async def batch_submit(ctx: JobContext) -> None:
     )
     if not ids:
         return
-    requests, items = [], []
+    requests, items, started_run_ids = [], [], []
     try:
         for cid in ids:
             creative = await ingest_repo.get_creative(ctx.db, org_id, cid)
             run_id = await tag_repo.start_tag_run(ctx.db, org_id, cid, tv, model)
             if run_id is None:
                 continue
+            started_run_ids.append(run_id)
             jpeg, _, _ = prepare_image(await ctx.blobs.get(creative["primary_asset_path"]))
             copy = {
                 k: creative[k]
@@ -121,7 +122,7 @@ async def batch_submit(ctx: JobContext) -> None:
         # Any run already flipped to 'running' above must not be left stuck:
         # mark it failed so untagged_creative_ids() picks the creative up again
         # on a future batch_submit, then let the job fail/retry normally.
-        for run_id, _ in items:
+        for run_id in started_run_ids:
             await tag_repo.fail_tag_run(ctx.db, org_id, run_id, str(exc))
         raise
     batch_id = new_id()
