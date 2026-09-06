@@ -198,3 +198,35 @@ async def download_carousel(
 def window(days: int, today: date | None = None) -> tuple[date, date]:
     today = today or date.today()
     return today - timedelta(days=days), today
+
+
+import os  # noqa: E402
+
+if os.environ.get("CS_FAKE_CONNECTOR"):
+    from cs.connectors.base import PlatformAd, PlatformCreative  # noqa: E402
+    from cs.connectors.fakes import FakeConnector  # noqa: E402
+    from cs.generation.fakes import solid_png  # noqa: E402
+
+    _FAKE = FakeConnector()
+    for _n in ("demo_a", "demo_b"):
+        _FAKE.add_creative(
+            PlatformCreative(
+                _n,
+                "image",
+                f"Headline {_n}",
+                "Primary text",
+                None,
+                "SHOP_NOW",
+                "https://example.com",
+                f"https://img/{_n}",
+                "image/png",
+                {},
+            ),
+            solid_png(256, 256),
+        )
+        _FAKE.add_ad(PlatformAd(f"ad_{_n}", _n, "ACTIVE", "as1", "c1", _n))
+
+    def _fake_factory(settings, account, http, blobs):
+        return _FAKE
+
+    CONNECTOR_FACTORY = _fake_factory

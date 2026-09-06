@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from uuid import UUID
 
 import httpx
@@ -230,3 +231,11 @@ async def batch_poll(ctx: JobContext) -> None:
             )
         else:
             await tag_repo.fail_tag_run(ctx.db, org_id, run_id, res["error"] or "batch item failed")
+
+
+if os.environ.get("CS_FAKE_CONNECTOR"):
+    from cs.tagging.fakes import FakeEmbedder, FakeTagger, FakeTranscriber
+
+    TAGGER_FACTORY = lambda s: FakeTagger()  # noqa: E731
+    TRANSCRIBER_FACTORY = lambda s, http: FakeTranscriber()  # noqa: E731
+    EMBEDDER_FACTORY = lambda s, http: FakeEmbedder()  # noqa: E731

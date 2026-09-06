@@ -1,4 +1,4 @@
-.PHONY: install up down migrate migrate-test test lint dev api worker scheduler evals
+.PHONY: install up down migrate migrate-test test lint dev api worker scheduler evals web-dev web-test web-e2e demo
 
 install:
 	uv sync --extra dev
@@ -32,3 +32,15 @@ scheduler:
 
 evals:
 	uv run python scripts/eval_tagging.py --min-agreement 0.7
+
+web-dev:
+	cd web && npm run dev
+
+web-test:
+	cd web && npm test
+
+web-e2e:
+	uv run python scripts/seed_dev_account.py && cd web && npx playwright install chromium && npm run test:e2e
+
+demo:
+	CS_FAKE_CONNECTOR=1 $(MAKE) -j3 api worker scheduler
