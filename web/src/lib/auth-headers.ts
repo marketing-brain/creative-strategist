@@ -8,7 +8,7 @@ export async function authHeaders(): Promise<Record<string, string>> {
   }
   let token: string | null | undefined;
   if (typeof window === 'undefined') {
-    const { auth } = await import('@clerk/nextjs/server');
+    const { auth } = await import(/* webpackIgnore: true */ '@clerk/nextjs/server');
     token = await (await auth()).getToken();
   } else {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

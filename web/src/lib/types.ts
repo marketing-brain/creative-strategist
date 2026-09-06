@@ -1,6 +1,6 @@
 export type Account = { id: string; platform: string; platform_account_id: string; name: string; currency: string; status: 'active' | 'paused' | 'disconnected'; sync_cursor: Record<string, unknown> };
 export type Creative = { id: string; ad_account_id: string; platform_creative_id: string; format: 'image' | 'video' | 'carousel'; headline: string | null; primary_text: string | null; cta_type: string | null; link_url: string | null; primary_asset_url: string | null; primary_asset_mime?: string | null; first_seen_at: string; distance?: number };
-export type MetricDay = { day: string; spend: number; impressions: number; clicks: number; conversions: number; conversion_value: number; ctr: number; cpa: number | null; roas: number | null };
+export type MetricDay = { day: string; spend: number; impressions: number; clicks: number; conversions: number; conversion_value: number; ctr: number | null; cpa: number | null; roas: number | null };
 export type Tag = { dimension: string; value: string; confidence: number; evidence: string };
 export type Dimension = { name: string; group: string; applies_to: string[]; values: string[] | null; description: string };
 export type Insight = { id: string; kind: 'pattern' | 'fatigue'; dimension: string; value: string; metric: 'ctr' | 'cpa' | 'roas'; creative_id: string | null; creative_headline?: string | null; window_start: string; window_end: string; sample_creatives: number; sample_spend: number; baseline: number; observed: number; lift: number; explanation: string; suggested_test: string; created_at: string };
