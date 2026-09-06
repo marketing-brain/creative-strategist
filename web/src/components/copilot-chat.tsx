@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { api } from '@/lib/api';
+import { ApiError, api } from '@/lib/api';
 import type { Conversation, Message } from '@/lib/types';
 
 export function CopilotChat({ conversations, initialId }: { conversations: Conversation[]; initialId: string | null }) {
@@ -11,22 +11,30 @@ export function CopilotChat({ conversations, initialId }: { conversations: Conve
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [pending, setPending] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const newConvRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (active) {
       const isNew = active === newConvRef.current;
+      setLoadError(null);
       api.messages(active).then((msgs) => {
         // Only update if not a newly created conversation
         if (!isNew) {
           setMessages(msgs);
         }
+      }).catch((e) => {
+        if (!isNew) setMessages([]);
+        setLoadError(e instanceof ApiError && e.status === 403
+          ? "You don't have permission to read this conversation — ask an admin."
+          : `Couldn't load this conversation: ${e instanceof Error ? e.message : 'Something went wrong.'}`);
       });
       if (isNew) {
         newConvRef.current = null;
       }
     } else {
       setMessages([]);
+      setLoadError(null);
     }
   }, [active]);
 
@@ -61,6 +69,7 @@ export function CopilotChat({ conversations, initialId }: { conversations: Conve
         <div className="flex-1 space-y-3 overflow-y-auto p-2">
           {messages.map((m, i) => <div key={i} className={`max-w-[80%] rounded p-3 text-sm ${m.role === 'user' ? 'ml-auto bg-primary text-primary-foreground' : 'bg-muted'}`}><pre className="whitespace-pre-wrap font-sans">{m.content}</pre></div>)}
           {pending && <div className="text-sm text-muted-foreground">Thinking…</div>}
+          {loadError && <p role="status" className="text-sm">{loadError}</p>}
         </div>
         <form className="flex gap-2 border-t pt-3" onSubmit={(e) => { e.preventDefault(); send(); }}>
           <Input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask about your creatives, e.g. which hooks have the lowest CPA this month?" />

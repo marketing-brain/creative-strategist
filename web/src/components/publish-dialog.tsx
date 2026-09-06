@@ -3,8 +3,13 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { api } from '@/lib/api';
+import { ApiError, api } from '@/lib/api';
 import type { GeneratedAsset } from '@/lib/types';
+
+const failure = (verb: string, e: unknown) =>
+  e instanceof ApiError && e.status === 403
+    ? "You don't have permission to do this — ask an admin."
+    : `Failed to ${verb}: ${e instanceof Error ? e.message : 'Something went wrong.'}`;
 
 type Opt = { id: string; name: string };
 
@@ -13,13 +18,23 @@ export function PublishDialog({ asset, accounts, open, onOpenChange }: { asset: 
   const [adsets, setAdsets] = useState<Opt[]>([]); const [adset, setAdset] = useState(''); const [pageId, setPageId] = useState(''); const [link, setLink] = useState('');
   const [headline, setHeadline] = useState(asset.headline); const [text, setText] = useState(asset.primary_text); const [cta, setCta] = useState(asset.cta_type);
   const [status, setStatus] = useState<'PAUSED' | 'ACTIVE'>('PAUSED'); const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => { if (account) api.campaigns(account).then(setCampaigns); else setCampaigns([]); setCampaign(''); }, [account]);
-  useEffect(() => { if (account && campaign) api.adsets(account, campaign).then(setAdsets); else setAdsets([]); setAdset(''); }, [account, campaign]);
+  useEffect(() => { if (account) api.campaigns(account).then(setCampaigns).catch((e) => { setCampaigns([]); setMsg(failure('load campaigns', e)); }); else setCampaigns([]); setCampaign(''); }, [account]);
+  useEffect(() => { if (account && campaign) api.adsets(account, campaign).then(setAdsets).catch((e) => { setAdsets([]); setMsg(failure('load ad sets', e)); }); else setAdsets([]); setAdset(''); }, [account, campaign]);
 
+  // Publishing spends money: guard against a double-submit, and never fail silently.
   const submit = async () => {
-    const { publish_job_id } = await api.publish(asset.id, { ad_account_id: account, campaign_id: campaign, adset_id: adset, page_id: pageId, link_url: link, headline, primary_text: text, cta_type: cta, status });
-    setMsg(`Publish job ${publish_job_id} queued.`);
+    if (busy) return;
+    setBusy(true); setMsg(null);
+    try {
+      const { publish_job_id } = await api.publish(asset.id, { ad_account_id: account, campaign_id: campaign, adset_id: adset, page_id: pageId, link_url: link, headline, primary_text: text, cta_type: cta, status });
+      setMsg(`Publish job ${publish_job_id} queued.`);
+    } catch (e) {
+      setMsg(failure('publish', e));
+    } finally {
+      setBusy(false);
+    }
   };
   const sel = (label: string, value: string, set: (v: string) => void, opts: Opt[]) => (
     <label className="block text-sm">{label}<select className="mt-1 w-full rounded border p-1" value={value} onChange={(e) => set(e.target.value)} aria-label={label}><option value="">Select…</option>{opts.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>);
@@ -35,7 +50,7 @@ export function PublishDialog({ asset, accounts, open, onOpenChange }: { asset: 
         <label className="block text-sm">Primary text<Input value={text} onChange={(e) => setText(e.target.value)} /></label>
         <label className="block text-sm">CTA<Input value={cta} onChange={(e) => setCta(e.target.value)} /></label>
         <label className="block text-sm">Status <select className="ml-1 rounded border p-1" value={status} onChange={(e) => setStatus(e.target.value as 'PAUSED' | 'ACTIVE')}><option>PAUSED</option><option>ACTIVE</option></select></label>
-        <Button onClick={submit} disabled={!account || !campaign || !adset || !pageId || !link}>Publish</Button>
+        <Button onClick={submit} disabled={busy || !account || !campaign || !adset || !pageId || !link}>{busy ? 'Publishing…' : 'Publish'}</Button>
         {msg && <p role="status" className="text-sm">{msg}</p>}
       </DialogContent>
     </Dialog>

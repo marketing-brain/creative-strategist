@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/lib/api', () => ({ api: {
+vi.mock('@/lib/api', async () => ({ ...(await vi.importActual<typeof import('@/lib/api')>('@/lib/api')), api: {
   messages: vi.fn().mockResolvedValue([]),
   newConversation: vi.fn().mockResolvedValue({ id: 'c1' }),
   send: vi.fn().mockResolvedValue({ reply: 'Questions win.' }),

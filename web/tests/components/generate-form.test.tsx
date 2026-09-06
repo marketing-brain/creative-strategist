@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 const create = vi.fn().mockResolvedValue({ id: 'g1' });
 const push = vi.fn();
-vi.mock('@/lib/api', () => ({ api: { createGeneration: (b: unknown) => create(b) } }));
+vi.mock('@/lib/api', async () => ({ ...(await vi.importActual<typeof import('@/lib/api')>('@/lib/api')), api: { createGeneration: (b: unknown) => create(b) } }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 import { GenerateForm } from '@/components/generate-form';
 

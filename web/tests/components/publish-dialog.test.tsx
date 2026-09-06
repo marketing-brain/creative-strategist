@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 const publish = vi.fn().mockResolvedValue({ publish_job_id: 'p1' });
-vi.mock('@/lib/api', () => ({ api: {
+vi.mock('@/lib/api', async () => ({ ...(await vi.importActual<typeof import('@/lib/api')>('@/lib/api')), api: {
   campaigns: vi.fn().mockResolvedValue([{ id: 'c1', name: 'Camp' }]),
   adsets: vi.fn().mockResolvedValue([{ id: 'as1', name: 'Set' }]),
   publish: (id: string, b: unknown) => publish(id, b),
