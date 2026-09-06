@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ApiError, api, apiFetch } from '@/lib/api';
+import { blobUrl } from '@/lib/blob-url';
 import type { BrandKit } from '@/lib/types';
 
 const list = (s: string, sep: RegExp) => s.split(sep).map((x) => x.trim()).filter(Boolean);
@@ -50,7 +51,7 @@ export function BrandKitForm({ initial }: { initial: BrandKit | null }) {
       <label className="block text-sm">Voice rules<Textarea value={voice} onChange={(e) => setVoice(e.target.value)} /></label>
       <label className="block text-sm">Prohibited claims (one per line)<Textarea value={prohibited} onChange={(e) => setProhibited(e.target.value)} /></label>
       <label className="block text-sm">Logo (PNG or SVG)<Input type="file" accept="image/png,image/svg+xml" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} /></label>
-      {logoUrl && <img src={logoUrl} alt="logo" className="h-12" />}
+      {logoUrl && <img src={blobUrl(logoUrl)} alt="logo" className="h-12" />}
       <Button onClick={save}>Save brand kit</Button>
       {msg && <p role="status" className="text-sm">{msg}</p>}
     </section>

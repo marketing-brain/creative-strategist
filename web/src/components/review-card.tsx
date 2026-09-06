@@ -4,6 +4,7 @@ import { PublishDialog } from '@/components/publish-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ApiError, api } from '@/lib/api';
+import { blobUrl } from '@/lib/blob-url';
 import type { GeneratedAsset } from '@/lib/types';
 
 export function ReviewCard({ asset, accounts, isAdmin }: { asset: GeneratedAsset; accounts: { id: string; name: string }[]; isAdmin: boolean }) {
@@ -25,7 +26,7 @@ export function ReviewCard({ asset, accounts, isAdmin }: { asset: GeneratedAsset
   };
   return (
     <div className="space-y-2 rounded border p-3 text-sm">
-      {asset.kind === 'video' ? <video src={asset.url} controls className="w-full rounded" /> : <img src={asset.url} alt="" className="w-full rounded" />}
+      {asset.kind === 'video' ? <video src={blobUrl(asset.url)} controls className="w-full rounded" /> : <img src={blobUrl(asset.url)} alt="" className="w-full rounded" />}
       <div className="flex items-center justify-between"><Badge variant="outline">{asset.aspect} · v{asset.variant}</Badge><Badge>{state}</Badge></div>
       <div className="font-medium">{asset.headline}</div><div className="text-muted-foreground">{asset.primary_text}</div>
       <div className="flex gap-2">

@@ -2,6 +2,7 @@ import { CreativeCard } from '@/components/creative-card';
 import { MetricChart } from '@/components/metric-chart';
 import { TagList } from '@/components/tag-list';
 import { api } from '@/lib/api';
+import { blobUrl } from '@/lib/blob-url';
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -10,12 +11,13 @@ export default async function CreativeDetail({ params }: { params: Promise<{ id:
   const until = new Date(); const since = new Date(until.getTime() - 89 * 86400000);
   const [creative, tags, metrics, dims, similar] = await Promise.all([
     api.creative(id), api.creativeTags(id), api.creativeMetrics(id, iso(since), iso(until)), api.dimensions(), api.similar(id)]);
+  const assetSrc = blobUrl(creative.primary_asset_url);
   return (
     <div className="grid gap-8 lg:grid-cols-3">
       <div className="space-y-3">
-        {creative.primary_asset_url && (creative.format === 'video'
-          ? <video src={creative.primary_asset_url} controls className="w-full rounded" />
-          : <img src={creative.primary_asset_url} alt="" className="w-full rounded" />)}
+        {assetSrc && (creative.format === 'video'
+          ? <video src={assetSrc} controls className="w-full rounded" />
+          : <img src={assetSrc} alt="" className="w-full rounded" />)}
         <h1 className="text-lg font-semibold">{creative.headline}</h1>
         <p className="text-sm text-muted-foreground">{creative.primary_text}</p>
         <p className="text-xs">CTA: {creative.cta_type} · {creative.link_url}</p>
