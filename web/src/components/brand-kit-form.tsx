@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { api, apiFetch } from '@/lib/api';
+import { ApiError, api, apiFetch } from '@/lib/api';
 import type { BrandKit } from '@/lib/types';
 
 const list = (s: string, sep: RegExp) => s.split(sep).map((x) => x.trim()).filter(Boolean);
@@ -17,13 +17,29 @@ export function BrandKitForm({ initial }: { initial: BrandKit | null }) {
   const [msg, setMsg] = useState<string | null>(null);
 
   const save = async () => {
-    const kit = await api.saveBrandKit({ colors: list(colors, /,/), fonts: list(fonts, /,/), voice_rules: voice, prohibited_claims: list(prohibited, /\n/) });
-    setMsg(`Saved version ${kit.version}.`);
+    try {
+      const kit = await api.saveBrandKit({ colors: list(colors, /,/), fonts: list(fonts, /,/), voice_rules: voice, prohibited_claims: list(prohibited, /\n/) });
+      setMsg(`Saved version ${kit.version}.`);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 403) {
+        setMsg("You don't have permission to do this — ask an admin.");
+      } else {
+        setMsg(`Failed to save: ${e instanceof Error ? e.message : 'Something went wrong.'}`);
+      }
+    }
   };
   const upload = async (file: File) => {
-    const fd = new FormData(); fd.append('file', file);
-    const kit = await apiFetch<BrandKit>('/brand-kit/logo', { method: 'POST', body: fd });
-    setLogoUrl(kit.logo_url); setMsg(`Logo saved (version ${kit.version}).`);
+    try {
+      const fd = new FormData(); fd.append('file', file);
+      const kit = await apiFetch<BrandKit>('/brand-kit/logo', { method: 'POST', body: fd });
+      setLogoUrl(kit.logo_url); setMsg(`Logo saved (version ${kit.version}).`);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 403) {
+        setMsg("You don't have permission to do this — ask an admin.");
+      } else {
+        setMsg(`Failed to upload logo: ${e instanceof Error ? e.message : 'Something went wrong.'}`);
+      }
+    }
   };
 
   return (
