@@ -10,6 +10,21 @@ async def test_me_requires_auth(client):
     assert (await client.get("/me")).status_code == 401
 
 
+async def test_cors_allows_configured_origin(client, settings):
+    origin = settings.cors_origins_list[0]
+    r = await client.get("/health", headers={"Origin": origin})
+    assert r.status_code == 200
+    assert r.headers.get("access-control-allow-origin") == origin
+
+
+async def test_cors_rejects_unconfigured_origin(client):
+    r = await client.get("/health", headers={"Origin": "http://evil.example"})
+    # The request still succeeds; the browser is what enforces CORS. What matters
+    # is that the middleware does not reflect an arbitrary origin back.
+    assert r.status_code == 200
+    assert "access-control-allow-origin" not in r.headers
+
+
 async def test_me_provisions_org_and_membership(client, db):
     r = await client.get("/me", headers=dev_headers(org="org_abc", user="user_9"))
     assert r.status_code == 200

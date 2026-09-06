@@ -1,36 +1,39 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# creative-strategist web
 
-## Getting Started
+The Next.js (App Router) front end for creative-strategist: creative library and
+detail pages, insights and fatigue, the weekly brief, the copilot chat, the
+generation form, the review queue and the publish dialog.
 
-First, run the development server:
+It is a thin client over the FastAPI backend in `../src/cs` — every page is a
+server component that calls the API through `src/lib/api.ts`. It has no database
+or state of its own.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Running it
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+    npm install
+    cp .env.example .env.local     # NEXT_PUBLIC_API_URL, auth mode, dev identity
+    npm run dev                    # http://localhost:3000
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The backend must be running too (`make api` + `make worker` from the repo root).
+See the root [README](../README.md) for the full local-setup story: Postgres and
+MinIO, migrations, the worker/scheduler processes, and `make demo` for a
+fake-connector mode that needs no real Meta credentials.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+    npm test          # vitest (jsdom) unit + component tests
+    npm run build     # production build / type + lint check
+    npm run test:e2e  # Playwright; prefer `make web-e2e` from the repo root
 
-## Learn More
+## Layout
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `src/app/` — routes. Pages are async server components; `error.tsx` /
+  `global-error.tsx` are the error boundaries.
+- `src/app/blobs/[...path]/route.ts` — same-origin proxy for the API's
+  `/blobs/{key}` route, which requires an auth header a bare `<img src>` cannot
+  send. Use `blobUrl()` from `src/lib/blob-url.ts` on any asset URL the API
+  returns before putting it in a `src` attribute.
+- `src/components/` — client components (`'use client'`) plus the shadcn-style
+  primitives under `src/components/ui/`.
+- `src/lib/auth-headers*.ts` — the isomorphic auth-header contract. The browser
+  file is `auth-headers.ts`; `auth-headers.server.ts` is swapped in for server
+  components by a webpack alias in `next.config.ts`. Server-only modules should
+  import `auth-headers.server` directly.
