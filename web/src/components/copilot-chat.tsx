@@ -34,10 +34,16 @@ export function CopilotChat({ conversations, initialId }: { conversations: Conve
     const content = input.trim();
     if (!content || pending) return;
     let id = active;
-    if (!id) { const c = await api.newConversation(content.slice(0, 60)); id = c.id; newConvRef.current = id; setConvs([{ id, title: content.slice(0, 60), created_at: new Date().toISOString() }, ...convs]); setActive(id); }
-    setMessages((m) => [...m, { role: 'user', content }]); setInput(''); setPending(true);
-    try { const { reply } = await api.send(id, content); setMessages((m) => [...m, { role: 'assistant', content: reply }]); }
-    finally { setPending(false); }
+    try {
+      if (!id) { const c = await api.newConversation(content.slice(0, 60)); id = c.id; newConvRef.current = id; setConvs([{ id, title: content.slice(0, 60), created_at: new Date().toISOString() }, ...convs]); setActive(id); }
+      setMessages((m) => [...m, { role: 'user', content }]); setInput(''); setPending(true);
+      const { reply } = await api.send(id, content);
+      setMessages((m) => [...m, { role: 'assistant', content: reply }]);
+    } catch {
+      setMessages((m) => [...m, { role: 'assistant', content: 'Something went wrong sending that message. Please try again.' }]);
+    } finally {
+      setPending(false);
+    }
   };
 
 
