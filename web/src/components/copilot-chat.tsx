@@ -45,7 +45,11 @@ export function CopilotChat({ conversations, initialId }: { conversations: Conve
     <div className="grid h-[70vh] grid-cols-4 gap-4">
       <aside className="space-y-2 overflow-y-auto border-r pr-3 text-sm">
         <Button size="sm" variant="outline" onClick={() => setActive(null)}>New conversation</Button>
-        {convs.map((c) => <button key={c.id} onClick={() => setActive(c.id)} className={`block w-full truncate rounded px-2 py-1 text-left ${c.id === active ? 'bg-muted' : ''}`}>{c.title}</button>)}
+        {convs.map((c) => (
+          <button key={c.id} onClick={() => setActive(c.id)} className={`block w-full truncate rounded px-2 py-1 text-left ${c.id === active ? 'bg-muted' : ''}`}>
+            {`${c.title} · ${new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+          </button>
+        ))}
       </aside>
       <section className="col-span-3 flex flex-col">
         <div className="flex-1 space-y-3 overflow-y-auto p-2">
