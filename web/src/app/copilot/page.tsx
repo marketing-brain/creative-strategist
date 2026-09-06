@@ -1,7 +1,17 @@
 import { CopilotChat } from '@/components/copilot-chat';
 import { api } from '@/lib/api';
 
+export const metadata = { title: 'Copilot' };
+
 export default async function Copilot() {
   const conversations = await api.conversations();
-  return <div className="space-y-4"><h1 className="text-xl font-semibold">Copilot</h1><CopilotChat conversations={conversations} initialId={conversations[0]?.id ?? null} /></div>;
+  return (
+    <div className="flex h-full flex-col space-y-4">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Copilot</h1>
+        <p className="text-sm text-muted-foreground">Ask questions about your creative performance in plain language.</p>
+      </div>
+      <CopilotChat conversations={conversations} initialId={conversations[0]?.id ?? null} />
+    </div>
+  );
 }

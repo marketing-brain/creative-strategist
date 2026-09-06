@@ -15,9 +15,12 @@ const asset = { id: 'a1', generation_id: 'g', kind: 'image' as const, aspect: '1
 describe('PublishDialog', () => {
   it('walks account -> campaign -> adset and publishes paused', async () => {
     render(<PublishDialog asset={asset} accounts={[{ id: 'acc1', name: 'Main' }]} open onOpenChange={() => {}} />);
-    await userEvent.selectOptions(screen.getByLabelText(/account/i), 'acc1');
-    await userEvent.selectOptions(await screen.findByLabelText(/campaign/i), 'c1');
-    await userEvent.selectOptions(await screen.findByLabelText(/ad set/i), 'as1');
+    await userEvent.click(screen.getByLabelText(/account/i));
+    await userEvent.click(await screen.findByRole('option', { name: 'Main' }));
+    await userEvent.click(await screen.findByLabelText(/campaign/i));
+    await userEvent.click(await screen.findByRole('option', { name: 'Camp' }));
+    await userEvent.click(await screen.findByLabelText(/ad set/i));
+    await userEvent.click(await screen.findByRole('option', { name: 'Set' }));
     await userEvent.type(screen.getByLabelText(/page id/i), 'pg');
     await userEvent.type(screen.getByLabelText(/link url/i), 'https://x');
     await userEvent.click(screen.getByRole('button', { name: /publish/i }));

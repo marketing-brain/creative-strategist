@@ -9,7 +9,8 @@ import { CreativeFilters } from '@/components/creative-filters';
 describe('CreativeFilters', () => {
   it('pushes query on format change', async () => {
     render(<CreativeFilters accounts={[{ id: 'a1', name: 'Main' }]} />);
-    await userEvent.selectOptions(screen.getByLabelText(/format/i), 'video');
+    await userEvent.click(screen.getByLabelText(/format/i));
+    await userEvent.click(await screen.findByRole('option', { name: 'Video' }));
     expect(push).toHaveBeenCalledWith('/creatives?format=video');
   });
 });

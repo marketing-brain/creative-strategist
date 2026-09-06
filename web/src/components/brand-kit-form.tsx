@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ApiError, api, apiFetch } from '@/lib/api';
@@ -31,9 +32,11 @@ export function BrandKitForm({ initial }: { initial: BrandKit | null }) {
   };
   const upload = async (file: File) => {
     try {
-      const fd = new FormData(); fd.append('file', file);
+      const fd = new FormData();
+      fd.append('file', file);
       const kit = await apiFetch<BrandKit>('/brand-kit/logo', { method: 'POST', body: fd });
-      setLogoUrl(kit.logo_url); setMsg(`Logo saved (version ${kit.version}).`);
+      setLogoUrl(kit.logo_url);
+      setMsg(`Logo saved (version ${kit.version}).`);
     } catch (e) {
       if (e instanceof ApiError && e.status === 403) {
         setMsg("You don't have permission to do this — ask an admin.");
@@ -44,16 +47,39 @@ export function BrandKitForm({ initial }: { initial: BrandKit | null }) {
   };
 
   return (
-    <section className="space-y-3">
-      <h2 className="text-lg font-semibold">Brand kit</h2>
-      <label className="block text-sm">Colors (comma separated)<Input value={colors} onChange={(e) => setColors(e.target.value)} placeholder="#112233, #FFFFFF" /></label>
-      <label className="block text-sm">Fonts (comma separated)<Input value={fonts} onChange={(e) => setFonts(e.target.value)} /></label>
-      <label className="block text-sm">Voice rules<Textarea value={voice} onChange={(e) => setVoice(e.target.value)} /></label>
-      <label className="block text-sm">Prohibited claims (one per line)<Textarea value={prohibited} onChange={(e) => setProhibited(e.target.value)} /></label>
-      <label className="block text-sm">Logo (PNG or SVG)<Input type="file" accept="image/png,image/svg+xml" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} /></label>
-      {logoUrl && <img src={blobUrl(logoUrl)} alt="logo" className="h-12" />}
-      <Button onClick={save}>Save brand kit</Button>
-      {msg && <p role="status" className="text-sm">{msg}</p>}
-    </section>
+    <Card>
+      <CardHeader>
+        <CardTitle>Brand kit</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <label className="flex flex-col gap-1.5 text-sm font-medium">
+          Colors (comma separated)
+          <Input value={colors} onChange={(e) => setColors(e.target.value)} placeholder="#112233, #FFFFFF" autoComplete="off" />
+        </label>
+        <label className="flex flex-col gap-1.5 text-sm font-medium">
+          Fonts (comma separated)
+          <Input value={fonts} onChange={(e) => setFonts(e.target.value)} autoComplete="off" />
+        </label>
+        <label className="flex flex-col gap-1.5 text-sm font-medium">
+          Voice rules
+          <Textarea value={voice} onChange={(e) => setVoice(e.target.value)} />
+        </label>
+        <label className="flex flex-col gap-1.5 text-sm font-medium">
+          Prohibited claims (one per line)
+          <Textarea value={prohibited} onChange={(e) => setProhibited(e.target.value)} />
+        </label>
+        <label className="flex flex-col gap-1.5 text-sm font-medium">
+          Logo (PNG or SVG)
+          <Input type="file" accept="image/png,image/svg+xml" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
+        </label>
+        {logoUrl && <img src={blobUrl(logoUrl)} alt="Brand logo" className="h-12 rounded border border-border bg-background p-1" />}
+        <Button onClick={save}>Save brand kit</Button>
+        {msg && (
+          <p role="status" className="text-sm">
+            {msg}
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }
