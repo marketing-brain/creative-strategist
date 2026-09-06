@@ -108,6 +108,31 @@ async def test_retry_does_not_duplicate_generated_assets(db, blobs, settings, or
     assert len(first) == len(second) == 6
 
 
+async def test_retry_preserves_already_reviewed_assets(db, blobs, settings, org_id, kit):
+    """A retry's cleanup must not delete a generated_asset a human already approved or
+    rejected: doing so would (a) silently discard that review decision, and (b) if the
+    approved asset had already been published, violate publish_job's FK to generated_asset
+    (asyncpg.ForeignKeyViolationError) since publish_job.generated_asset_id has no ON DELETE
+    clause. Only 'draft' rows are cleared before a retry regenerates."""
+    gid = await repo.create_generation(db, org_id, kit.id, "static", 2, "u1", concept="c")
+    ctx = _ctx(db, blobs, settings, org_id)
+    await service.run_generation(
+        ctx, gid, FakeCopyWriter(), FakeImageGenerator(), FakeVideoGenerator()
+    )
+    first = await repo.list_generated_assets(db, org_id, generation_id=gid)
+    approved_id = first[0]["id"]
+    assert await repo.set_review_state(db, org_id, approved_id, "approved", "u1")
+
+    # Simulate a job-queue retry of the same generation_id.
+    await service.run_generation(
+        ctx, gid, FakeCopyWriter(), FakeImageGenerator(), FakeVideoGenerator()
+    )
+    second = await repo.list_generated_assets(db, org_id, generation_id=gid)
+    by_id = {a["id"]: a for a in second}
+    assert approved_id in by_id and by_id[approved_id]["review_state"] == "approved"
+    assert len([a for a in second if a["review_state"] == "draft"]) == 6
+
+
 class _OverGenerousCopyWriter:
     """A copywriter that ignores n and always returns more sets than requested, simulating a
     real Claude response returning more sets than asked for."""

@@ -115,6 +115,34 @@ async def test_publish_video_uploads_still_as_thumbnail(
     assert video_data["image_hash"] == "hash_2"
 
 
+async def test_publish_meta_skips_non_pending_job(
+    db, blobs, settings, org_id, approved_asset, monkeypatch
+):
+    """publish.meta's status guard must stop a retry from re-running an already-attempted
+    publish_job: re-running it after the Meta API calls already succeeded (but a later step
+    failed) would create a second, real ad on the customer's Meta account."""
+    acct = await ingest_repo.upsert_ad_account(
+        db, org_id, "1", "M", "USD", encrypt_str(settings, "t"), None
+    )
+    fake = FakeConnector()
+    monkeypatch.setattr(ingest_service, "CONNECTOR_FACTORY", lambda s, a, http, b: fake)
+    pj = await db.fetchval(
+        "INSERT INTO publish_job (id, org_id, generated_asset_id, ad_account_id, campaign_id, "
+        "adset_id, ad_status_requested, form, status) "
+        "VALUES ($1,$2,$3,$4,'c1','as1','PAUSED',$5,'running') RETURNING id",
+        UUID(int=9),
+        org_id,
+        approved_asset,
+        acct,
+        {"link_url": "https://x", "page_id": "p1"},
+    )
+    await queue.enqueue(db, org_id, "publish.meta", {"publish_job_id": str(pj)})
+    await run_once(db, blobs, settings, "w")
+    assert fake.uploads == [] and fake.created_ads == []
+    row = await db.fetchrow("SELECT status FROM publish_job WHERE id=$1", pj)
+    assert row["status"] == "running"
+
+
 async def test_publish_job_and_loop_closure(
     db, blobs, settings, org_id, approved_asset, monkeypatch
 ):

@@ -41,6 +41,9 @@ async def test_review_transitions_and_publish_gate(client, db, settings):
     r = await client.post(f"/generated-assets/{aid}/publish", headers=H, json=form)
     assert r.status_code == 200 and await db.fetchval("SELECT job_type FROM job") == "publish.meta"
     assert (await client.get("/publish-jobs", headers=H)).json()[0]["status"] == "pending"
+    # An external, financial/creative side effect on the customer's real Meta account must not
+    # be auto-retried from scratch by the queue's default policy -- see publish.jobs.publish_meta.
+    assert await db.fetchval("SELECT max_attempts FROM job WHERE job_type='publish.meta'") == 1
 
 
 async def test_publish_rejects_ad_account_from_another_org(client, db, settings):
