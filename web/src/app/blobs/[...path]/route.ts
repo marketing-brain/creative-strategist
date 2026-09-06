@@ -16,10 +16,29 @@ const base = () => (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000').
 // <img>/<video> tag sends), and we re-issue it upstream with auth attached.
 export async function GET(_req: Request, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
-  if (!path?.length || path.some((s) => s === '' || s === '.' || s === '..')) {
+  // Next decodes each dynamic-route segment individually, before this handler
+  // ever sees it — so a single raw segment can be a percent-encoded string
+  // that, once decoded, itself contains '/' or '\' and its own traversal
+  // sequences (e.g. `..%2F..%2Fme` decodes to `../../me`). The `s === '..'`
+  // check alone only catches a segment that IS exactly '..', not one that
+  // CONTAINS a separator after decoding, so also reject any decoded segment
+  // holding a raw path separator: a legitimate blob-key segment never has one.
+  if (
+    !path?.length ||
+    path.some((s) => s === '' || s === '.' || s === '..' || s.includes('/') || s.includes('\\'))
+  ) {
     return new NextResponse('invalid blob key', { status: 400 });
   }
-  const upstream = await fetch(`${base()}/blobs/${path.join('/')}`, {
+  // Defense in depth: validate the final resolved URL rather than trusting
+  // segment-level filtering to enumerate every encoding trick. The URL
+  // constructor normalizes '..' (and, for the http/https special schemes,
+  // treats '\' as '/'), so anything that still escapes `/blobs/` here is
+  // rejected regardless of how it was encoded.
+  const upstreamUrl = new URL(`/blobs/${path.join('/')}`, `${base()}/`);
+  if (!upstreamUrl.pathname.startsWith('/blobs/')) {
+    return new NextResponse('invalid blob key', { status: 400 });
+  }
+  const upstream = await fetch(upstreamUrl, {
     headers: await authHeaders(),
     cache: 'no-store',
   });
