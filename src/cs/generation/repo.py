@@ -102,18 +102,21 @@ async def insert_generated_asset(
 
 
 async def delete_generated_assets(db: Database, org_id: UUID, generation_id: UUID) -> None:
-    """Delete this generation's not-yet-reviewed (draft) generated_asset rows.
+    """Delete this generation's not-yet-approved generated_asset rows (draft or rejected).
 
     Called at the top of a generation.run attempt so a job-queue retry after a partial
     failure regenerates from scratch instead of piling duplicate drafts (and duplicate spend)
-    on top of whatever an earlier, failed attempt already inserted. Scoped to review_state=
-    'draft' only: an approved/rejected row reflects a human decision the retry must not
-    silently discard, and if it's already approved it may be referenced by a publish_job
-    (generated_asset_id has no ON DELETE clause) -- deleting it would raise a foreign-key
-    violation instead of a clean retry.
+    on top of whatever an earlier, failed attempt already inserted. Scoped to exclude
+    'approved' rows only: approving is the one decision that must survive a retry -- it may
+    already be referenced by a publish_job (generated_asset_id has no ON DELETE clause), so
+    deleting it would raise a foreign-key violation instead of a clean retry. A 'rejected' row
+    is deliberately NOT protected: rejecting a draft means "try again for this slot," not
+    "never fill this slot again," so a retry is free to clear and regenerate it same as a
+    plain draft.
     """
     await db.execute(
-        "DELETE FROM generated_asset WHERE org_id=$1 AND generation_id=$2 AND review_state='draft'",
+        "DELETE FROM generated_asset WHERE org_id=$1 AND generation_id=$2 "
+        "AND review_state != 'approved'",
         org_id,
         generation_id,
     )

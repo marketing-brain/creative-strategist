@@ -101,20 +101,28 @@ async def run_generation(
         await repo.set_generation_status(
             ctx.db, org_id, generation_id, "running", model=ctx.settings.image_model, prompt=prompt
         )
+        # delete_generated_assets only clears non-approved rows, so any row still occupying a
+        # (kind, aspect, variant) slot survived because a human already approved it (possibly
+        # already published). Fetch them all once rather than a query per slot, and leave both
+        # the approved row and the blob it points at untouched -- never regenerate over it.
+        existing_by_slot = {
+            (a["kind"], a["aspect"], a["variant"]): a
+            for a in await repo.list_generated_assets(ctx.db, org_id, generation_id=generation_id)
+        }
         produced = 0
         first_still_key: str | None = None
+        first_still_copy: tuple[str, str, str] | None = None
         for variant, (raw, copy) in enumerate(zip(raws, sets, strict=False), start=1):
             for aspect in ASPECTS:
-                # delete_generated_assets only clears 'draft' rows, so a row still occupying
-                # this (kind, aspect, variant) slot survived from an earlier attempt because a
-                # human already reviewed it. Leave its blob and DB row untouched rather than
-                # silently overwriting what an approved/rejected asset actually is.
-                existing = await repo.get_generated_asset_by_variant(
-                    ctx.db, org_id, generation_id, "image", aspect, variant
-                )
+                existing = existing_by_slot.get(("image", aspect, variant))
                 if existing is not None:
                     if aspect == "9:16" and first_still_key is None:
                         first_still_key = existing["path"]
+                        first_still_copy = (
+                            existing["headline"],
+                            existing["primary_text"],
+                            existing["cta_type"],
+                        )
                     continue
                 img = await asyncio.to_thread(fit_to_aspect, raw, aspect)
                 if logo:
@@ -139,22 +147,20 @@ async def run_generation(
                 produced += 1
                 if aspect == "9:16" and first_still_key is None:
                     first_still_key = key
+                    first_still_copy = (copy.headline, copy.primary_text, copy.cta_type)
         existing_video = (
-            await repo.get_generated_asset_by_variant(
-                ctx.db, org_id, generation_id, "video", "9:16", 1
-            )
-            if g["kind"] == "video"
-            else None
+            existing_by_slot.get(("video", "9:16", 1)) if g["kind"] == "video" else None
         )
-        if g["kind"] == "video" and first_still_key and existing_video is None:
+        if g["kind"] == "video" and first_still_key and first_still_copy and existing_video is None:
+            headline, primary_text, cta_type = first_still_copy
             still_url = await ctx.blobs.url_for(first_still_key, expires_seconds=3600)
             clip = await video_gen.generate(
-                still_url, f"Subtle cinematic motion. {sets[0].headline}", VIDEO_SECONDS, "9:16"
+                still_url, f"Subtle cinematic motion. {headline}", VIDEO_SECONDS, "9:16"
             )
             final = await asyncio.to_thread(
                 video_with_end_card,
                 clip,
-                sets[0].headline,
+                headline,
                 logo,
                 kit.colors[0] if kit.colors else "#000000",
                 "9:16",
@@ -170,9 +176,9 @@ async def run_generation(
                 1,
                 key,
                 sha256_hex(final),
-                sets[0].headline,
-                sets[0].primary_text,
-                sets[0].cta_type,
+                headline,
+                primary_text,
+                cta_type,
             )
             produced += 1
         await repo.set_generation_status(ctx.db, org_id, generation_id, "done")

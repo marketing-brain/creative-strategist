@@ -109,11 +109,11 @@ async def test_retry_does_not_duplicate_generated_assets(db, blobs, settings, or
 
 
 async def test_retry_preserves_already_reviewed_assets(db, blobs, settings, org_id, kit):
-    """A retry's cleanup must not delete a generated_asset a human already approved or
-    rejected: doing so would (a) silently discard that review decision, and (b) if the
-    approved asset had already been published, violate publish_job's FK to generated_asset
-    (asyncpg.ForeignKeyViolationError) since publish_job.generated_asset_id has no ON DELETE
-    clause. Only 'draft' rows are cleared before a retry regenerates."""
+    """A retry's cleanup must not delete a generated_asset a human already approved: doing so
+    would (a) silently discard that decision, and (b) if the asset had already been
+    published, violate publish_job's FK to generated_asset (asyncpg.ForeignKeyViolationError)
+    since publish_job.generated_asset_id has no ON DELETE clause. Only non-approved rows
+    (draft or rejected) are cleared before a retry regenerates."""
     gid = await repo.create_generation(db, org_id, kit.id, "static", 2, "u1", concept="c")
     ctx = _ctx(db, blobs, settings, org_id)
     await service.run_generation(
@@ -165,6 +165,73 @@ async def test_retry_skips_regenerating_an_already_reviewed_video(db, blobs, set
     assert len(videos) == 1 and videos[0]["id"] == video_id and videos[0]["sha256"] == "video-sha"
     stills_9x16 = [a for a in assets if a["kind"] == "image" and a["aspect"] == "9:16"]
     assert len(stills_9x16) == 1 and stills_9x16[0]["id"] == still_id
+
+
+async def test_retry_regenerates_a_rejected_slot(db, blobs, settings, org_id, kit):
+    """Rejecting a draft means 'try again for this slot', not 'never fill this slot again' --
+    unlike approved rows, a rejected row must not permanently block its slot from a future
+    retry (or an explicit re-generate action, which also goes through this same cleanup)."""
+    gid = await repo.create_generation(db, org_id, kit.id, "static", 1, "u1", concept="c")
+    ctx = _ctx(db, blobs, settings, org_id)
+    await service.run_generation(
+        ctx, gid, FakeCopyWriter(), FakeImageGenerator(), FakeVideoGenerator()
+    )
+    first = await repo.list_generated_assets(db, org_id, generation_id=gid)
+    rejected_id = first[0]["id"]
+    rejected_slot = (first[0]["kind"], first[0]["aspect"], first[0]["variant"])
+    assert await repo.set_review_state(db, org_id, rejected_id, "rejected", "u1")
+
+    await service.run_generation(
+        ctx, gid, FakeCopyWriter(), FakeImageGenerator(), FakeVideoGenerator()
+    )
+    second = await repo.list_generated_assets(db, org_id, generation_id=gid)
+    assert len(second) == 3  # still just one full set of aspects for variant 1, not 4
+    replacement = next(a for a in second if (a["kind"], a["aspect"], a["variant"]) == rejected_slot)
+    assert replacement["id"] != rejected_id and replacement["review_state"] == "draft"
+
+
+async def test_retry_reuses_the_still_own_copy_for_the_video_not_the_fresh_rewrite(
+    db, blobs, settings, org_id, kit, monkeypatch
+):
+    """If a retry reuses an old, already-approved still (the video row itself doesn't exist
+    yet), the video must be built from THAT still's own headline/copy, not from whatever the
+    copywriter freshly wrote on this attempt -- otherwise the video's end-card text and stored
+    copy would describe a different message than the still it was visually seeded from.
+    video_with_end_card is monkeypatched so this doesn't need a real ffmpeg."""
+    from cs.generation import service as service_mod
+
+    monkeypatch.setattr(service_mod, "video_with_end_card", lambda *a, **kw: b"fakemp4")
+
+    gid = await repo.create_generation(db, org_id, kit.id, "video", 1, "u1", concept="c")
+    still_key = f"{org_id}/generated/{gid}/v1-9x16.jpg"
+    await blobs.put(still_key, solid_png(64, 64), "image/jpeg")
+    still_id = await repo.insert_generated_asset(
+        db,
+        org_id,
+        gid,
+        "image",
+        "9:16",
+        1,
+        still_key,
+        "still-sha",
+        "Old approved headline",
+        "Old approved body",
+        "LEARN_MORE",
+    )
+    assert await repo.set_review_state(db, org_id, still_id, "approved", "u1")
+
+    vid = FakeVideoGenerator()
+    fresh_copy = FakeCopyWriter()
+    await service.run_generation(
+        _ctx(db, blobs, settings, org_id), gid, fresh_copy, FakeImageGenerator(), vid
+    )
+
+    assert vid.calls[0]["prompt"] == "Subtle cinematic motion. Old approved headline"
+    videos = await repo.list_generated_assets(db, org_id, generation_id=gid, review_state="draft")
+    video_row = next(a for a in videos if a["kind"] == "video")
+    assert video_row["headline"] == "Old approved headline"
+    assert video_row["primary_text"] == "Old approved body"
+    assert video_row["cta_type"] == "LEARN_MORE"
 
 
 class _OverGenerousCopyWriter:
