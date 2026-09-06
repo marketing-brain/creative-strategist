@@ -1,0 +1,13 @@
+export type Account = { id: string; platform: string; platform_account_id: string; name: string; currency: string; status: 'active' | 'paused' | 'disconnected'; sync_cursor: Record<string, unknown> };
+export type Creative = { id: string; ad_account_id: string; platform_creative_id: string; format: 'image' | 'video' | 'carousel'; headline: string | null; primary_text: string | null; cta_type: string | null; link_url: string | null; primary_asset_url: string | null; primary_asset_mime?: string | null; first_seen_at: string; distance?: number };
+export type MetricDay = { day: string; spend: number; impressions: number; clicks: number; conversions: number; conversion_value: number; ctr: number; cpa: number | null; roas: number | null };
+export type Tag = { dimension: string; value: string; confidence: number; evidence: string };
+export type Dimension = { name: string; group: string; applies_to: string[]; values: string[] | null; description: string };
+export type Insight = { id: string; kind: 'pattern' | 'fatigue'; dimension: string; value: string; metric: 'ctr' | 'cpa' | 'roas'; creative_id: string | null; creative_headline?: string | null; window_start: string; window_end: string; sample_creatives: number; sample_spend: number; baseline: number; observed: number; lift: number; explanation: string; suggested_test: string; created_at: string };
+export type Brief = { id: string; week_start: string; content_md: string };
+export type Conversation = { id: string; title: string; created_at: string };
+export type Message = { role: 'user' | 'assistant'; content: string };
+export type GeneratedAsset = { id: string; generation_id: string; kind: 'image' | 'video'; aspect: string; variant: number; url: string; headline: string; primary_text: string; cta_type: string; review_state: 'draft' | 'approved' | 'rejected' };
+export type Generation = { id: string; kind: string; status: string; concept: string | null; source_insight_id: string | null; created_at: string; error: string | null; assets: GeneratedAsset[] };
+export type PublishJob = { id: string; generated_asset_id: string; status: string; platform_ad_id: string | null; error: string | null; created_at: string };
+export type BrandKit = { id: string; version: number; colors: string[]; fonts: string[]; voice_rules: string; prohibited_claims: string[]; logo_url: string | null };
