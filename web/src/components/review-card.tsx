@@ -3,13 +3,26 @@ import { useState } from 'react';
 import { PublishDialog } from '@/components/publish-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { api } from '@/lib/api';
+import { ApiError, api } from '@/lib/api';
 import type { GeneratedAsset } from '@/lib/types';
 
 export function ReviewCard({ asset, accounts, isAdmin }: { asset: GeneratedAsset; accounts: { id: string; name: string }[]; isAdmin: boolean }) {
   const [state, setState] = useState(asset.review_state);
   const [open, setOpen] = useState(false);
-  const act = async (s: 'approved' | 'rejected') => { const { ok } = await (s === 'approved' ? api.approve(asset.id) : api.reject(asset.id)); if (ok) setState(s); };
+  const [error, setError] = useState<string | null>(null);
+  const act = async (s: 'approved' | 'rejected') => {
+    setError(null);
+    try {
+      const { ok } = await (s === 'approved' ? api.approve(asset.id) : api.reject(asset.id));
+      if (ok) setState(s);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 403) {
+        setError("You don't have permission to do this — ask an admin.");
+      } else {
+        setError(`Failed: ${e instanceof Error ? e.message : 'Something went wrong.'}`);
+      }
+    }
+  };
   return (
     <div className="space-y-2 rounded border p-3 text-sm">
       {asset.kind === 'video' ? <video src={asset.url} controls className="w-full rounded" /> : <img src={asset.url} alt="" className="w-full rounded" />}
@@ -21,6 +34,7 @@ export function ReviewCard({ asset, accounts, isAdmin }: { asset: GeneratedAsset
           ? <Button size="sm" onClick={() => setOpen(true)}>Publish</Button>
           : <p className="text-muted-foreground">Ask an admin to publish this.</p>)}
       </div>
+      {error && <p role="status" className="text-sm">{error}</p>}
       {open && <PublishDialog asset={{ ...asset, review_state: state }} accounts={accounts} open={open} onOpenChange={setOpen} />}
     </div>
   );
