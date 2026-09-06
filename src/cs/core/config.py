@@ -44,11 +44,17 @@ class Settings(BaseSettings):
     worker_poll_seconds: float = 1.0
     job_lease_seconds: int = 600
 
+    cors_origins: str = "http://localhost:3000"
+
     @model_validator(mode="after")
     def _check_clerk_config(self) -> "Settings":
         if self.auth_mode == "clerk" and not self.clerk_jwks_url:
             raise ValueError("CLERK_JWKS_URL is required when AUTH_MODE=clerk")
         return self
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
 
 @lru_cache

@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from cs.api.routers import (
     accounts,
@@ -20,6 +21,13 @@ from cs.core.db import Database
 
 def create_app(settings: Settings, db: Database, blobs_store: BlobStore) -> FastAPI:
     app = FastAPI(title="creative-strategist")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins_list,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.state.settings = settings
     app.state.db = db
     app.state.blobs = blobs_store
