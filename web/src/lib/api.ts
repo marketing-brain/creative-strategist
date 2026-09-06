@@ -1,4 +1,4 @@
-import { authHeaders } from '@/lib/auth-headers';
+import { authHeaders } from './auth-headers';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
