@@ -130,7 +130,41 @@ async def test_retry_preserves_already_reviewed_assets(db, blobs, settings, org_
     second = await repo.list_generated_assets(db, org_id, generation_id=gid)
     by_id = {a["id"]: a for a in second}
     assert approved_id in by_id and by_id[approved_id]["review_state"] == "approved"
-    assert len([a for a in second if a["review_state"] == "draft"]) == 6
+    assert len([a for a in second if a["review_state"] == "draft"]) == 5
+    # Total count must stay at 6, not 7: the retry must not insert a second row at the same
+    # (kind, aspect, variant) slot the approved row already occupies.
+    assert len(second) == 6
+
+
+async def test_retry_skips_regenerating_an_already_reviewed_video(db, blobs, settings, org_id, kit):
+    """Same slot-preservation rule as the static case, but for the video branch: a retry must
+    not call the (expensive) video generator again, or touch the still it already used, if an
+    earlier attempt's video at this slot was already reviewed."""
+    gid = await repo.create_generation(db, org_id, kit.id, "video", 1, "u1", concept="c")
+    still_key = f"{org_id}/generated/{gid}/v1-9x16.jpg"
+    await blobs.put(still_key, solid_png(64, 64), "image/jpeg")
+    still_id = await repo.insert_generated_asset(
+        db, org_id, gid, "image", "9:16", 1, still_key, "still-sha", "H", "P", "SHOP_NOW"
+    )
+    assert await repo.set_review_state(db, org_id, still_id, "approved", "u1")
+    video_key = f"{org_id}/generated/{gid}/v1-9x16.mp4"
+    await blobs.put(video_key, b"orig-video-bytes", "video/mp4")
+    video_id = await repo.insert_generated_asset(
+        db, org_id, gid, "video", "9:16", 1, video_key, "video-sha", "H", "P", "SHOP_NOW"
+    )
+    assert await repo.set_review_state(db, org_id, video_id, "approved", "u1")
+
+    vid = FakeVideoGenerator()
+    await service.run_generation(
+        _ctx(db, blobs, settings, org_id), gid, FakeCopyWriter(), FakeImageGenerator(), vid
+    )
+    assert vid.calls == []
+
+    assets = await repo.list_generated_assets(db, org_id, generation_id=gid)
+    videos = [a for a in assets if a["kind"] == "video"]
+    assert len(videos) == 1 and videos[0]["id"] == video_id and videos[0]["sha256"] == "video-sha"
+    stills_9x16 = [a for a in assets if a["kind"] == "image" and a["aspect"] == "9:16"]
+    assert len(stills_9x16) == 1 and stills_9x16[0]["id"] == still_id
 
 
 class _OverGenerousCopyWriter:

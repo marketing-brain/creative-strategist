@@ -105,6 +105,17 @@ async def run_generation(
         first_still_key: str | None = None
         for variant, (raw, copy) in enumerate(zip(raws, sets, strict=False), start=1):
             for aspect in ASPECTS:
+                # delete_generated_assets only clears 'draft' rows, so a row still occupying
+                # this (kind, aspect, variant) slot survived from an earlier attempt because a
+                # human already reviewed it. Leave its blob and DB row untouched rather than
+                # silently overwriting what an approved/rejected asset actually is.
+                existing = await repo.get_generated_asset_by_variant(
+                    ctx.db, org_id, generation_id, "image", aspect, variant
+                )
+                if existing is not None:
+                    if aspect == "9:16" and first_still_key is None:
+                        first_still_key = existing["path"]
+                    continue
                 img = await asyncio.to_thread(fit_to_aspect, raw, aspect)
                 if logo:
                     img = await asyncio.to_thread(overlay_logo, img, logo)
@@ -128,7 +139,14 @@ async def run_generation(
                 produced += 1
                 if aspect == "9:16" and first_still_key is None:
                     first_still_key = key
-        if g["kind"] == "video" and first_still_key:
+        existing_video = (
+            await repo.get_generated_asset_by_variant(
+                ctx.db, org_id, generation_id, "video", "9:16", 1
+            )
+            if g["kind"] == "video"
+            else None
+        )
+        if g["kind"] == "video" and first_still_key and existing_video is None:
             still_url = await ctx.blobs.url_for(first_still_key, expires_seconds=3600)
             clip = await video_gen.generate(
                 still_url, f"Subtle cinematic motion. {sets[0].headline}", VIDEO_SECONDS, "9:16"
