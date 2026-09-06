@@ -97,8 +97,7 @@ class MetaConnector:
             data={
                 "name": name,
                 **{
-                    k: json.dumps(v) if isinstance(v, dict) else v
-                    for k, v in creative_spec.items()
+                    k: json.dumps(v) if isinstance(v, dict) else v for k, v in creative_spec.items()
                 },
             },
         )
@@ -117,7 +116,9 @@ class MetaConnector:
         rows = await self.client.get_all(
             f"act_{account_id}/campaigns", {"fields": "id,name,status", "limit": 200}
         )
-        return [{"id": r["id"], "name": r.get("name", ""), "status": r.get("status", "")} for r in rows]
+        return [
+            {"id": r["id"], "name": r.get("name", ""), "status": r.get("status", "")} for r in rows
+        ]
 
     async def list_adsets(self, account_id: str, campaign_id: str) -> list[dict]:
         rows = await self.client.get_all(

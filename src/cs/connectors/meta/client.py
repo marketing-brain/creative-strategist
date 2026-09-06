@@ -103,5 +103,7 @@ class GraphClient:
             if resp.status_code == 429 or code in RETRYABLE_CODES:
                 await asyncio.sleep(self._backoff_seconds(resp, attempt))
                 continue
-            raise GraphError(f"{resp.status_code} POST {path}: {body.get('error') or resp.text[:200]}")
+            raise GraphError(
+                f"{resp.status_code} POST {path}: {body.get('error') or resp.text[:200]}"
+            )
         raise GraphError(f"rate limit retries exhausted for POST {path}")

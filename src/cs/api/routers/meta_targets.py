@@ -1,7 +1,7 @@
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from cs.api.auth import AuthContext, current_auth
 from cs.api.deps import get_blobs, get_db, get_settings_dep
@@ -21,16 +21,27 @@ async def _connector_and_account(db, settings, blobs, auth, account_id, http):
 
 
 @router.get("/{account_id}/campaigns")
-async def campaigns(account_id: UUID, auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db),
-                    settings: Settings = Depends(get_settings_dep), blobs: BlobStore = Depends(get_blobs)) -> list[dict]:
+async def campaigns(
+    account_id: UUID,
+    auth: AuthContext = Depends(current_auth),
+    db: Database = Depends(get_db),
+    settings: Settings = Depends(get_settings_dep),
+    blobs: BlobStore = Depends(get_blobs),
+) -> list[dict]:
     async with httpx.AsyncClient(timeout=60) as http:
         c, acct = await _connector_and_account(db, settings, blobs, auth, account_id, http)
         return await c.list_campaigns(acct["platform_account_id"])
 
 
 @router.get("/{account_id}/adsets")
-async def adsets(account_id: UUID, campaign_id: str, auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db),
-                 settings: Settings = Depends(get_settings_dep), blobs: BlobStore = Depends(get_blobs)) -> list[dict]:
+async def adsets(
+    account_id: UUID,
+    campaign_id: str = Query(..., pattern=r"^\d+$"),
+    auth: AuthContext = Depends(current_auth),
+    db: Database = Depends(get_db),
+    settings: Settings = Depends(get_settings_dep),
+    blobs: BlobStore = Depends(get_blobs),
+) -> list[dict]:
     async with httpx.AsyncClient(timeout=60) as http:
         c, acct = await _connector_and_account(db, settings, blobs, auth, account_id, http)
         return await c.list_adsets(acct["platform_account_id"], campaign_id)

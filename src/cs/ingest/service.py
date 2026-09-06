@@ -84,8 +84,8 @@ async def sync_account(
             new_creatives += int(created)
             if created:
                 ga = await ctx.db.fetchval(
-                    "SELECT generated_asset_id FROM publish_job WHERE org_id=$1 AND platform_creative_id=$2 "
-                    "AND status='done' LIMIT 1",
+                    "SELECT generated_asset_id FROM publish_job WHERE org_id=$1 "
+                    "AND platform_creative_id=$2 AND status='done' LIMIT 1",
                     org_id,
                     c.platform_creative_id,
                 )

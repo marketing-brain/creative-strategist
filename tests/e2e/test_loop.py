@@ -1,4 +1,8 @@
-"""Backfill -> tag -> insight -> generate -> approve -> publish -> sync closes the loop, all on fakes."""
+"""Backfill -> tag -> insight -> generate -> approve -> publish -> sync closes the loop.
+
+All on fakes.
+"""
+
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -45,17 +49,52 @@ async def test_full_loop(client, db, blobs, settings, monkeypatch):
     for i in range(12):
         name = f"q{i}" if i < 6 else f"s{i}"
         ctr_clicks = 30 if i < 6 else 10
-        fake.add_creative(PlatformCreative(name, "image", name, "P", None, "SHOP_NOW", "https://x", f"https://img/{name}", "image/png", {}), solid_png(64, 64))
+        fake.add_creative(
+            PlatformCreative(
+                name,
+                "image",
+                name,
+                "P",
+                None,
+                "SHOP_NOW",
+                "https://x",
+                f"https://img/{name}",
+                "image/png",
+                {},
+            ),
+            solid_png(64, 64),
+        )
         fake.add_ad(PlatformAd(f"ad_{name}", name, "ACTIVE", "as1", "c1", name))
         for d in days:
-            fake.add_metric(MetricRow(f"ad_{name}", d, "facebook:feed", Decimal("30"), 1000, ctr_clicks, ctr_clicks, Decimal("1"), Decimal("50"), 0, 0, 0, 0, {}))
+            fake.add_metric(
+                MetricRow(
+                    f"ad_{name}",
+                    d,
+                    "facebook:feed",
+                    Decimal("30"),
+                    1000,
+                    ctr_clicks,
+                    ctr_clicks,
+                    Decimal("1"),
+                    Decimal("50"),
+                    0,
+                    0,
+                    0,
+                    0,
+                    {},
+                )
+            )
 
     # 1. connect + activate (backfill)
     from uuid import UUID
+
     org_id = UUID((await client.get("/me", headers=H)).json()["org_id"])
     from cs.core.crypto import encrypt_str
     from cs.ingest import repo as ingest_repo
-    acct = await ingest_repo.upsert_ad_account(db, org_id, "1", "Main", "USD", encrypt_str(settings, "t"), None)
+
+    acct = await ingest_repo.upsert_ad_account(
+        db, org_id, "1", "Main", "USD", encrypt_str(settings, "t"), None
+    )
     await client.post(f"/accounts/{acct}/activate", headers=H)
     await _drain(db, blobs, settings)
     assert await db.fetchval("SELECT count(*) FROM tag_run WHERE status='done'") == 12
@@ -68,8 +107,18 @@ async def test_full_loop(client, db, blobs, settings, monkeypatch):
     assert winner["lift"] > 0
 
     # 3. brand kit + generate from the insight
-    await client.post("/brand-kit", headers=H, json={"colors": ["#112233"], "fonts": [], "voice_rules": "", "prohibited_claims": []})
-    gid = (await client.post("/generations", headers=H, json={"kind": "static", "variants": 1, "source_insight_id": winner["id"]})).json()["id"]
+    await client.post(
+        "/brand-kit",
+        headers=H,
+        json={"colors": ["#112233"], "fonts": [], "voice_rules": "", "prohibited_claims": []},
+    )
+    gid = (
+        await client.post(
+            "/generations",
+            headers=H,
+            json={"kind": "static", "variants": 1, "source_insight_id": winner["id"]},
+        )
+    ).json()["id"]
     await _drain(db, blobs, settings)
     detail = (await client.get(f"/generations/{gid}", headers=H)).json()
     assert detail["status"] == "done" and len(detail["assets"]) == 3
@@ -77,17 +126,43 @@ async def test_full_loop(client, db, blobs, settings, monkeypatch):
     # 4. approve + publish
     aid = detail["assets"][0]["id"]
     await client.post(f"/generated-assets/{aid}/approve", headers=H)
-    r = await client.post(f"/generated-assets/{aid}/publish", headers=H, json={
-        "ad_account_id": str(acct), "campaign_id": "c1", "adset_id": "as1", "page_id": "p", "link_url": "https://x", "status": "PAUSED"})
+    r = await client.post(
+        f"/generated-assets/{aid}/publish",
+        headers=H,
+        json={
+            "ad_account_id": str(acct),
+            "campaign_id": "c1",
+            "adset_id": "as1",
+            "page_id": "p",
+            "link_url": "https://x",
+            "status": "PAUSED",
+        },
+    )
     assert r.status_code == 200
     await _drain(db, blobs, settings)
     pj = (await client.get("/publish-jobs", headers=H)).json()[0]
     assert pj["status"] == "done" and pj["platform_ad_id"] == "ad_new_1"
 
     # 5. next sync closes the loop
-    fake.add_creative(PlatformCreative("cr_new_1", "image", "Sleep deeper", "P", None, "SHOP_NOW", "https://x", "https://img/new", "image/png", {}), solid_png(64, 64))
+    fake.add_creative(
+        PlatformCreative(
+            "cr_new_1",
+            "image",
+            "Sleep deeper",
+            "P",
+            None,
+            "SHOP_NOW",
+            "https://x",
+            "https://img/new",
+            "image/png",
+            {},
+        ),
+        solid_png(64, 64),
+    )
     fake.add_ad(PlatformAd("ad_new_1", "CS ad", "PAUSED", "as1", "c1", "cr_new_1"))
     await client.post(f"/accounts/{acct}/sync", headers=H)
     await _drain(db, blobs, settings)
-    linked = await db.fetchval("SELECT generated_asset_id FROM creative WHERE platform_creative_id='cr_new_1'")
+    linked = await db.fetchval(
+        "SELECT generated_asset_id FROM creative WHERE platform_creative_id='cr_new_1'"
+    )
     assert str(linked) == aid

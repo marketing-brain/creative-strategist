@@ -167,11 +167,19 @@ async def test_upsert_metrics_with_no_known_ads_writes_nothing(db, org_id, accou
 
 
 async def test_list_assets_by_kind_orders_by_seq(db, org_id, settings):
-    acct = await repo.upsert_ad_account(db, org_id, "1", "M", "USD", encrypt_str(settings, "t"), None)
+    acct = await repo.upsert_ad_account(
+        db, org_id, "1", "M", "USD", encrypt_str(settings, "t"), None
+    )
     cid, _ = await repo.upsert_creative(
-        db, org_id, acct, PlatformCreative("cx", "carousel", "H", "P", None, None, "u", None, None, {}), "raw"
+        db,
+        org_id,
+        acct,
+        PlatformCreative("cx", "carousel", "H", "P", None, None, "u", None, None, {}),
+        "raw",
     )
     for i in (2, 0, 1):  # insert out of order
-        await repo.insert_asset(db, org_id, cid, "original_image", f"o/{i}.png", "sha", "image/png", seq=i)
+        await repo.insert_asset(
+            db, org_id, cid, "original_image", f"o/{i}.png", "sha", "image/png", seq=i
+        )
     rows = await repo.list_assets_by_kind(db, org_id, cid, "original_image")
     assert [r["seq"] for r in rows] == [0, 1, 2]

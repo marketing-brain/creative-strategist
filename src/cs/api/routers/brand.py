@@ -18,13 +18,23 @@ class KitBody(BaseModel):
 
 
 async def _ser(k: brand.BrandKit, blobs: BlobStore) -> dict:
-    return {"id": str(k.id), "version": k.version, "colors": k.colors, "fonts": k.fonts, "voice_rules": k.voice_rules,
-            "prohibited_claims": k.prohibited_claims,
-            "logo_url": await blobs.url_for(k.logo_path) if k.logo_path else None}
+    return {
+        "id": str(k.id),
+        "version": k.version,
+        "colors": k.colors,
+        "fonts": k.fonts,
+        "voice_rules": k.voice_rules,
+        "prohibited_claims": k.prohibited_claims,
+        "logo_url": await blobs.url_for(k.logo_path) if k.logo_path else None,
+    }
 
 
 @router.get("")
-async def get_kit(auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db), blobs: BlobStore = Depends(get_blobs)) -> dict:
+async def get_kit(
+    auth: AuthContext = Depends(current_auth),
+    db: Database = Depends(get_db),
+    blobs: BlobStore = Depends(get_blobs),
+) -> dict:
     k = await brand.get_active_brand_kit(db, auth.org_id)
     if not k:
         raise HTTPException(404, "no brand kit yet")
@@ -32,25 +42,53 @@ async def get_kit(auth: AuthContext = Depends(current_auth), db: Database = Depe
 
 
 @router.post("")
-async def create_kit(body: KitBody, auth: AuthContext = Depends(require_admin), db: Database = Depends(get_db),
-                     blobs: BlobStore = Depends(get_blobs)) -> dict:
+async def create_kit(
+    body: KitBody,
+    auth: AuthContext = Depends(require_admin),
+    db: Database = Depends(get_db),
+    blobs: BlobStore = Depends(get_blobs),
+) -> dict:
     prev = await brand.get_active_brand_kit(db, auth.org_id)
-    k = await brand.create_brand_kit(db, auth.org_id, body.colors, body.fonts, body.voice_rules, body.prohibited_claims,
-                                     prev.logo_path if prev else None, prev.logo_sha256 if prev else None)
+    k = await brand.create_brand_kit(
+        db,
+        auth.org_id,
+        body.colors,
+        body.fonts,
+        body.voice_rules,
+        body.prohibited_claims,
+        prev.logo_path if prev else None,
+        prev.logo_sha256 if prev else None,
+    )
     return await _ser(k, blobs)
 
 
 @router.post("/logo")
-async def upload_logo(file: UploadFile, auth: AuthContext = Depends(require_admin), db: Database = Depends(get_db),
-                      blobs: BlobStore = Depends(get_blobs)) -> dict:
-    if file.content_type not in ("image/png", "image/svg+xml"):
-        raise HTTPException(400, "logo must be PNG or SVG")
+async def upload_logo(
+    file: UploadFile,
+    auth: AuthContext = Depends(require_admin),
+    db: Database = Depends(get_db),
+    blobs: BlobStore = Depends(get_blobs),
+) -> dict:
+    if file.content_type != "image/png":
+        # SVG was accepted at upload time historically, but compose.overlay_logo opens logo
+        # bytes with PIL.Image.open, which cannot decode SVG -- that crashed every generation
+        # for any org with an SVG logo. There's no SVG rasterization in this codebase, so PNG
+        # is the only format accepted until that lands.
+        raise HTTPException(400, "logo must be PNG")
     data = await file.read()
-    ext = "png" if file.content_type == "image/png" else "svg"
+    ext = "png"
     content_hash = sha256_hex(data)
     key = f"{auth.org_id}/brand/{content_hash}/logo.{ext}"
     await blobs.put(key, data, file.content_type)
     prev = await brand.get_active_brand_kit(db, auth.org_id)
-    k = await brand.create_brand_kit(db, auth.org_id, prev.colors if prev else [], prev.fonts if prev else [],
-                                     prev.voice_rules if prev else "", prev.prohibited_claims if prev else [], key, content_hash)
+    k = await brand.create_brand_kit(
+        db,
+        auth.org_id,
+        prev.colors if prev else [],
+        prev.fonts if prev else [],
+        prev.voice_rules if prev else "",
+        prev.prohibited_claims if prev else [],
+        key,
+        content_hash,
+    )
     return await _ser(k, blobs)

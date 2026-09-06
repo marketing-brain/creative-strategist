@@ -9,10 +9,16 @@ G = "https://graph.facebook.com/v21.0"
 
 @respx.mock
 async def test_upload_and_create_ad(settings):
-    respx.post(f"{G}/act_1/adimages").mock(return_value=httpx.Response(200, json={"images": {"a.jpg": {"hash": "h1"}}}))
+    respx.post(f"{G}/act_1/adimages").mock(
+        return_value=httpx.Response(200, json={"images": {"a.jpg": {"hash": "h1"}}})
+    )
     respx.post(f"{G}/act_1/adcreatives").mock(return_value=httpx.Response(200, json={"id": "cr9"}))
     respx.post(f"{G}/act_1/ads").mock(return_value=httpx.Response(200, json={"id": "ad9"}))
-    respx.get(f"{G}/act_1/campaigns").mock(return_value=httpx.Response(200, json={"data": [{"id": "c1", "name": "C", "status": "ACTIVE"}]}))
+    respx.get(f"{G}/act_1/campaigns").mock(
+        return_value=httpx.Response(
+            200, json={"data": [{"id": "c1", "name": "C", "status": "ACTIVE"}]}
+        )
+    )
     async with httpx.AsyncClient() as http:
         mc = MetaConnector(GraphClient(settings, "tok", http))
         assert await mc.upload_image("1", b"jpg", "a.jpg") == "h1"

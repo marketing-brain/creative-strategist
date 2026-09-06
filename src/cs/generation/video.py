@@ -12,7 +12,9 @@ DEFAULT_SCRIPT = Path(__file__).resolve().parents[3] / "tools" / "video-gen" / "
 
 
 class VideoGenerator(Protocol):
-    async def generate(self, still_url: str, prompt: str, duration_s: int, aspect: str) -> bytes: ...
+    async def generate(
+        self, still_url: str, prompt: str, duration_s: int, aspect: str
+    ) -> bytes: ...
 
 
 class NodeVideoGenerator:
@@ -26,9 +28,24 @@ class NodeVideoGenerator:
             out = Path(d) / "out.mp4"
             env = {**os.environ, "AI_GATEWAY_API_KEY": self.settings.ai_gateway_api_key}
             proc = await asyncio.create_subprocess_exec(
-                "node", str(self.script), "--model", self.settings.video_model, "--image-url", still_url,
-                "--prompt", prompt, "--duration", str(duration_s), "--aspect", aspect, "--out", str(out),
-                env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                "node",
+                str(self.script),
+                "--model",
+                self.settings.video_model,
+                "--image-url",
+                still_url,
+                "--prompt",
+                prompt,
+                "--duration",
+                str(duration_s),
+                "--aspect",
+                aspect,
+                "--out",
+                str(out),
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
             try:
                 _, err = await asyncio.wait_for(proc.communicate(), timeout=self.timeout_s)
             except TimeoutError:

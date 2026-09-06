@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from cs.api.auth import AuthContext, current_auth
+from cs.api.auth import AuthContext, current_auth, require_admin
 from cs.api.deps import get_blobs, get_db
 from cs.core import queue
 from cs.core.blobs import BlobStore
@@ -37,7 +37,9 @@ def _ser(r) -> dict:
 
 
 @router.post("/generations")
-async def create(body: NewGeneration, auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)) -> dict:
+async def create(
+    body: NewGeneration, auth: AuthContext = Depends(require_admin), db: Database = Depends(get_db)
+) -> dict:
     if body.kind not in ("static", "video"):
         raise HTTPException(400, "kind must be static or video")
     kit = await get_active_brand_kit(db, auth.org_id)
@@ -45,20 +47,37 @@ async def create(body: NewGeneration, auth: AuthContext = Depends(current_auth),
         raise HTTPException(400, "create a brand kit first")
     if not body.concept and not body.source_insight_id:
         raise HTTPException(400, "provide a concept or a source insight")
-    gid = await repo.create_generation(db, auth.org_id, kit.id, body.kind, max(1, min(body.variants, 8)), auth.user_id,
-                                       body.source_insight_id, tuple(body.source_creative_ids), body.concept)
-    await queue.enqueue(db, auth.org_id, "generation.run", {"generation_id": str(gid)}, dedup_key=f"gen:{gid}")
+    gid = await repo.create_generation(
+        db,
+        auth.org_id,
+        kit.id,
+        body.kind,
+        max(1, min(body.variants, 8)),
+        auth.user_id,
+        body.source_insight_id,
+        tuple(body.source_creative_ids),
+        body.concept,
+    )
+    await queue.enqueue(
+        db, auth.org_id, "generation.run", {"generation_id": str(gid)}, dedup_key=f"gen:{gid}"
+    )
     return {"id": str(gid)}
 
 
 @router.get("/generations")
-async def list_gens(auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)) -> list[dict]:
+async def list_gens(
+    auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)
+) -> list[dict]:
     return [_ser(r) for r in await repo.list_generations(db, auth.org_id)]
 
 
 @router.get("/generations/{gid}")
-async def get_gen(gid: UUID, auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db),
-                  blobs: BlobStore = Depends(get_blobs)) -> dict:
+async def get_gen(
+    gid: UUID,
+    auth: AuthContext = Depends(current_auth),
+    db: Database = Depends(get_db),
+    blobs: BlobStore = Depends(get_blobs),
+) -> dict:
     g = await repo.get_generation(db, auth.org_id, gid)
     if not g:
         raise HTTPException(404)
@@ -81,8 +100,12 @@ class PublishBody(BaseModel):
 
 
 @router.get("/review-queue")
-async def review_queue(state: str = "draft", auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db),
-                       blobs: BlobStore = Depends(get_blobs)) -> list[dict]:
+async def review_queue(
+    state: str = "draft",
+    auth: AuthContext = Depends(current_auth),
+    db: Database = Depends(get_db),
+    blobs: BlobStore = Depends(get_blobs),
+) -> list[dict]:
     out = []
     for a in await repo.list_generated_assets(db, auth.org_id, review_state=state):
         out.append({**_ser(a), "url": await blobs.url_for(a["path"])})
@@ -90,19 +113,27 @@ async def review_queue(state: str = "draft", auth: AuthContext = Depends(current
 
 
 @router.post("/generated-assets/{aid}/approve")
-async def approve(aid: UUID, auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)) -> dict:
+async def approve(
+    aid: UUID, auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)
+) -> dict:
     return {"ok": await repo.set_review_state(db, auth.org_id, aid, "approved", auth.user_id)}
 
 
 @router.post("/generated-assets/{aid}/reject")
-async def reject(aid: UUID, auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)) -> dict:
+async def reject(
+    aid: UUID, auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)
+) -> dict:
     return {"ok": await repo.set_review_state(db, auth.org_id, aid, "rejected", auth.user_id)}
 
 
 @router.post("/generated-assets/{aid}/publish")
-async def publish(aid: UUID, body: PublishBody, auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)) -> dict:
+async def publish(
+    aid: UUID,
+    body: PublishBody,
+    auth: AuthContext = Depends(require_admin),
+    db: Database = Depends(get_db),
+) -> dict:
     from cs.core.ids import new_id
-
     from cs.ingest import repo as ingest_repo
 
     a = await repo.get_generated_asset(db, auth.org_id, aid)
@@ -117,13 +148,38 @@ async def publish(aid: UUID, body: PublishBody, auth: AuthContext = Depends(curr
     pj = new_id()
     form = body.model_dump(mode="json")
     await db.execute(
-        "INSERT INTO publish_job (id, org_id, generated_asset_id, ad_account_id, campaign_id, adset_id, ad_status_requested, form, status) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending')", pj, auth.org_id, aid, body.ad_account_id, body.campaign_id, body.adset_id, body.status, form)
-    await queue.enqueue(db, auth.org_id, "publish.meta", {"publish_job_id": str(pj)}, dedup_key=f"publish:{pj}")
+        "INSERT INTO publish_job (id, org_id, generated_asset_id, ad_account_id, campaign_id, "
+        "adset_id, ad_status_requested, form, status) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending')",
+        pj,
+        auth.org_id,
+        aid,
+        body.ad_account_id,
+        body.campaign_id,
+        body.adset_id,
+        body.status,
+        form,
+    )
+    # A publish job has an external financial/creative side effect on the customer's real Meta
+    # account -- don't let the queue's default retry-from-scratch policy fire a second create-ad
+    # call if this job fails after partially succeeding. See publish.jobs.publish_meta's status
+    # guard for the complementary half of this idempotency fix.
+    await queue.enqueue(
+        db,
+        auth.org_id,
+        "publish.meta",
+        {"publish_job_id": str(pj)},
+        dedup_key=f"publish:{pj}",
+        max_attempts=1,
+    )
     return {"publish_job_id": str(pj)}
 
 
 @router.get("/publish-jobs")
-async def publish_jobs(auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)) -> list[dict]:
-    rows = await db.fetch("SELECT * FROM publish_job WHERE org_id=$1 ORDER BY created_at DESC LIMIT 100", auth.org_id)
+async def publish_jobs(
+    auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)
+) -> list[dict]:
+    rows = await db.fetch(
+        "SELECT * FROM publish_job WHERE org_id=$1 ORDER BY created_at DESC LIMIT 100", auth.org_id
+    )
     return [_ser(r) for r in rows]

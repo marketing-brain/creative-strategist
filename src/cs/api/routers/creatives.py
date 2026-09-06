@@ -27,7 +27,13 @@ def _derived(r) -> dict:
     }
     out["day"] = r["day"].isoformat()
     out.update(
-        derived_metrics(r["spend"], int(r["impressions"]), int(r["clicks"]), r["conversions"], r["conversion_value"])
+        derived_metrics(
+            r["spend"],
+            int(r["impressions"]),
+            int(r["clicks"]),
+            r["conversions"],
+            r["conversion_value"],
+        )
     )
     return out
 

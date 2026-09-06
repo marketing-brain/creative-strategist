@@ -220,7 +220,9 @@ async def test_tag_carousel_creative_uses_all_cards(db, blobs, settings, org_id,
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
-async def test_ffmpeg_calls_run_off_the_event_loop_thread(db, blobs, settings, org_id, tmp_path, monkeypatch):
+async def test_ffmpeg_calls_run_off_the_event_loop_thread(
+    db, blobs, settings, org_id, tmp_path, monkeypatch
+):
     import threading
 
     from cs.tagging import runner as runner_mod
@@ -239,6 +241,8 @@ async def test_ffmpeg_calls_run_off_the_event_loop_thread(db, blobs, settings, o
 
     monkeypatch.setattr(runner_mod, "extract_keyframes", fake_extract_keyframes)
     monkeypatch.setattr(runner_mod, "extract_audio", fake_extract_audio)
-    await runner.tag_creative(_ctx(db, blobs, settings, org_id, {}), cid, FakeTagger(), FakeTranscriber())
+    await runner.tag_creative(
+        _ctx(db, blobs, settings, org_id, {}), cid, FakeTagger(), FakeTranscriber()
+    )
     assert len(seen_threads) == 2
     assert all(t is not threading.current_thread() for t in seen_threads)

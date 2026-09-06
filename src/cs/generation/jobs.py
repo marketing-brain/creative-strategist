@@ -29,5 +29,10 @@ VIDEO_FACTORY = default_video_gen
 
 @handler("generation.run")
 async def run(ctx: JobContext) -> None:
-    await service.run_generation(ctx, UUID(ctx.job.payload["generation_id"]), COPYWRITER_FACTORY(ctx.settings),
-                                 IMAGE_FACTORY(ctx.settings), VIDEO_FACTORY(ctx.settings))
+    await service.run_generation(
+        ctx,
+        UUID(ctx.job.payload["generation_id"]),
+        COPYWRITER_FACTORY(ctx.settings),
+        IMAGE_FACTORY(ctx.settings),
+        VIDEO_FACTORY(ctx.settings),
+    )

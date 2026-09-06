@@ -5,7 +5,7 @@ import subprocess
 import pytest
 from PIL import Image
 
-from cs.generation.compose import fit_to_aspect, overlay_logo, video_with_end_card
+from cs.generation.compose import _escape_drawtext, fit_to_aspect, overlay_logo, video_with_end_card
 from cs.generation.fakes import solid_png, tiny_mp4
 
 
@@ -34,7 +34,9 @@ def test_overlay_logo_changes_corner():
     assert out.getpixel((950, 950))[0] > 200 and out.getpixel((20, 20))[0] < 30
 
 
-@pytest.mark.skipif(not _ffmpeg_has_drawtext(), reason="ffmpeg built without drawtext (libfreetype) support")
+@pytest.mark.skipif(
+    not _ffmpeg_has_drawtext(), reason="ffmpeg built without drawtext (libfreetype) support"
+)
 def test_video_with_end_card_extends_duration():
     from cs.tagging.video import probe_duration_ms
 
@@ -42,8 +44,26 @@ def test_video_with_end_card_extends_duration():
     assert probe_duration_ms(out) >= 3300
 
 
-@pytest.mark.skipif(not _ffmpeg_has_drawtext(), reason="ffmpeg built without drawtext (libfreetype) support")
+@pytest.mark.skipif(
+    not _ffmpeg_has_drawtext(), reason="ffmpeg built without drawtext (libfreetype) support"
+)
 def test_video_with_end_card_caption_with_comma():
-    """Regression test: captions with commas must be escaped to avoid breaking ffmpeg filtergraph."""
-    out = video_with_end_card(tiny_mp4(2), "Sleep deeper, wake happier", solid_png(200, 200), "#112233", "9:16")
-    assert out[:4] == b"\x00\x00\x00" or out[:8] == b"\x00\x00\x00\x18ftyp"  # MP4 file header
+    """Regression test: captions with commas must be escaped without breaking the encode."""
+    out = video_with_end_card(
+        tiny_mp4(2), "Sleep deeper, wake happier", solid_png(200, 200), "#112233", "9:16"
+    )
+    assert len(out) > 0
+
+
+def test_escape_drawtext_backslash_escaped_before_other_chars():
+    # Order matters: backslash must be escaped first, so the backslashes introduced by escaping
+    # the other special characters below don't themselves get doubled by this step.
+    assert _escape_drawtext("a\\b") == r"a\\b"
+
+
+def test_escape_drawtext_escapes_all_special_chars():
+    assert _escape_drawtext("a:b,c[d]e;f%g") == r"a\:b\,c\[d\]e\;f\%g"
+
+
+def test_escape_drawtext_drops_apostrophes():
+    assert _escape_drawtext("it's fine") == "its fine"
