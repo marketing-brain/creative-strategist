@@ -4,14 +4,13 @@ from decimal import Decimal
 import pytest
 
 from cs.connectors.base import MetricRow, PlatformAd, PlatformCreative
-from cs.core.crypto import encrypt_str
 from cs.ingest import repo
 
 
 @pytest.fixture
 async def account_id(db, org_id, settings):
     return await repo.upsert_ad_account(
-        db, org_id, "1", "Main", "USD", encrypt_str(settings, "tok"), None
+        db, org_id, "1", "Main", "USD",
     )
 
 
@@ -168,7 +167,7 @@ async def test_upsert_metrics_with_no_known_ads_writes_nothing(db, org_id, accou
 
 async def test_list_assets_by_kind_orders_by_seq(db, org_id, settings):
     acct = await repo.upsert_ad_account(
-        db, org_id, "1", "M", "USD", encrypt_str(settings, "t"), None
+        db, org_id, "1", "M", "USD",
     )
     cid, _ = await repo.upsert_creative(
         db,
@@ -183,3 +182,21 @@ async def test_list_assets_by_kind_orders_by_seq(db, org_id, settings):
         )
     rows = await repo.list_assets_by_kind(db, org_id, cid, "original_image")
     assert [r["seq"] for r in rows] == [0, 1, 2]
+
+
+async def test_meta_connection_upsert_and_status(db, org_id):
+    cid = await repo.upsert_meta_connection(db, org_id, "conn_1", "org1__meta_ads")
+    row = await repo.get_meta_connection(db, org_id)
+    assert row["id"] == cid and row["sync_status"] == "pending"
+
+    await repo.set_meta_connection_status(db, cid, "error", last_error="broken")
+    row = await repo.get_meta_connection_by_id(db, cid)
+    assert row["sync_status"] == "error" and row["last_error"] == "broken"
+
+
+async def test_meta_connection_upsert_is_idempotent_per_org(db, org_id):
+    first = await repo.upsert_meta_connection(db, org_id, "conn_1", "org1__meta_ads")
+    second = await repo.upsert_meta_connection(db, org_id, "conn_2", "org1__meta_ads")
+    assert first == second
+    row = await repo.get_meta_connection(db, org_id)
+    assert row["fivetran_connector_id"] == "conn_2"

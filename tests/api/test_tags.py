@@ -1,7 +1,6 @@
 from uuid import uuid4
 
 from cs.connectors.base import PlatformCreative
-from cs.core.crypto import encrypt_str
 from cs.ingest import repo as ingest_repo
 from cs.tagging import repo
 from cs.tagging.taxonomy import load_taxonomy
@@ -15,7 +14,7 @@ async def _seed(client, db, settings):
 
     org_id = UUID((await client.get("/me", headers=H)).json()["org_id"])
     acct = await ingest_repo.upsert_ad_account(
-        db, org_id, "1", "M", "USD", encrypt_str(settings, "t"), None
+        db, org_id, "1", "M", "USD",
     )
     cid, _ = await ingest_repo.upsert_creative(
         db,

@@ -3,7 +3,6 @@ from decimal import Decimal
 from uuid import UUID
 
 from cs.connectors.base import MetricRow, PlatformAd, PlatformCreative
-from cs.core.crypto import encrypt_str
 from cs.ingest import repo as ingest_repo
 from cs.tagging import repo as tag_repo
 from cs.tagging.taxonomy import load_taxonomy
@@ -11,7 +10,7 @@ from cs.tagging.taxonomy import load_taxonomy
 
 async def seed_account(db, org_id, settings) -> UUID:
     aid = await ingest_repo.upsert_ad_account(
-        db, org_id, "1", "Main", "USD", encrypt_str(settings, "t"), None
+        db, org_id, "1", "Main", "USD",
     )
     await ingest_repo.set_ad_account_status(db, org_id, aid, "active")
     return aid

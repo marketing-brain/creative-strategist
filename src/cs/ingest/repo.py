@@ -32,18 +32,16 @@ async def upsert_ad_account(
     platform_account_id: str,
     name: str,
     currency: str,
-    token_enc: str,
-    expires_at: datetime | None,
+    meta_connection_id: UUID | None = None,
 ) -> UUID:
     row = await db.fetchrow(
         """
         INSERT INTO ad_account (id, org_id, platform, platform_account_id, name, currency,
-                                access_token_enc, token_expires_at, status)
-        VALUES ($1, $2, 'meta', $3, $4, $5, $6, $7, 'paused')
+                                meta_connection_id, status)
+        VALUES ($1, $2, 'meta', $3, $4, $5, $6, 'paused')
         ON CONFLICT (org_id, platform, platform_account_id) DO UPDATE
           SET name = EXCLUDED.name, currency = EXCLUDED.currency,
-              access_token_enc = EXCLUDED.access_token_enc,
-              token_expires_at = EXCLUDED.token_expires_at
+              meta_connection_id = EXCLUDED.meta_connection_id
         RETURNING id
         """,
         new_id(),
@@ -51,16 +49,20 @@ async def upsert_ad_account(
         platform_account_id,
         name,
         currency,
-        token_enc,
-        expires_at,
+        meta_connection_id,
     )
     return row["id"]
 
 
 async def list_ad_accounts(db: Database, org_id: UUID) -> list[asyncpg.Record]:
     return await db.fetch(
-        "SELECT id, platform, platform_account_id, name, currency, status, sync_cursor, created_at "
-        "FROM ad_account WHERE org_id = $1 ORDER BY created_at",
+        """
+        SELECT a.id, a.platform, a.platform_account_id, a.name, a.currency, a.status,
+               a.sync_cursor, a.created_at,
+               c.sync_status AS connection_status, c.last_error AS connection_error
+        FROM ad_account a LEFT JOIN meta_connection c ON c.id = a.meta_connection_id
+        WHERE a.org_id = $1 ORDER BY a.created_at
+        """,
         org_id,
     )
 
@@ -77,6 +79,65 @@ async def set_ad_account_status(db: Database, org_id: UUID, account_id: UUID, st
         org_id,
         account_id,
         status,
+    )
+
+
+async def upsert_meta_connection(
+    db: Database, org_id: UUID, fivetran_connector_id: str, schema_name: str
+) -> UUID:
+    row = await db.fetchrow(
+        """
+        INSERT INTO meta_connection (id, org_id, fivetran_connector_id, schema_name, sync_status)
+        VALUES ($1, $2, $3, $4, 'pending')
+        ON CONFLICT (org_id) DO UPDATE
+          SET fivetran_connector_id = EXCLUDED.fivetran_connector_id,
+              schema_name = EXCLUDED.schema_name, sync_status = 'pending', last_error = NULL
+        RETURNING id
+        """,
+        new_id(),
+        org_id,
+        fivetran_connector_id,
+        schema_name,
+    )
+    return row["id"]
+
+
+async def get_meta_connection(db: Database, org_id: UUID) -> asyncpg.Record | None:
+    return await db.fetchrow("SELECT * FROM meta_connection WHERE org_id = $1", org_id)
+
+
+async def get_meta_connection_by_id(db: Database, connection_id: UUID) -> asyncpg.Record | None:
+    return await db.fetchrow("SELECT * FROM meta_connection WHERE id = $1", connection_id)
+
+
+async def set_meta_connection_status(
+    db: Database,
+    connection_id: UUID,
+    status: str,
+    *,
+    last_synced_at: datetime | None = None,
+    last_error: str | None = None,
+) -> None:
+    await db.execute(
+        "UPDATE meta_connection SET sync_status=$2, last_synced_at=COALESCE($3, last_synced_at), "
+        "last_error=$4 WHERE id=$1",
+        connection_id,
+        status,
+        last_synced_at,
+        last_error,
+    )
+
+
+async def list_ready_meta_connections_with_active_account(db: Database) -> list[asyncpg.Record]:
+    """Connections eligible for a nightly re-sync: healthy, and at least one account someone
+    has activated -- mirrors the old nightly_sync's `WHERE status = 'active'` filter, just
+    re-expressed at the connection level since discovery now happens per-org, not per-account."""
+    return await db.fetch(
+        """
+        SELECT DISTINCT c.id, c.org_id, c.schema_name FROM meta_connection c
+        JOIN ad_account a ON a.meta_connection_id = c.id
+        WHERE c.sync_status = 'ready' AND a.status = 'active'
+        """
     )
 
 

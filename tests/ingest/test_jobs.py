@@ -10,7 +10,6 @@ import respx
 from cs.connectors.base import MetricRow, PlatformAd, PlatformCreative
 from cs.connectors.fakes import FakeConnector
 from cs.core import queue
-from cs.core.crypto import encrypt_str
 from cs.ingest import repo, service
 from cs.jobs.worker import run_once
 from cs.tagging import jobs as tagging_jobs
@@ -20,7 +19,7 @@ from cs.tagging.fakes import FakeTagger, FakeTranscriber
 @pytest.fixture
 async def account_id(db, org_id, settings):
     aid = await repo.upsert_ad_account(
-        db, org_id, "1", "Main", "USD", encrypt_str(settings, "tok"), None
+        db, org_id, "1", "Main", "USD",
     )
     await repo.set_ad_account_status(db, org_id, aid, "active")
     return aid

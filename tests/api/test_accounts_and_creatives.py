@@ -3,7 +3,6 @@ from decimal import Decimal
 from uuid import UUID
 
 from cs.connectors.base import MetricRow, PlatformAd, PlatformCreative
-from cs.core.crypto import encrypt_str
 from cs.ingest import repo
 from tests.conftest import dev_headers
 
@@ -14,7 +13,7 @@ async def _seed(db, settings, client):
     me = (await client.get("/me", headers=H)).json()
     org_id = UUID(me["org_id"])
     acct = await repo.upsert_ad_account(
-        db, org_id, "1", "Main", "USD", encrypt_str(settings, "t"), None
+        db, org_id, "1", "Main", "USD",
     )
     cid, _ = await repo.upsert_creative(
         db,

@@ -89,11 +89,10 @@ async def test_full_loop(client, db, blobs, settings, monkeypatch):
     from uuid import UUID
 
     org_id = UUID((await client.get("/me", headers=H)).json()["org_id"])
-    from cs.core.crypto import encrypt_str
     from cs.ingest import repo as ingest_repo
 
     acct = await ingest_repo.upsert_ad_account(
-        db, org_id, "1", "Main", "USD", encrypt_str(settings, "t"), None
+        db, org_id, "1", "Main", "USD",
     )
     await client.post(f"/accounts/{acct}/activate", headers=H)
     await _drain(db, blobs, settings)

@@ -5,7 +5,6 @@ from PIL import Image
 
 from cs.connectors.base import PlatformCreative
 from cs.core import queue
-from cs.core.crypto import encrypt_str
 from cs.core.ids import new_id
 from cs.ingest import repo as ingest_repo
 from cs.tagging.reconcile import reenqueue_untagged
@@ -20,7 +19,7 @@ def _png() -> bytes:
 @pytest.fixture
 async def untagged_and_tagged(db, org_id, settings, blobs):
     acct = await ingest_repo.upsert_ad_account(
-        db, org_id, "1", "M", "USD", encrypt_str(settings, "t"), None
+        db, org_id, "1", "M", "USD",
     )
     ids = []
     for n in ("c1", "c2"):

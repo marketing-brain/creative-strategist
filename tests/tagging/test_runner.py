@@ -8,7 +8,6 @@ from PIL import Image
 
 from cs.connectors.base import PlatformCreative
 from cs.core import queue
-from cs.core.crypto import encrypt_str
 from cs.core.queue import Job
 from cs.ingest import repo as ingest_repo
 from cs.jobs.registry import JobContext
@@ -26,7 +25,7 @@ def _png():
 @pytest.fixture
 async def image_creative(db, org_id, settings, blobs):
     acct = await ingest_repo.upsert_ad_account(
-        db, org_id, "1", "M", "USD", encrypt_str(settings, "t"), None
+        db, org_id, "1", "M", "USD",
     )
     cid, _ = await ingest_repo.upsert_creative(
         db,
@@ -92,7 +91,7 @@ async def test_refusal_marks_run_failed(db, blobs, settings, org_id, image_creat
 
 async def _make_video_creative(db, blobs, settings, org_id, tmp_path):
     acct = await ingest_repo.upsert_ad_account(
-        db, org_id, "1", "M", "USD", encrypt_str(settings, "t"), None
+        db, org_id, "1", "M", "USD",
     )
     cid, _ = await ingest_repo.upsert_creative(
         db,
@@ -190,7 +189,7 @@ async def test_job_handler_uses_factories(db, blobs, settings, org_id, image_cre
 @pytest.fixture
 async def carousel_creative(db, org_id, settings, blobs):
     acct = await ingest_repo.upsert_ad_account(
-        db, org_id, "1", "M", "USD", encrypt_str(settings, "t"), None
+        db, org_id, "1", "M", "USD",
     )
     cid, _ = await ingest_repo.upsert_creative(
         db,
