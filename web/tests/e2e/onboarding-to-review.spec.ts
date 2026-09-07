@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test';
 
-// Requires: `CS_FAKE_CONNECTOR=1 make api` and `CS_FAKE_CONNECTOR=1 make worker` running, and an ad_account row for the
-// dev org inserted by `scripts/seed_dev_account.py` (see Step 4). NEXT_PUBLIC_DEV_ORG must match the seeded org.
+// Requires: `AUTH_MODE=dev CS_FAKE_CONNECTOR=1 make api` and `AUTH_MODE=dev CS_FAKE_CONNECTOR=1 make worker` running
+// (explicit AUTH_MODE=dev: the root .env now defaults to clerk, since everyday browser use always requires real
+// login), and an ad_account row for the dev org inserted by `scripts/seed_dev_account.py` (see Step 4).
+// NEXT_PUBLIC_DEV_ORG must match the seeded org.
 test('onboarding -> creatives -> generate -> review', async ({ page }) => {
   await page.goto('/onboarding');
   await page.getByRole('button', { name: 'Activate' }).first().click();
