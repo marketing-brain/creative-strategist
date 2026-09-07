@@ -38,6 +38,7 @@ tests/publish/                                        # deleted (test_publish.py
 tests/api/test_review_publish.py                      # rewritten as a pure review-transitions test
 tests/api/test_generation.py                          # remove test_member_cannot_publish_generated_asset
 tests/generation/test_service.py                      # trim stale publish_job mention from a docstring
+tests/e2e/test_loop.py                                 # replace the approve+publish+resync tail with an approve+download-ready assertion
 web/src/components/publish-dialog.tsx                 # deleted
 web/tests/components/publish-dialog.test.tsx           # deleted
 web/src/components/review-card.tsx                     # Publish button -> Download link + Copy-details button
@@ -131,7 +132,7 @@ git commit -m "feat: drop publish_job table and its ingest-side lookup"
 
 **Files:**
 - Delete: `src/cs/publish/meta.py`, `src/cs/publish/jobs.py`, `src/cs/publish/__init__.py`, `src/cs/api/routers/meta_targets.py`, `tests/connectors/test_meta_publish.py`, `tests/publish/test_publish.py`, `tests/publish/__init__.py`, `tests/api/test_meta_targets.py`
-- Modify: `src/cs/jobs/all_handlers.py`, `src/cs/api/routers/generation.py`, `src/cs/api/app.py`, `src/cs/connectors/base.py`, `src/cs/connectors/meta/connector.py`, `src/cs/connectors/fakes.py`, `src/cs/generation/repo.py:110-113`, `tests/api/test_review_publish.py`, `tests/api/test_generation.py`, `tests/generation/test_service.py:112-115`
+- Modify: `src/cs/jobs/all_handlers.py`, `src/cs/api/routers/generation.py`, `src/cs/api/app.py`, `src/cs/connectors/base.py`, `src/cs/connectors/meta/connector.py`, `src/cs/connectors/fakes.py`, `src/cs/generation/repo.py:110-113`, `tests/api/test_review_publish.py`, `tests/api/test_generation.py`, `tests/generation/test_service.py:112-115`, `tests/e2e/test_loop.py`
 
 **Interfaces:**
 - Consumes: `AdPlatformConnector` Protocol from Task 1's untouched state.
@@ -283,7 +284,40 @@ async def test_review_transitions(client, db):
 
 In `tests/api/test_generation.py`, delete the `test_member_cannot_publish_generated_asset` function (the last function in the file, lines 42-63). The `uuid` import at the top (`from uuid import UUID`) is also now unused — remove it too, since no remaining test in this file uses `UUID`.
 
-- [ ] **Step 12: Run the full backend test suite**
+- [ ] **Step 12: Truncate the publish tail of the full-loop e2e test**
+
+`tests/e2e/test_loop.py` (`test_full_loop`) drives the whole backfill → tag → insight → generate → approve → publish → sync loop on fakes. Its final two sections (currently labeled `# 4. approve + publish` and `# 5. next sync closes the loop`) call the now-deleted `/generated-assets/{id}/publish` and `/publish-jobs` routes, and assert a `creative.generated_asset_id` link that only ever got populated via the just-deleted `publish_job` lookup in `sync_account` (Task 1, Step 3) — that whole "next sync re-discovers the published creative and links it back" behavior no longer exists. Replace both sections (everything from `# 4. approve + publish` to the end of the function) with:
+
+```python
+    # 4. approve -> asset is ready to download, with its ad copy alongside it
+    aid = detail["assets"][0]["id"]
+    await client.post(f"/generated-assets/{aid}/approve", headers=H)
+    approved = (await client.get("/review-queue?state=approved", headers=H)).json()
+    asset = next(a for a in approved if a["id"] == aid)
+    assert asset["url"] and asset["headline"] and asset["primary_text"] and asset["cta_type"]
+```
+
+Also update the module docstring at the top of the file — it currently reads:
+
+```python
+"""Backfill -> tag -> insight -> generate -> approve -> publish -> sync closes the loop.
+
+All on fakes.
+"""
+```
+
+Change it to:
+
+```python
+"""Backfill -> tag -> insight -> generate -> approve, ready to download.
+
+All on fakes.
+"""
+```
+
+Leave everything before `# 4.` (the `FakeConnector`/`encrypt_str` setup, backfill, insights, generation) untouched — that's ingest machinery this plan doesn't touch. (It gets its own rewrite in the Fivetran ingest migration plan, `docs/superpowers/plans/2026-09-07-fivetran-meta-ingest.md`, Task 11 — don't fix it here.)
+
+- [ ] **Step 13: Run the full backend test suite**
 
 Run: `pytest tests/ -v`
 Expected: PASS. No test references `publish_job`, `cs.publish`, `meta_targets`, `upload_image`, `upload_video`, `create_ad`, `list_campaigns`, or `list_adsets`.
@@ -291,7 +325,7 @@ Expected: PASS. No test references `publish_job`, `cs.publish`, `meta_targets`, 
 Run: `grep -rn "publish_job\|cs\.publish\|meta_targets" src tests`
 Expected: no output.
 
-- [ ] **Step 13: Commit**
+- [ ] **Step 14: Commit**
 
 ```bash
 git add -A
