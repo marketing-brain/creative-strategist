@@ -40,7 +40,8 @@ web-test:
 	cd web && npm test
 
 web-e2e:
-	uv run python scripts/seed_dev_account.py && cd web && npx playwright install chromium && npm run test:e2e
+	AUTH_MODE=dev uv run python scripts/seed_dev_fivetran.py && cd web && npx playwright install chromium && npm run test:e2e
 
 demo:
-	CS_FAKE_CONNECTOR=1 $(MAKE) -j3 api worker scheduler
+	AUTH_MODE=dev uv run python scripts/seed_dev_fivetran.py
+	AUTH_MODE=dev $(MAKE) -j3 api worker scheduler

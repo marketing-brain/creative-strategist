@@ -24,21 +24,26 @@ The Next.js front end lives in `web/` and talks to the API above.
     cp web/.env.example web/.env.local   # NEXT_PUBLIC_API_URL, auth mode, dev identity
     make web-dev                          # http://localhost:3000
     make web-test                         # vitest unit + component tests
-    make web-e2e                          # seeds the dev account, runs Playwright
+    make web-e2e                          # seeds a fixture Fivetran schema, runs Playwright
 
-To click through the app without real Meta or model credentials:
+To click through the app without a live Fivetran connector or Meta credentials:
 
-    make demo       # CS_FAKE_CONNECTOR=1: api + worker + scheduler on fakes
+    make demo       # seeds a fixture Fivetran schema, then api + worker + scheduler
     make web-dev    # in a second terminal
 
-`CS_FAKE_CONNECTOR=1` fakes the Meta connector and the tagging pipeline, so
-onboarding, sync, the creative library, insights and the brief all work offline.
+`make demo` runs `scripts/seed_dev_fivetran.py`, which drops a fixture
+`<schema>__meta_ads` schema (shaped like a real Fivetran-landed Meta Ads sync) for the
+dev org and runs the real transform against it once, leaving a `paused` ad account ready
+for onboarding's "Activate" button. Tagging and generation still call real models by
+default; add `CS_FAKE_CONNECTOR=1` before `make api`/`make worker` to fake the tagging
+pipeline (tagger/transcriber/embedder) too, if you want the loop to run without model
+credentials past ingest.
 
 ### Known limitations
 
-- `make web-e2e` cannot go fully green without real credentials. `CS_FAKE_CONNECTOR`
-  does not fake generation, so the generate/review/publish leg of the flow needs a
-  working `ANTHROPIC_API_KEY` / `AI_GATEWAY_API_KEY`.
+- `make web-e2e` cannot go fully green without real credentials: generation always needs a
+  working `ANTHROPIC_API_KEY` / `AI_GATEWAY_API_KEY`, and tagging does too unless you run
+  `make api`/`make worker` with `CS_FAKE_CONNECTOR=1`.
 - With `BLOB_BACKEND=local`, `GET /blobs/{key}` requires an auth header. The web
   app serves assets through its own `/blobs/...` route, which re-issues the
   request server-side with auth attached; never point an `<img src>` straight at
@@ -46,12 +51,18 @@ onboarding, sync, the creative library, insights and the brief all work offline.
 
 ## Connect a Meta account
 
-Set `META_APP_ID`, `META_APP_SECRET` and `META_REDIRECT_URI` (default
-`http://localhost:8000/meta/oauth/callback`) in `.env`, then:
+Set `FIVETRAN_API_KEY`, `FIVETRAN_API_SECRET` and `FIVETRAN_GROUP_ID` in `.env`, then:
 
-1. `GET /meta/oauth/start` as an admin returns a `url`; open it and grant access.
-2. Meta redirects back to `GET /meta/oauth/callback`, which exchanges the code for a
-   long-lived token and stores every visible ad account with status `paused`.
-3. `POST /accounts/{id}/activate` flips the account to `active` and enqueues the 180-day
-   backfill (`make worker` runs it).
-4. The scheduler (`make scheduler`) then re-syncs the trailing 3 days nightly.
+1. `POST /connections/meta/start` as an admin creates a Fivetran connector and returns a
+   `connect_card_url`; open it and grant access to a Meta ad account.
+2. The Fivetran Connect Card redirects back to the web app's `/fivetran-return` page,
+   which calls `POST /connections/meta/finalize` with the `connector_id`. That stores the
+   `meta_connection` row and enqueues `meta.await_first_sync`, which polls Fivetran until
+   its first sync completes.
+3. Once Fivetran's first sync succeeds, `meta.sync_from_fivetran` runs automatically: it
+   discovers every ad account into `ad_account` rows (status `paused`) and syncs their
+   creatives, ads and insights from the landed schema.
+4. `POST /accounts/{id}/activate` flips an account to `active` and re-enqueues
+   `meta.sync_from_fivetran` for it (`make worker` runs it).
+5. The scheduler (`make scheduler`) then re-syncs every `ready` connection with an active
+   account nightly.

@@ -1,19 +1,27 @@
 """Backfill -> tag -> insight -> generate -> approve, ready to download.
 
-All on fakes.
+Ingest setup runs the real Fivetran transform against a fixture-seeded schema (no live
+connector/Meta creds); tagging, transcription, embedding, insight explanation, and
+generation still run on fakes.
 """
 
 from datetime import date, timedelta
-from decimal import Decimal
+from uuid import UUID
 
-from cs.connectors.base import MetricRow, PlatformAd, PlatformCreative
-from cs.connectors.fakes import FakeConnector
+from cs.connectors.fivetran.connect import schema_for
 from cs.core import queue
 from cs.generation import jobs as gen_jobs
-from cs.generation.fakes import FakeCopyWriter, FakeImageGenerator, FakeVideoGenerator, solid_png
-from cs.ingest import service as ingest_service
+from cs.generation.fakes import FakeCopyWriter, FakeImageGenerator, FakeVideoGenerator
+from cs.ingest import fivetran_insights, fivetran_transform
+from cs.ingest import repo as ingest_repo
+from cs.ingest.fivetran_fixtures import (
+    create_fixture_schema,
+    insert_campaign_ad_creative,
+    insert_daily_insight,
+)
 from cs.insights import jobs as insight_jobs
 from cs.insights.fakes import FakeExplainer
+from cs.jobs.registry import JobContext
 from cs.jobs.worker import run_once
 from cs.tagging import jobs as tag_jobs
 from cs.tagging.fakes import FakeEmbedder, FakeTagger, FakeTranscriber
@@ -29,8 +37,6 @@ async def _drain(db, blobs, settings):
 
 
 async def test_full_loop(client, db, blobs, settings, monkeypatch):
-    fake = FakeConnector()
-    monkeypatch.setattr(ingest_service, "CONNECTOR_FACTORY", lambda s, a, http, b: fake)
     q_tags = [{"dimension": "hook_type", "value": "question", "confidence": 0.9, "evidence": "e"}]
     s_tags = [{"dimension": "hook_type", "value": "statistic", "confidence": 0.9, "evidence": "e"}]
     # One shared tagger instance: TAGGER_FACTORY is invoked once per tag_creative job (once per
@@ -45,59 +51,49 @@ async def test_full_loop(client, db, blobs, settings, monkeypatch):
     monkeypatch.setattr(gen_jobs, "IMAGE_FACTORY", lambda s: FakeImageGenerator())
     monkeypatch.setattr(gen_jobs, "VIDEO_FACTORY", lambda s: FakeVideoGenerator())
 
-    days = [date.today() - timedelta(days=i + 1) for i in range(10)]
+    # 1. seed a fixture Fivetran schema (no live connector/Meta creds needed), run the
+    # transform directly to discover the account (mirroring what meta.sync_from_fivetran
+    # does after a real Fivetran connector's first sync completes), then activate it.
+    org_id = UUID((await client.get("/me", headers=H)).json()["org_id"])
+    schema = schema_for(org_id)
+    await create_fixture_schema(db, schema)
     for i in range(12):
         name = f"q{i}" if i < 6 else f"s{i}"
         ctr_clicks = 30 if i < 6 else 10
-        fake.add_creative(
-            PlatformCreative(
-                name,
-                "image",
-                name,
-                "P",
-                None,
-                "SHOP_NOW",
-                "https://x",
-                f"https://img/{name}",
-                "image/png",
-                {},
-            ),
-            solid_png(64, 64),
+        await insert_campaign_ad_creative(
+            db,
+            schema,
+            campaign_id="c1",
+            account_id="1",
+            adset_id="as1",
+            ad_id=f"ad_{name}",
+            creative_id=name,
+            name=name,
+            headline=name,
+            # a real, fetchable URL -- meta.download_creative (enqueued by the real
+            # transform below) does a genuine HTTP GET, same as scripts/seed_dev_fivetran.py.
+            image_url=f"https://placehold.co/64x64.png?text={name}",
         )
-        fake.add_ad(PlatformAd(f"ad_{name}", name, "ACTIVE", "as1", "c1", name))
-        for d in days:
-            fake.add_metric(
-                MetricRow(
-                    f"ad_{name}",
-                    d,
-                    "facebook:feed",
-                    Decimal("30"),
-                    1000,
-                    ctr_clicks,
-                    ctr_clicks,
-                    Decimal("1"),
-                    Decimal("50"),
-                    0,
-                    0,
-                    0,
-                    0,
-                    {},
-                )
+        for d in (date.today() - timedelta(days=n + 1) for n in range(10)):
+            await insert_daily_insight(
+                db,
+                schema,
+                ad_id=f"ad_{name}",
+                day=d.isoformat(),
+                spend=30,
+                impressions=1000,
+                clicks=ctr_clicks,
+                link_clicks=ctr_clicks,
             )
 
-    # 1. connect + activate (backfill)
-    from uuid import UUID
+    conn_id = await ingest_repo.upsert_meta_connection(db, org_id, "conn_e2e", schema)
+    await db.execute("UPDATE meta_connection SET sync_status='ready' WHERE id=$1", conn_id)
+    connection = await ingest_repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    await fivetran_insights.sync_insights(ctx, org_id, connection)
 
-    org_id = UUID((await client.get("/me", headers=H)).json()["org_id"])
-    from cs.ingest import repo as ingest_repo
-
-    acct = await ingest_repo.upsert_ad_account(
-        db,
-        org_id,
-        "1",
-        "Main",
-        "USD",
-    )
+    acct = (await ingest_repo.list_ad_accounts(db, org_id))[0]["id"]
     await client.post(f"/accounts/{acct}/activate", headers=H)
     await _drain(db, blobs, settings)
     assert await db.fetchval("SELECT count(*) FROM tag_run WHERE status='done'") == 12
