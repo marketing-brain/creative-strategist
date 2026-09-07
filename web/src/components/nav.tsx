@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { UserButton } from '@clerk/nextjs';
 import {
   BatteryWarning,
   ClipboardCheck,
@@ -77,6 +78,7 @@ export function Nav() {
             <Settings className="size-4 shrink-0" aria-hidden="true" />
             Settings
           </Link>
+          {process.env.NEXT_PUBLIC_AUTH_MODE === 'clerk' && <UserButton />}
           <ThemeToggle />
         </div>
       </aside>
@@ -107,6 +109,7 @@ export function Nav() {
         >
           <Settings className="size-4" aria-hidden="true" />
         </Link>
+        {process.env.NEXT_PUBLIC_AUTH_MODE === 'clerk' && <UserButton />}
       </nav>
     </>
   );
