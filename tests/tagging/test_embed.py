@@ -33,7 +33,11 @@ async def test_gateway_embedder(settings):
 @pytest.fixture
 async def two_tagged(db, org_id, settings):
     acct = await ingest_repo.upsert_ad_account(
-        db, org_id, "1", "M", "USD",
+        db,
+        org_id,
+        "1",
+        "M",
+        "USD",
     )
     tv = await repo.ensure_taxonomy_version(db, load_taxonomy())
     ids = []

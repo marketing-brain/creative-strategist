@@ -34,8 +34,9 @@ async def test_start_returns_connect_card_url(client, settings):
 @respx.mock
 async def test_finalize_persists_connection_and_enqueues_await_job(client, db):
     org_id = (await client.get("/me", headers=H)).json()["org_id"]
-    from cs.connectors.fivetran.connect import schema_for
     from uuid import UUID
+
+    from cs.connectors.fivetran.connect import schema_for
 
     respx.get(f"{F}/connectors/conn_1").mock(
         return_value=httpx.Response(
@@ -52,7 +53,9 @@ async def test_finalize_persists_connection_and_enqueues_await_job(client, db):
 @respx.mock
 async def test_finalize_rejects_connector_from_another_schema(client):
     respx.get(f"{F}/connectors/conn_1").mock(
-        return_value=httpx.Response(200, json={"data": {"id": "conn_1", "schema": "not_yours__meta_ads"}})
+        return_value=httpx.Response(
+            200, json={"data": {"id": "conn_1", "schema": "not_yours__meta_ads"}}
+        )
     )
     r = await client.post("/connections/meta/finalize", headers=H, json={"connector_id": "conn_1"})
     assert r.status_code == 403

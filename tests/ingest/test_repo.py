@@ -10,7 +10,11 @@ from cs.ingest import repo
 @pytest.fixture
 async def account_id(db, org_id, settings):
     return await repo.upsert_ad_account(
-        db, org_id, "1", "Main", "USD",
+        db,
+        org_id,
+        "1",
+        "Main",
+        "USD",
     )
 
 
@@ -167,7 +171,11 @@ async def test_upsert_metrics_with_no_known_ads_writes_nothing(db, org_id, accou
 
 async def test_list_assets_by_kind_orders_by_seq(db, org_id, settings):
     acct = await repo.upsert_ad_account(
-        db, org_id, "1", "M", "USD",
+        db,
+        org_id,
+        "1",
+        "M",
+        "USD",
     )
     cid, _ = await repo.upsert_creative(
         db,

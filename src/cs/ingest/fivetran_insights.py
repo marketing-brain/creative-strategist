@@ -27,9 +27,7 @@ def _q(schema: str, table: str) -> str:
     return f'"{schema}".{table}'
 
 
-async def _action_totals(
-    db, schema: str, table: str
-) -> dict[tuple[str, date], dict[str, Decimal]]:
+async def _action_totals(db, schema: str, table: str) -> dict[tuple[str, date], dict[str, Decimal]]:
     """(ad_id, date) -> {action_type: value}, summed across `index` (Meta can report the
     same action_type more than once per breakdown row)."""
     rows = await db.fetch(f"""
@@ -55,7 +53,9 @@ def _video_total(by_type: dict[str, Decimal] | None) -> int:
     return int(sum((by_type or {}).values()))
 
 
-async def sync_insights(ctx: JobContext, org_id: UUID, connection: asyncpg.Record) -> dict[str, Any]:
+async def sync_insights(
+    ctx: JobContext, org_id: UUID, connection: asyncpg.Record
+) -> dict[str, Any]:
     schema = connection["schema_name"]
     db = ctx.db
 
@@ -70,11 +70,13 @@ async def sync_insights(ctx: JobContext, org_id: UUID, connection: asyncpg.Recor
     metric_rows: list[MetricRow] = []
     for r in base_rows:
         key = (r["ad_id"], r["date"])
+        publisher = r["publisher_platform"] or "unknown"
+        position = r["platform_position"] or "unknown"
         metric_rows.append(
             MetricRow(
                 platform_ad_id=r["ad_id"],
                 day=r["date"],
-                placement=f"{r['publisher_platform'] or 'unknown'}:{r['platform_position'] or 'unknown'}",
+                placement=f"{publisher}:{position}",
                 spend=Decimal(str(r["spend"] or 0)),
                 impressions=int(r["impressions"] or 0),
                 clicks=int(r["clicks"] or 0),
@@ -93,7 +95,9 @@ async def sync_insights(ctx: JobContext, org_id: UUID, connection: asyncpg.Recor
     # upsert_metrics resolves platform_ad_id -> (ad_account_id, creative_id) via the `ad`
     # table itself, so every ad in this org's insights is grouped by its actual account.
     by_account: dict[UUID, list[MetricRow]] = {}
-    ad_rows = await db.fetch("SELECT id, ad_account_id, platform_ad_id FROM ad WHERE org_id=$1", org_id)
+    ad_rows = await db.fetch(
+        "SELECT id, ad_account_id, platform_ad_id FROM ad WHERE org_id=$1", org_id
+    )
     account_by_platform_ad_id = {a["platform_ad_id"]: a["ad_account_id"] for a in ad_rows}
     for m in metric_rows:
         acct_id = account_by_platform_ad_id.get(m.platform_ad_id)

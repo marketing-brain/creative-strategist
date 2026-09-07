@@ -30,8 +30,12 @@ async def test_create_connector_returns_connect_card_url(settings):
     )
     async with httpx.AsyncClient() as http:
         data = await client.create_connector(
-            settings, http, service="facebook_ads", group_id="grp_1",
-            schema="org1__meta_ads", redirect_uri="https://app.example/fivetran-return",
+            settings,
+            http,
+            service="facebook_ads",
+            group_id="grp_1",
+            schema="org1__meta_ads",
+            redirect_uri="https://app.example/fivetran-return",
         )
     assert data["id"] == "conn_1"
     assert data["connect_card"]["uri"] == "https://fivetran.com/connect-card/conn_1"
@@ -43,7 +47,9 @@ async def test_create_connector_returns_connect_card_url(settings):
 async def test_get_connector(settings):
     _settings(settings)
     respx.get(f"{F}/connectors/conn_1").mock(
-        return_value=httpx.Response(200, json={"data": {"id": "conn_1", "schema": "org1__meta_ads"}})
+        return_value=httpx.Response(
+            200, json={"data": {"id": "conn_1", "schema": "org1__meta_ads"}}
+        )
     )
     async with httpx.AsyncClient() as http:
         data = await client.get_connector(settings, http, "conn_1")
@@ -53,7 +59,9 @@ async def test_get_connector(settings):
 @respx.mock
 async def test_delete_connector(settings):
     _settings(settings)
-    route = respx.delete(f"{F}/connectors/conn_1").mock(return_value=httpx.Response(200, json={"data": {}}))
+    route = respx.delete(f"{F}/connectors/conn_1").mock(
+        return_value=httpx.Response(200, json={"data": {}})
+    )
     async with httpx.AsyncClient() as http:
         await client.delete_connector(settings, http, "conn_1")
     assert route.called
@@ -65,10 +73,14 @@ async def test_find_connector_by_schema_matches(settings):
     respx.get(f"{F}/groups/grp_1/connectors?limit=1000").mock(
         return_value=httpx.Response(
             200,
-            json={"data": {"items": [
-                {"id": "conn_1", "schema": "org1__meta_ads"},
-                {"id": "conn_2", "schema": "org2__meta_ads"},
-            ]}},
+            json={
+                "data": {
+                    "items": [
+                        {"id": "conn_1", "schema": "org1__meta_ads"},
+                        {"id": "conn_2", "schema": "org2__meta_ads"},
+                    ]
+                }
+            },
         )
     )
     async with httpx.AsyncClient() as http:

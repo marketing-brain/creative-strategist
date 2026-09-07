@@ -10,7 +10,11 @@ from cs.tagging.taxonomy import load_taxonomy
 
 async def seed_account(db, org_id, settings) -> UUID:
     aid = await ingest_repo.upsert_ad_account(
-        db, org_id, "1", "Main", "USD",
+        db,
+        org_id,
+        "1",
+        "Main",
+        "USD",
     )
     await ingest_repo.set_ad_account_status(db, org_id, aid, "active")
     return aid

@@ -19,7 +19,11 @@ from cs.tagging.fakes import FakeTagger, FakeTranscriber
 @pytest.fixture
 async def account_id(db, org_id, settings):
     aid = await repo.upsert_ad_account(
-        db, org_id, "1", "Main", "USD",
+        db,
+        org_id,
+        "1",
+        "Main",
+        "USD",
     )
     await repo.set_ad_account_status(db, org_id, aid, "active")
     return aid

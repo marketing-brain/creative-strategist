@@ -19,7 +19,11 @@ def _png() -> bytes:
 @pytest.fixture
 async def untagged_and_tagged(db, org_id, settings, blobs):
     acct = await ingest_repo.upsert_ad_account(
-        db, org_id, "1", "M", "USD",
+        db,
+        org_id,
+        "1",
+        "M",
+        "USD",
     )
     ids = []
     for n in ("c1", "c2"):

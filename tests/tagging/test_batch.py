@@ -28,7 +28,11 @@ def _png():
 @pytest.fixture
 async def three_images(db, org_id, settings, blobs):
     acct = await ingest_repo.upsert_ad_account(
-        db, org_id, "1", "M", "USD",
+        db,
+        org_id,
+        "1",
+        "M",
+        "USD",
     )
     ids = []
     for n in ("a", "b", "c"):

@@ -13,7 +13,11 @@ async def _seed(db, settings, client):
     me = (await client.get("/me", headers=H)).json()
     org_id = UUID(me["org_id"])
     acct = await repo.upsert_ad_account(
-        db, org_id, "1", "Main", "USD",
+        db,
+        org_id,
+        "1",
+        "Main",
+        "USD",
     )
     cid, _ = await repo.upsert_creative(
         db,

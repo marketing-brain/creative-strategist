@@ -6,7 +6,11 @@ from cs.tagging.taxonomy import load_taxonomy
 
 async def test_finish_tag_run_is_idempotent_on_retry(db, org_id, settings):
     acct = await ingest_repo.upsert_ad_account(
-        db, org_id, "1", "M", "USD",
+        db,
+        org_id,
+        "1",
+        "M",
+        "USD",
     )
     cid, _ = await ingest_repo.upsert_creative(
         db,

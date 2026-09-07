@@ -19,7 +19,11 @@ def _auth_header(settings: Settings) -> str:
 
 
 async def _call(
-    settings: Settings, http: httpx.AsyncClient, method: str, path: str, json_body: dict | None = None
+    settings: Settings,
+    http: httpx.AsyncClient,
+    method: str,
+    path: str,
+    json_body: dict | None = None,
 ) -> dict:
     resp = await http.request(
         method,
@@ -32,14 +36,11 @@ async def _call(
         },
     )
     body = (
-        resp.json()
-        if resp.headers.get("content-type", "").startswith("application/json")
-        else {}
+        resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
     )
     if resp.status_code >= 400:
-        raise FivetranError(
-            f"Fivetran {method} {path} failed ({resp.status_code}): {body.get('message', 'unknown error')}"
-        )
+        error_msg = body.get("message", "unknown error")
+        raise FivetranError(f"Fivetran {method} {path} failed ({resp.status_code}): {error_msg}")
     return body.get("data", {})
 
 

@@ -16,15 +16,18 @@ async def test_start_connection_deletes_existing_before_recreating(settings, mon
     settings.fivetran_group_id = "grp_1"
     calls = []
     monkeypatch.setattr(
-        connect.fivetran_client, "find_connector_by_schema",
+        connect.fivetran_client,
+        "find_connector_by_schema",
         lambda s, h, g, sc: _record(calls, "find", "old_conn"),
     )
     monkeypatch.setattr(
-        connect.fivetran_client, "delete_connector",
+        connect.fivetran_client,
+        "delete_connector",
         lambda s, h, cid: _record(calls, "delete", None),
     )
     monkeypatch.setattr(
-        connect.fivetran_client, "create_connector",
+        connect.fivetran_client,
+        "create_connector",
         lambda s, h, **kw: _record(
             calls, "create", {"id": "new_conn", "connect_card": {"uri": "https://card"}}
         ),
@@ -45,7 +48,8 @@ async def test_start_connection_requires_group_id(settings):
 async def test_finalize_connection_accepts_matching_schema(settings, monkeypatch):
     org = UUID(int=1)
     monkeypatch.setattr(
-        connect.fivetran_client, "get_connector",
+        connect.fivetran_client,
+        "get_connector",
         lambda s, h, cid: _async_result({"id": cid, "schema": connect.schema_for(org)}),
     )
     detail = await connect.finalize_connection(settings, None, org, "conn_1")
@@ -54,7 +58,8 @@ async def test_finalize_connection_accepts_matching_schema(settings, monkeypatch
 
 async def test_finalize_connection_rejects_mismatched_schema(settings, monkeypatch):
     monkeypatch.setattr(
-        connect.fivetran_client, "get_connector",
+        connect.fivetran_client,
+        "get_connector",
         lambda s, h, cid: _async_result({"id": cid, "schema": "someone_else__meta_ads"}),
     )
     with pytest.raises(connect.ConnectError) as exc:

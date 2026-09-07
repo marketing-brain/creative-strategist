@@ -92,7 +92,11 @@ async def test_full_loop(client, db, blobs, settings, monkeypatch):
     from cs.ingest import repo as ingest_repo
 
     acct = await ingest_repo.upsert_ad_account(
-        db, org_id, "1", "Main", "USD",
+        db,
+        org_id,
+        "1",
+        "Main",
+        "USD",
     )
     await client.post(f"/accounts/{acct}/activate", headers=H)
     await _drain(db, blobs, settings)

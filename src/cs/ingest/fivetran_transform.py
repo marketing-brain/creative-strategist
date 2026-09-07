@@ -44,9 +44,7 @@ def _format_and_urls(row: asyncpg.Record) -> tuple[str, str | None, list[str] | 
     return "image", row["image_url"] or row["thumbnail_url"], None
 
 
-async def _discover_accounts(
-    db, org_id: UUID, connection_id: UUID, schema: str
-) -> dict[str, UUID]:
+async def _discover_accounts(db, org_id: UUID, connection_id: UUID, schema: str) -> dict[str, UUID]:
     """Every distinct account_id seen in campaign_history becomes (or already is) an
     ad_account row, starting 'paused' until a human activates it -- same default the old
     OAuth callback used."""
@@ -65,7 +63,7 @@ async def _sync_ads_and_creatives(
     creative_rows = await db.fetch(f"""
         SELECT * FROM (
           SELECT *, row_number() OVER (PARTITION BY id ORDER BY _fivetran_synced DESC) rn
-          FROM {_q(schema, 'creative_history')}
+          FROM {_q(schema, "creative_history")}
         ) t WHERE rn = 1
     """)
     creatives_by_platform_id: dict[str, asyncpg.Record] = {r["id"]: r for r in creative_rows}
@@ -73,7 +71,7 @@ async def _sync_ads_and_creatives(
     ad_rows = await db.fetch(f"""
         SELECT * FROM (
           SELECT *, row_number() OVER (PARTITION BY id ORDER BY _fivetran_synced DESC) rn
-          FROM {_q(schema, 'ad_history')}
+          FROM {_q(schema, "ad_history")}
         ) t WHERE rn = 1
     """)
 
@@ -121,13 +119,17 @@ async def _sync_ads_and_creatives(
             if fmt == "carousel" and child_urls:
                 if not await repo.creative_has_primary_asset(db, org_id, creative_id):
                     await queue.enqueue(
-                        db, org_id, "meta.download_carousel",
+                        db,
+                        org_id,
+                        "meta.download_carousel",
                         {"creative_id": str(creative_id), "asset_urls": child_urls},
                         dedup_key=str(creative_id),
                     )
             elif asset_url and not await repo.creative_has_asset(db, org_id, creative_id, kind):
                 await queue.enqueue(
-                    db, org_id, "meta.download_creative",
+                    db,
+                    org_id,
+                    "meta.download_creative",
                     {"creative_id": str(creative_id), "asset_url": asset_url, "kind": kind},
                     dedup_key=str(creative_id),
                 )

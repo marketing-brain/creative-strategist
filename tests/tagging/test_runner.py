@@ -25,7 +25,11 @@ def _png():
 @pytest.fixture
 async def image_creative(db, org_id, settings, blobs):
     acct = await ingest_repo.upsert_ad_account(
-        db, org_id, "1", "M", "USD",
+        db,
+        org_id,
+        "1",
+        "M",
+        "USD",
     )
     cid, _ = await ingest_repo.upsert_creative(
         db,
@@ -91,7 +95,11 @@ async def test_refusal_marks_run_failed(db, blobs, settings, org_id, image_creat
 
 async def _make_video_creative(db, blobs, settings, org_id, tmp_path):
     acct = await ingest_repo.upsert_ad_account(
-        db, org_id, "1", "M", "USD",
+        db,
+        org_id,
+        "1",
+        "M",
+        "USD",
     )
     cid, _ = await ingest_repo.upsert_creative(
         db,
@@ -189,7 +197,11 @@ async def test_job_handler_uses_factories(db, blobs, settings, org_id, image_cre
 @pytest.fixture
 async def carousel_creative(db, org_id, settings, blobs):
     acct = await ingest_repo.upsert_ad_account(
-        db, org_id, "1", "M", "USD",
+        db,
+        org_id,
+        "1",
+        "M",
+        "USD",
     )
     cid, _ = await ingest_repo.upsert_creative(
         db,
