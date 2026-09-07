@@ -27,6 +27,7 @@ src/cs/publish/                                      # deleted entirely (meta.py
 src/cs/jobs/all_handlers.py                          # remove `import cs.publish.jobs`
 src/cs/api/routers/generation.py                     # remove PublishBody, publish, publish_jobs
 src/cs/api/routers/meta_targets.py                    # deleted entirely
+tests/api/test_meta_targets.py                          # deleted (tested the deleted router)
 src/cs/api/app.py                                     # remove meta_targets import + include_router
 src/cs/connectors/base.py                             # remove upload_image/upload_video/create_ad/list_campaigns/list_adsets from the Protocol
 src/cs/connectors/meta/connector.py                   # remove the same methods from MetaConnector
@@ -129,7 +130,7 @@ git commit -m "feat: drop publish_job table and its ingest-side lookup"
 ### Task 2: Remove the publish module, routes, and write-side connector methods
 
 **Files:**
-- Delete: `src/cs/publish/meta.py`, `src/cs/publish/jobs.py`, `src/cs/publish/__init__.py`, `src/cs/api/routers/meta_targets.py`, `tests/connectors/test_meta_publish.py`, `tests/publish/test_publish.py`, `tests/publish/__init__.py`
+- Delete: `src/cs/publish/meta.py`, `src/cs/publish/jobs.py`, `src/cs/publish/__init__.py`, `src/cs/api/routers/meta_targets.py`, `tests/connectors/test_meta_publish.py`, `tests/publish/test_publish.py`, `tests/publish/__init__.py`, `tests/api/test_meta_targets.py`
 - Modify: `src/cs/jobs/all_handlers.py`, `src/cs/api/routers/generation.py`, `src/cs/api/app.py`, `src/cs/connectors/base.py`, `src/cs/connectors/meta/connector.py`, `src/cs/connectors/fakes.py`, `src/cs/generation/repo.py:110-113`, `tests/api/test_review_publish.py`, `tests/api/test_generation.py`, `tests/generation/test_service.py:112-115`
 
 **Interfaces:**
@@ -141,6 +142,8 @@ git commit -m "feat: drop publish_job table and its ingest-side lookup"
 ```bash
 git rm -r src/cs/publish tests/connectors/test_meta_publish.py tests/publish
 ```
+
+`tests/api/test_meta_targets.py` also gets deleted, but not yet — it tests `/accounts/{id}/adsets`, which Step 4 below removes. Deleting it now would leave a broken import until then; it's covered by Step 4's `git rm`.
 
 - [ ] **Step 2: Drop the import in the handler registry**
 
@@ -159,10 +162,10 @@ import cs.tagging.jobs  # noqa: F401
 
 In `src/cs/api/routers/generation.py`, delete the `PublishBody` class and the `publish` and `publish_jobs` route functions (everything from `class PublishBody(BaseModel):` down to the end of the file). The file should end after the `reject` route function.
 
-- [ ] **Step 4: Delete the dead campaign/ad-set router**
+- [ ] **Step 4: Delete the dead campaign/ad-set router and its test**
 
 ```bash
-git rm src/cs/api/routers/meta_targets.py
+git rm src/cs/api/routers/meta_targets.py tests/api/test_meta_targets.py
 ```
 
 - [ ] **Step 5: Unregister it in `app.py`**
