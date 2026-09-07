@@ -1,6 +1,6 @@
 'use client';
 import { useRef, useState } from 'react';
-import { Plug } from 'lucide-react';
+import { Loader2, Plug } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,68 +9,124 @@ import type { Account } from '@/lib/types';
 
 const statusVariant = { active: 'success', paused: 'secondary', disconnected: 'destructive' } as const;
 
+type MsgKind = 'info' | 'success' | 'error';
+const msgClass: Record<MsgKind, string> = {
+  info: 'text-muted-foreground',
+  success: 'text-emerald-600 dark:text-emerald-400',
+  error: 'text-destructive',
+};
+
 export function AccountsPanel({ accounts }: { accounts: Account[] }) {
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ text: string; kind: MsgKind } | null>(null);
+  const [connecting, setConnecting] = useState(false);
   const messageListenerRef = useRef<((e: MessageEvent) => void) | null>(null);
+  const closeWatcherRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopWatchingPopup = () => {
+    if (closeWatcherRef.current) {
+      clearInterval(closeWatcherRef.current);
+      closeWatcherRef.current = null;
+    }
+  };
+
   const connect = async () => {
+    // If a previous connect attempt never completed (popup closed manually, or the
+    // Connect Card never sent the return message), drop its listener before adding a
+    // new one — otherwise a stale listener stays live and double-finalizes on the
+    // next successful return message, using its own (now-stale) connector_id.
+    if (messageListenerRef.current) {
+      window.removeEventListener('message', messageListenerRef.current);
+      messageListenerRef.current = null;
+    }
+    stopWatchingPopup();
+    setConnecting(true);
+    setMsg(null);
     try {
-      // If a previous connect attempt never completed (popup closed manually, or the
-      // Connect Card never sent the return message), drop its listener before adding a
-      // new one — otherwise a stale listener stays live and double-finalizes on the
-      // next successful return message, using its own (now-stale) connector_id.
-      if (messageListenerRef.current) {
-        window.removeEventListener('message', messageListenerRef.current);
-        messageListenerRef.current = null;
-      }
       const { connect_card_url, connector_id } = await api.fivetranConnectStart();
-      const popup = window.open(connect_card_url, 'fivetran-connect', 'width=500,height=700');
+      const width = 520;
+      const height = 720;
+      const left = Math.round(window.screenX + Math.max(0, (window.outerWidth - width) / 2));
+      const top = Math.round(window.screenY + Math.max(0, (window.outerHeight - height) / 2));
+      const popup = window.open(
+        connect_card_url,
+        'fivetran-connect',
+        `width=${width},height=${height},left=${left},top=${top},popup=1`,
+      );
+      if (!popup) {
+        setConnecting(false);
+        setMsg({
+          text: 'Your browser blocked the connect window — allow pop-ups for this site and try again.',
+          kind: 'error',
+        });
+        return;
+      }
+      setMsg({ text: 'Waiting for you to finish connecting in the popup…', kind: 'info' });
+
       const onMessage = async (e: MessageEvent) => {
         if (e.origin !== window.location.origin || e.data?.type !== 'fivetran:return') return;
         window.removeEventListener('message', onMessage);
         messageListenerRef.current = null;
-        popup?.close();
+        stopWatchingPopup();
+        popup.close();
         try {
           await api.fivetranConnectFinalize(connector_id);
-          setMsg('Connected — accounts will appear once the first sync finishes.');
+          setMsg({ text: 'Connected — accounts will appear once the first sync finishes.', kind: 'success' });
         } catch (err) {
-          setMsg(`Failed to finish connecting: ${err instanceof Error ? err.message : 'Something went wrong.'}`);
+          setMsg({
+            text: `Failed to finish connecting: ${err instanceof Error ? err.message : 'Something went wrong.'}`,
+            kind: 'error',
+          });
+        } finally {
+          setConnecting(false);
         }
       };
       messageListenerRef.current = onMessage;
       window.addEventListener('message', onMessage);
+
+      // The popup gives no other signal if the user just closes it without finishing —
+      // without this, the button would stay stuck in "Connecting…" forever.
+      closeWatcherRef.current = setInterval(() => {
+        if (popup.closed) {
+          stopWatchingPopup();
+          window.removeEventListener('message', onMessage);
+          messageListenerRef.current = null;
+          setConnecting(false);
+          setMsg({ text: 'Connect window closed before finishing — try again when ready.', kind: 'info' });
+        }
+      }, 500);
     } catch (e) {
+      setConnecting(false);
       if (e instanceof ApiError && e.status === 403) {
-        setMsg("You don't have permission to do this — ask an admin.");
+        setMsg({ text: "You don't have permission to do this — ask an admin.", kind: 'error' });
       } else {
-        setMsg(`Failed to connect: ${e instanceof Error ? e.message : 'Something went wrong.'}`);
+        setMsg({ text: `Failed to connect: ${e instanceof Error ? e.message : 'Something went wrong.'}`, kind: 'error' });
       }
     }
   };
   const activate = async (id: string) => {
     try {
       const { job_id } = await api.activateAccount(id);
-      setMsg(
-        job_id
-          ? 'Sync queued. Creatives will appear as they sync.'
-          : 'Activated — connect Meta first to start syncing.',
-      );
+      setMsg({
+        text: job_id ? 'Sync queued. Creatives will appear as they sync.' : 'Activated — connect Meta first to start syncing.',
+        kind: 'success',
+      });
     } catch (e) {
       if (e instanceof ApiError && e.status === 403) {
-        setMsg("You don't have permission to do this — ask an admin.");
+        setMsg({ text: "You don't have permission to do this — ask an admin.", kind: 'error' });
       } else {
-        setMsg(`Failed to activate: ${e instanceof Error ? e.message : 'Something went wrong.'}`);
+        setMsg({ text: `Failed to activate: ${e instanceof Error ? e.message : 'Something went wrong.'}`, kind: 'error' });
       }
     }
   };
   const sync = async (id: string) => {
     try {
       await api.syncAccount(id);
-      setMsg('Sync queued.');
+      setMsg({ text: 'Sync queued.', kind: 'success' });
     } catch (e) {
       if (e instanceof ApiError && e.status === 403) {
-        setMsg("You don't have permission to do this — ask an admin.");
+        setMsg({ text: "You don't have permission to do this — ask an admin.", kind: 'error' });
       } else {
-        setMsg(`Failed to sync: ${e instanceof Error ? e.message : 'Something went wrong.'}`);
+        setMsg({ text: `Failed to sync: ${e instanceof Error ? e.message : 'Something went wrong.'}`, kind: 'error' });
       }
     }
   };
@@ -78,9 +134,9 @@ export function AccountsPanel({ accounts }: { accounts: Account[] }) {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>Ad accounts</CardTitle>
-        <Button size="sm" onClick={connect} className="gap-1.5">
-          <Plug className="size-4" aria-hidden="true" />
-          Connect Meta
+        <Button size="sm" onClick={connect} disabled={connecting} className="gap-1.5">
+          {connecting ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Plug className="size-4" aria-hidden="true" />}
+          {connecting ? 'Connecting…' : 'Connect Meta'}
         </Button>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -119,8 +175,8 @@ export function AccountsPanel({ accounts }: { accounts: Account[] }) {
           </ul>
         )}
         {msg && (
-          <p role="status" className="text-sm">
-            {msg}
+          <p role="status" className={`text-sm ${msgClass[msg.kind]}`}>
+            {msg.text}
           </p>
         )}
       </CardContent>
