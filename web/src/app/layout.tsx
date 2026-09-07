@@ -2,7 +2,6 @@ import './globals.css';
 import type { Metadata, Viewport } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import { ClerkProvider } from '@clerk/nextjs';
-import { Nav } from '@/components/nav';
 
 const geistSans = Geist({ variable: '--font-sans', subsets: ['latin'] });
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
@@ -28,20 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body className="min-h-dvh bg-background font-sans text-foreground antialiased">
-        <a
-          href="#main"
-          className="sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:top-3 focus-visible:left-3 focus-visible:z-50 focus-visible:rounded-lg focus-visible:bg-primary focus-visible:px-3 focus-visible:py-2 focus-visible:text-sm focus-visible:font-medium focus-visible:text-primary-foreground"
-        >
-          Skip to content
-        </a>
-        <div className="flex min-h-dvh flex-col md:flex-row">
-          <Nav />
-          <main id="main" className="min-w-0 flex-1 px-4 py-6 md:px-8 md:py-8">
-            {children}
-          </main>
-        </div>
-      </body>
+      <body className="min-h-dvh bg-background font-sans text-foreground antialiased">{children}</body>
     </html>
   );
   return process.env.NEXT_PUBLIC_AUTH_MODE === 'clerk' ? <ClerkProvider>{body}</ClerkProvider> : body;

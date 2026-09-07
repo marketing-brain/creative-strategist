@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactElement } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import ErrorBoundary from '@/app/error';
+import ErrorBoundary from '@/app/(app)/error';
 import GlobalErrorBoundary from '@/app/global-error';
 
 const err = Object.assign(new Error('backend unreachable'), { digest: 'abc123' });
