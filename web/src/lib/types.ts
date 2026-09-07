@@ -9,5 +9,4 @@ export type Conversation = { id: string; title: string; created_at: string };
 export type Message = { role: 'user' | 'assistant'; content: string };
 export type GeneratedAsset = { id: string; generation_id: string; kind: 'image' | 'video'; aspect: string; variant: number; url: string; headline: string; primary_text: string; cta_type: string; review_state: 'draft' | 'approved' | 'rejected' };
 export type Generation = { id: string; kind: string; status: string; concept: string | null; source_insight_id: string | null; created_at: string; error: string | null; assets: GeneratedAsset[] };
-export type PublishJob = { id: string; generated_asset_id: string; status: string; platform_ad_id: string | null; error: string | null; created_at: string };
 export type BrandKit = { id: string; version: number; colors: string[]; fonts: string[]; voice_rules: string; prohibited_claims: string[]; logo_url: string | null };

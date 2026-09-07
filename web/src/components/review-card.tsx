@@ -1,19 +1,19 @@
 'use client';
 import { useState } from 'react';
-import { PublishDialog } from '@/components/publish-dialog';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { cn } from 'cn';
 import { ApiError, api } from '@/lib/api';
 import { blobUrl } from '@/lib/blob-url';
 import type { GeneratedAsset } from '@/lib/types';
 
 const stateVariant = { draft: 'secondary', approved: 'success', rejected: 'destructive' } as const;
 
-export function ReviewCard({ asset, accounts, isAdmin }: { asset: GeneratedAsset; accounts: { id: string; name: string }[]; isAdmin: boolean }) {
+export function ReviewCard({ asset }: { asset: GeneratedAsset }) {
   const [state, setState] = useState(asset.review_state);
-  const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const act = async (s: 'approved' | 'rejected') => {
     setError(null);
     try {
@@ -26,6 +26,11 @@ export function ReviewCard({ asset, accounts, isAdmin }: { asset: GeneratedAsset
         setError(`Failed: ${e instanceof Error ? e.message : 'Something went wrong.'}`);
       }
     }
+  };
+  const copyDetails = async () => {
+    await navigator.clipboard.writeText(`${asset.headline}\n\n${asset.primary_text}\n\nCTA: ${asset.cta_type}`);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
   return (
     <Card size="sm">
@@ -56,14 +61,16 @@ export function ReviewCard({ asset, accounts, isAdmin }: { asset: GeneratedAsset
               </Button>
             </>
           )}
-          {state === 'approved' &&
-            (isAdmin ? (
-              <Button size="sm" onClick={() => setOpen(true)}>
-                Publish
+          {state === 'approved' && (
+            <>
+              <a href={blobUrl(asset.url)} download className={cn(buttonVariants({ size: 'sm' }))}>
+                Download
+              </a>
+              <Button size="sm" variant="outline" onClick={copyDetails}>
+                {copied ? 'Copied' : 'Copy details'}
               </Button>
-            ) : (
-              <p className="text-muted-foreground">Ask an admin to publish this.</p>
-            ))}
+            </>
+          )}
         </div>
         {error && (
           <p role="status" className="text-sm text-destructive">
@@ -71,7 +78,6 @@ export function ReviewCard({ asset, accounts, isAdmin }: { asset: GeneratedAsset
           </p>
         )}
       </CardContent>
-      {open && <PublishDialog asset={{ ...asset, review_state: state }} accounts={accounts} open={open} onOpenChange={setOpen} />}
     </Card>
   );
 }

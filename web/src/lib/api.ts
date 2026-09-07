@@ -48,8 +48,4 @@ export const api = {
   reviewQueue: (state: string) => apiFetch<import('./types').GeneratedAsset[]>(`/review-queue?state=${state}`),
   approve: (id: string) => apiFetch<{ ok: boolean }>(`/generated-assets/${id}/approve`, { method: 'POST' }),
   reject: (id: string) => apiFetch<{ ok: boolean }>(`/generated-assets/${id}/reject`, { method: 'POST' }),
-  publish: (id: string, b: object) => apiFetch<{ publish_job_id: string }>(`/generated-assets/${id}/publish`, { method: 'POST', body: JSON.stringify(b) }),
-  publishJobs: () => apiFetch<import('./types').PublishJob[]>('/publish-jobs'),
-  campaigns: (accountId: string) => apiFetch<{ id: string; name: string }[]>(`/accounts/${accountId}/campaigns`),
-  adsets: (accountId: string, campaignId: string) => apiFetch<{ id: string; name: string }[]>(`/accounts/${accountId}/adsets?campaign_id=${campaignId}`),
 };
