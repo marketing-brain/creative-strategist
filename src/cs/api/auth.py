@@ -41,13 +41,19 @@ def _clerk_claims(request: Request, settings: Settings) -> tuple[str, str, str]:
     except Exception as exc:  # noqa: BLE001 - JWKS fetch failures are not the caller's fault
         log.warning("jwks lookup failed: %s", exc)
         raise HTTPException(503, "auth provider unavailable") from exc
-    org = claims.get("org_id")
+    # Session token v2 (Clerk's default since 2025-04-14) nests organization
+    # claims under "o" (o.id, o.rol) instead of flat org_id/org_role -- verified
+    # against a real token, not assumed from docs. Fall back to the v1 flat
+    # claims for any instance still emitting the deprecated format.
+    org_claim = claims.get("o") or {}
+    org = org_claim.get("id") or claims.get("org_id")
     if not org:
         raise HTTPException(403, "no active organization")
     sub = claims.get("sub")
     if not sub:
         raise HTTPException(401, "token missing sub")
-    role = "admin" if str(claims.get("org_role", "")).endswith("admin") else "member"
+    org_role = org_claim.get("rol") or claims.get("org_role", "")
+    role = "admin" if str(org_role).endswith("admin") else "member"
     return sub, org, role
 
 

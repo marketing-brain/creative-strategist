@@ -87,9 +87,17 @@ async def clerk_client(clerk_settings, db, blobs, jwks):
         yield c
 
 
-def make_token(private_pem: str, **claims) -> str:
+def make_token(
+    private_pem: str, org_id: str | None = None, org_role: str | None = None, **claims
+) -> str:
+    # Session token v2 (Clerk's default since 2025-04-14, verified against a
+    # real token): org claims nest under "o" (o.id, o.rol), o.rol has no
+    # "org:" prefix. Kept as org_id=/org_role= kwargs here only so every call
+    # site below doesn't have to spell out the nested dict.
     now = int(time.time())
     payload = {"sub": "user_clerk", "iss": ISSUER, "iat": now, "exp": now + 300}
+    if org_id is not None:
+        payload["o"] = {"id": org_id, **({"rol": org_role} if org_role is not None else {})}
     payload.update(claims)
     payload = {k: v for k, v in payload.items() if v is not None}
     return jwt.encode(payload, private_pem, algorithm="RS256")
@@ -100,7 +108,7 @@ def bearer(token: str) -> dict:
 
 
 async def test_valid_admin_token(clerk_client, keypair, db):
-    token = make_token(keypair[0], org_id="org_clerk", org_role="org:admin")
+    token = make_token(keypair[0], org_id="org_clerk", org_role="admin")
     r = await clerk_client.get("/me", headers=bearer(token))
     assert r.status_code == 200
     body = r.json()
@@ -109,7 +117,7 @@ async def test_valid_admin_token(clerk_client, keypair, db):
 
 
 async def test_member_role(clerk_client, keypair):
-    token = make_token(keypair[0], org_id="org_clerk", org_role="org:member")
+    token = make_token(keypair[0], org_id="org_clerk", org_role="member")
     r = await clerk_client.get("/me", headers=bearer(token))
     assert r.status_code == 200 and r.json()["role"] == "member"
 
@@ -120,13 +128,13 @@ async def test_missing_org_is_forbidden(clerk_client, keypair):
 
 
 async def test_bad_signature_is_unauthorized(clerk_client, other_keypair):
-    token = make_token(other_keypair[0], org_id="org_clerk", org_role="org:admin")
+    token = make_token(other_keypair[0], org_id="org_clerk", org_role="admin")
     r = await clerk_client.get("/me", headers=bearer(token))
     assert r.status_code == 401
 
 
 async def test_missing_sub_is_unauthorized(clerk_client, keypair):
-    token = make_token(keypair[0], sub=None, org_id="org_clerk", org_role="org:admin")
+    token = make_token(keypair[0], sub=None, org_id="org_clerk", org_role="admin")
     r = await clerk_client.get("/me", headers=bearer(token))
     assert r.status_code == 401 and "sub" in r.json()["detail"]
 
@@ -148,13 +156,13 @@ async def test_jwks_fetch_failure_is_service_unavailable(clerk_client, keypair, 
             raise OSError("jwks unreachable")
 
     jwks["client"] = Broken()
-    token = make_token(keypair[0], org_id="org_clerk", org_role="org:admin")
+    token = make_token(keypair[0], org_id="org_clerk", org_role="admin")
     r = await clerk_client.get("/me", headers=bearer(token))
     assert r.status_code == 503 and r.json()["detail"] == "auth provider unavailable"
 
 
 async def test_require_admin_rejects_member(clerk_client, keypair):
-    member = make_token(keypair[0], org_id="org_clerk", org_role="org:member")
+    member = make_token(keypair[0], org_id="org_clerk", org_role="member")
     assert (await clerk_client.get("/_test/admin-only", headers=bearer(member))).status_code == 403
-    admin = make_token(keypair[0], org_id="org_clerk", org_role="org:admin")
+    admin = make_token(keypair[0], org_id="org_clerk", org_role="admin")
     assert (await clerk_client.get("/_test/admin-only", headers=bearer(admin))).status_code == 200
