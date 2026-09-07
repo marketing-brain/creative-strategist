@@ -1,35 +1,23 @@
 from cs.connectors.base import PlatformAd, PlatformCreative
 from cs.ingest import fivetran_insights, repo
+from cs.ingest.fivetran_fixtures import create_fixture_schema, insert_daily_insight
 from cs.jobs.registry import JobContext
 
 SCHEMA = "testorg__meta_ads"
 
 
 async def _seed(db, org_id):
-    await db.execute(f'DROP SCHEMA IF EXISTS "{SCHEMA}" CASCADE')
-    await db.execute(f'CREATE SCHEMA "{SCHEMA}"')
-    await db.execute(
-        f'CREATE TABLE "{SCHEMA}".ad_insights (ad_id TEXT, date DATE, '
-        f"publisher_platform TEXT, platform_position TEXT, spend NUMERIC, "
-        f"impressions INT, clicks INT, inline_link_clicks INT)"
+    await create_fixture_schema(db, SCHEMA)
+    await insert_daily_insight(
+        db,
+        SCHEMA,
+        ad_id="ad1",
+        day="2026-09-01",
+        spend=10.0,
+        impressions=1000,
+        clicks=20,
+        link_clicks=20,
     )
-    for t in (
-        "ad_insights_actions",
-        "ad_insights_action_values",
-        "ad_insights_video_play_actions",
-        "ad_insights_video_thruplay_watched_actions",
-        "ad_insights_video_p50_watched_actions",
-        "ad_insights_video_p100_watched_actions",
-    ):
-        await db.execute(
-            f'CREATE TABLE "{SCHEMA}".{t} '
-            f"(ad_id TEXT, date DATE, action_type TEXT, index INT, value NUMERIC)"
-        )
-
-    await db.execute(f"""
-        INSERT INTO "{SCHEMA}".ad_insights VALUES
-        ('ad1', '2026-09-01', 'facebook', 'feed', 10.0, 1000, 20, 20)
-    """)
     await db.execute(f"""
         INSERT INTO "{SCHEMA}".ad_insights_actions
         VALUES ('ad1', '2026-09-01', 'omni_purchase', 0, 2)

@@ -7,7 +7,7 @@ import { expect, test } from '@playwright/test';
 test('onboarding -> creatives -> generate -> review', async ({ page }) => {
   await page.goto('/onboarding');
   await page.getByRole('button', { name: 'Activate' }).first().click();
-  await expect(page.getByText(/backfill queued/i)).toBeVisible();
+  await expect(page.getByText(/sync queued/i)).toBeVisible();
 
   await page.getByLabel(/colors/i).fill('#112233');
   await page.getByLabel(/voice/i).fill('Warm and direct.');

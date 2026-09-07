@@ -18,7 +18,15 @@ describe('AccountsPanel', () => {
     render(<AccountsPanel accounts={[{ id: 'a1', platform: 'meta', platform_account_id: '1', name: 'Main', currency: 'USD', status: 'paused', sync_cursor: {}, connection_status: 'ready', connection_error: null }]} />);
     await userEvent.click(screen.getByRole('button', { name: /activate/i }));
     expect(activate).toHaveBeenCalledWith('a1');
-    expect(await screen.findByText(/backfill queued/i)).toBeInTheDocument();
+    expect(await screen.findByText(/sync queued/i)).toBeInTheDocument();
+  });
+
+  it('shows an honest message when activation queues no sync (no Meta connection yet)', async () => {
+    activate.mockResolvedValueOnce({ job_id: null });
+    render(<AccountsPanel accounts={[{ id: 'a1', platform: 'meta', platform_account_id: '1', name: 'Main', currency: 'USD', status: 'paused', sync_cursor: {}, connection_status: 'ready', connection_error: null }]} />);
+    await userEvent.click(screen.getByRole('button', { name: /activate/i }));
+    expect(activate).toHaveBeenCalledWith('a1');
+    expect(await screen.findByText(/connect meta first/i)).toBeInTheDocument();
   });
 
   it('opens a popup and finalizes on the fivetran:return message', async () => {

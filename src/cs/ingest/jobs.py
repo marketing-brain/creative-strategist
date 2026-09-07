@@ -20,8 +20,8 @@ log = logging.getLogger("cs.ingest")
 @handler("meta.await_first_sync")
 async def await_first_sync(ctx: JobContext) -> None:
     conn_id = UUID(ctx.job.payload["meta_connection_id"])
-    conn = await repo.get_meta_connection_by_id(ctx.db, conn_id)
-    if conn is None:
+    conn = await repo.get_meta_connection(ctx.db, ctx.job.org_id)
+    if conn is None or conn["id"] != conn_id:
         return  # connection was replaced by a newer connect attempt
     async with httpx.AsyncClient(timeout=30) as http:
         detail = await fivetran_client.get_connector(
@@ -63,8 +63,8 @@ async def await_first_sync(ctx: JobContext) -> None:
 @handler("meta.sync_from_fivetran")
 async def sync_from_fivetran(ctx: JobContext) -> None:
     conn_id = UUID(ctx.job.payload["meta_connection_id"])
-    conn = await repo.get_meta_connection_by_id(ctx.db, conn_id)
-    if conn is None:
+    conn = await repo.get_meta_connection(ctx.db, ctx.job.org_id)
+    if conn is None or conn["id"] != conn_id:
         return
     try:
         entities = await fivetran_transform.discover_and_sync_entities(ctx, ctx.job.org_id, conn)

@@ -48,8 +48,12 @@ export function AccountsPanel({ accounts }: { accounts: Account[] }) {
   };
   const activate = async (id: string) => {
     try {
-      await api.activateAccount(id);
-      setMsg('Backfill queued. Creatives will appear as they sync.');
+      const { job_id } = await api.activateAccount(id);
+      setMsg(
+        job_id
+          ? 'Sync queued. Creatives will appear as they sync.'
+          : 'Activated — connect Meta first to start syncing.',
+      );
     } catch (e) {
       if (e instanceof ApiError && e.status === 403) {
         setMsg("You don't have permission to do this — ask an admin.");

@@ -47,6 +47,15 @@ the brief all work offline.
   app serves assets through its own `/blobs/...` route, which re-issues the
   request server-side with auth attached; never point an `<img src>` straight at
   the API's blob URL. In S3 mode the API returns presigned URLs instead.
+- Video ad creatives are currently ingested as metadata only: a `creative` row is created,
+  but no asset (thumbnail/video) is downloaded and the creative is not tagged, so it won't
+  appear correctly in the creative library. The current landed-table set doesn't include
+  `ad_video_history` (the table that would carry a downloadable source URL), and its real
+  column shape hasn't been verified against a live Fivetran connector.
+- Orgs that connected Meta before this Fivetran migration must reconnect: the migration
+  adds `ad_account.meta_connection_id` without a backfill, so every pre-existing
+  `ad_account` row starts with `meta_connection_id = NULL`. The old connection is not
+  carried forward -- reconnect via the Connect Card flow below.
 
 ## Connect a Meta account
 
@@ -54,8 +63,11 @@ Set `FIVETRAN_API_KEY`, `FIVETRAN_API_SECRET` and `FIVETRAN_GROUP_ID` in `.env`,
 
 1. `POST /connections/meta/start` as an admin creates a Fivetran connector and returns a
    `connect_card_url`; open it and grant access to a Meta ad account.
-2. The Fivetran Connect Card redirects back to the web app's `/fivetran-return` page,
-   which calls `POST /connections/meta/finalize` with the `connector_id`. That stores the
+2. The Fivetran Connect Card redirects back to the web app's `/fivetran-return` page
+   (opened in a popup). That page has no `connector_id` and does no auth of its own -- it
+   just `postMessage`s a `fivetran:return` signal to the tab that opened it and closes
+   itself. The opening tab's listener (in `accounts-panel.tsx`) receives that message and
+   then calls `POST /connections/meta/finalize` with the `connector_id`, which stores the
    `meta_connection` row and enqueues `meta.await_first_sync`, which polls Fivetran until
    its first sync completes.
 3. Once Fivetran's first sync succeeds, `meta.sync_from_fivetran` runs automatically: it

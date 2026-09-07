@@ -8,10 +8,13 @@ generation still run on fakes.
 from datetime import date, timedelta
 from uuid import UUID
 
+import httpx
+import respx
+
 from cs.connectors.fivetran.connect import schema_for
 from cs.core import queue
 from cs.generation import jobs as gen_jobs
-from cs.generation.fakes import FakeCopyWriter, FakeImageGenerator, FakeVideoGenerator
+from cs.generation.fakes import FakeCopyWriter, FakeImageGenerator, FakeVideoGenerator, solid_png
 from cs.ingest import fivetran_insights, fivetran_transform
 from cs.ingest import repo as ingest_repo
 from cs.ingest.fivetran_fixtures import (
@@ -36,7 +39,16 @@ async def _drain(db, blobs, settings):
             break
 
 
+@respx.mock
 async def test_full_loop(client, db, blobs, settings, monkeypatch):
+    # meta.download_creative (enqueued by the real transform below) does a genuine HTTP GET
+    # against each fixture ad's image_url -- mock every placehold.co URL so this test stays
+    # hermetic (no real network call to a third-party host) rather than flaking offline/in CI.
+    respx.get(url__regex=r"^https://placehold\.co/.*").mock(
+        return_value=httpx.Response(
+            200, content=solid_png(64, 64), headers={"content-type": "image/png"}
+        )
+    )
     q_tags = [{"dimension": "hook_type", "value": "question", "confidence": 0.9, "evidence": "e"}]
     s_tags = [{"dimension": "hook_type", "value": "statistic", "confidence": 0.9, "evidence": "e"}]
     # One shared tagger instance: TAGGER_FACTORY is invoked once per tag_creative job (once per
@@ -70,8 +82,8 @@ async def test_full_loop(client, db, blobs, settings, monkeypatch):
             creative_id=name,
             name=name,
             headline=name,
-            # a real, fetchable URL -- meta.download_creative (enqueued by the real
-            # transform below) does a genuine HTTP GET, same as scripts/seed_dev_fivetran.py.
+            # same placehold.co URL shape scripts/seed_dev_fivetran.py uses against a real
+            # connector -- mocked above so meta.download_creative's HTTP GET stays hermetic.
             image_url=f"https://placehold.co/64x64.png?text={name}",
         )
         for d in (date.today() - timedelta(days=n + 1) for n in range(10)):
