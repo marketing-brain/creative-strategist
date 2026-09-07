@@ -84,7 +84,7 @@ async def _sync_ads_and_creatives(
         try:
             acct_id = accounts_by_platform_id.get(ad_row["account_id"])
             if acct_id is None:
-                continue  # a stale ad for an account not (yet) in campaign_history
+                continue  # not discovered yet, or discovered but not activated by the user
             cr = creatives_by_platform_id.get(ad_row["creative_id"])
             if cr is None:
                 continue  # ad references a creative Fivetran hasn't landed yet
@@ -159,5 +159,15 @@ async def discover_and_sync_entities(
 ) -> dict[str, Any]:
     schema = connection["schema_name"]
     accounts_by_platform_id = await _discover_accounts(ctx.db, org_id, connection["id"], schema)
-    counts = await _sync_ads_and_creatives(ctx.db, org_id, schema, accounts_by_platform_id)
+    # Discovery lists every account Fivetran can see (so the user has something to pick
+    # from in Settings), but ingestion -- ads, creatives, asset downloads, tagging -- only
+    # ever runs for accounts the user has explicitly activated. A still-paused account
+    # gets an ad_account row and nothing else: no creative content is ever pulled or
+    # exposed until the user consents to it in our own UI, independent of whatever Meta/
+    # Fivetran-level account scope the connect flow granted.
+    active_ids = await repo.list_active_ad_account_ids(ctx.db, org_id)
+    active_by_platform_id = {
+        pid: aid for pid, aid in accounts_by_platform_id.items() if aid in active_ids
+    }
+    counts = await _sync_ads_and_creatives(ctx.db, org_id, schema, active_by_platform_id)
     return {"accounts_discovered": len(accounts_by_platform_id), **counts}

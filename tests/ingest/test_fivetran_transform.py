@@ -31,6 +31,15 @@ async def test_discover_and_sync_entities(db, blobs, settings, org_id):
     assert len(accounts) == 1 and accounts[0]["platform_account_id"] == "999"
     assert accounts[0]["status"] == "paused"
 
+    # Discovery alone must not pull any content -- a still-paused account is a pick-list
+    # entry only, not an implicit grant to download and expose its ads.
+    assert await db.fetchval("SELECT count(*) FROM ad WHERE org_id=$1", org_id) == 0
+    assert await db.fetchval("SELECT count(*) FROM creative WHERE org_id=$1", org_id) == 0
+
+    await repo.set_ad_account_status(db, org_id, accounts[0]["id"], "active")
+    summary2 = await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    assert summary2["failed"] == 0
+
     ads = await db.fetch("SELECT * FROM ad WHERE org_id=$1", org_id)
     assert len(ads) == 1 and ads[0]["platform_ad_id"] == "ad1" and ads[0]["status"] == "ACTIVE"
 
@@ -62,11 +71,49 @@ async def test_discover_and_sync_entities_is_idempotent(db, blobs, settings, org
     ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
 
     await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    acct = (await repo.list_ad_accounts(db, org_id))[0]
+    await repo.set_ad_account_status(db, org_id, acct["id"], "active")
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
     await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
 
     assert await db.fetchval("SELECT count(*) FROM ad_account WHERE org_id=$1", org_id) == 1
     assert await db.fetchval("SELECT count(*) FROM ad WHERE org_id=$1", org_id) == 1
     assert await db.fetchval("SELECT count(*) FROM creative WHERE org_id=$1", org_id) == 1
+
+
+async def test_paused_account_is_discovered_but_not_ingested(db, blobs, settings, org_id):
+    """The activation gate itself: a discovered account with no explicit activation must
+    get an ad_account row (so the user has something to activate) and nothing else -- no
+    ad, no creative, no download/tagging job -- regardless of what Meta/Fivetran-level
+    scope the connect flow granted."""
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="ad1",
+        creative_id="cr1",
+        name="name",
+        headline="Headline",
+        image_url="https://img/orig.jpg",
+    )
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    summary = await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+
+    assert summary["accounts_discovered"] == 1
+    assert summary["synced_ads"] == 0
+    assert summary["new_creatives"] == 0
+    assert await db.fetchval("SELECT count(*) FROM ad_account WHERE org_id=$1", org_id) == 1
+    assert await db.fetchval("SELECT count(*) FROM ad WHERE org_id=$1", org_id) == 0
+    assert await db.fetchval("SELECT count(*) FROM creative WHERE org_id=$1", org_id) == 0
+    assert (
+        await db.fetchval("SELECT count(*) FROM job WHERE job_type='meta.download_creative'") == 0
+    )
 
 
 async def test_dead_download_job_is_reenqueued_on_resync(db, blobs, settings, org_id):
@@ -92,6 +139,9 @@ async def test_dead_download_job_is_reenqueued_on_resync(db, blobs, settings, or
     connection = await repo.get_meta_connection_by_id(db, conn_id)
     ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
 
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    acct = (await repo.list_ad_accounts(db, org_id))[0]
+    await repo.set_ad_account_status(db, org_id, acct["id"], "active")
     await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
     first_job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.download_creative'")
     assert first_job is not None and first_job["status"] == "pending"
@@ -144,6 +194,10 @@ async def test_one_malformed_ad_does_not_abort_the_whole_sync(
     conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
     connection = await repo.get_meta_connection_by_id(db, conn_id)
     ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    acct = (await repo.list_ad_accounts(db, org_id))[0]
+    await repo.set_ad_account_status(db, org_id, acct["id"], "active")
 
     original_upsert_creative = repo.upsert_creative
 

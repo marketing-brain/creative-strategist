@@ -69,7 +69,17 @@ async def create_connector(
             "run_setup_tests": False,
             "paused": True,
             "config": {"schema": schema, "pause_after_trial": True},
-            "connect_card_config": {"redirect_uri": redirect_uri, "hide_setup_guide": True},
+            # all_fields=True is required to show the connector's own setup fields (notably
+            # Facebook Ads' "sync specific accounts" picker) in the embedded Connect Card --
+            # without it, Fivetran renders only the OAuth login step and silently defaults to
+            # syncing every ad account the authenticating user can see. This is the only
+            # account-selection control point Meta/Fivetran expose to the end user; without
+            # it, a marketer managing several clients' accounts has no way to scope consent.
+            "connect_card_config": {
+                "redirect_uri": redirect_uri,
+                "hide_setup_guide": True,
+                "all_fields": True,
+            },
         },
     )
 

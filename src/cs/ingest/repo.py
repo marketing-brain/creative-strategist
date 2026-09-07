@@ -67,6 +67,14 @@ async def list_ad_accounts(db: Database, org_id: UUID) -> list[asyncpg.Record]:
     )
 
 
+async def list_active_ad_account_ids(db: Database, org_id: UUID) -> set[UUID]:
+    """Accounts the user has explicitly activated -- the consent boundary the Fivetran
+    transform gates ingestion on. A discovered-but-paused account gets no ads, creatives,
+    assets, or tagging until it appears here."""
+    rows = await db.fetch("SELECT id FROM ad_account WHERE org_id=$1 AND status='active'", org_id)
+    return {r["id"] for r in rows}
+
+
 async def get_ad_account(db: Database, org_id: UUID, account_id: UUID) -> asyncpg.Record | None:
     return await db.fetchrow(
         "SELECT * FROM ad_account WHERE org_id = $1 AND id = $2", org_id, account_id
