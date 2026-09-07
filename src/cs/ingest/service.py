@@ -26,10 +26,15 @@ async def download_creative(
     ext = _EXT_BY_MIME.get(mime, "bin")
     key = f"{org_id}/creatives/{creative_id}/original.{ext}"
     await ctx.blobs.put(key, data, mime)
-    asset_id = await repo.insert_asset(ctx.db, org_id, creative_id, kind, key, sha256_hex(data), mime)
+    asset_id = await repo.insert_asset(
+        ctx.db, org_id, creative_id, kind, key, sha256_hex(data), mime
+    )
     await repo.set_primary_asset(ctx.db, org_id, creative_id, asset_id)
     await queue.enqueue(
-        ctx.db, org_id, "tagging.tag_creative", {"creative_id": str(creative_id)},
+        ctx.db,
+        org_id,
+        "tagging.tag_creative",
+        {"creative_id": str(creative_id)},
         dedup_key=f"tag:{creative_id}",
     )
 
@@ -56,6 +61,9 @@ async def download_carousel(
     if primary_id is not None:
         await repo.set_primary_asset(ctx.db, org_id, creative_id, primary_id)
         await queue.enqueue(
-            ctx.db, org_id, "tagging.tag_creative", {"creative_id": str(creative_id)},
+            ctx.db,
+            org_id,
+            "tagging.tag_creative",
+            {"creative_id": str(creative_id)},
             dedup_key=f"tag:{creative_id}",
         )
