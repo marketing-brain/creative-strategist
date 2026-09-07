@@ -18,14 +18,18 @@ class ConnectError(RuntimeError):
 
 
 def schema_for(org_id: UUID) -> str:
-    """{org_slug}__meta_ads -- the Postgres schema Fivetran lands this org's data into.
+    """org_{org_slug}__meta_ads -- the Postgres schema Fivetran lands this org's data into.
 
     Exactly one implementation in the whole app: the transform (fivetran_transform.py)
     imports this rather than re-deriving it, since drift here silently reads the wrong
-    (or no) schema.
+    (or no) schema. The "org_" prefix is required, not cosmetic: Fivetran rejects a
+    connector schema that begins with a digit, and org_id is a UUID -- roughly 5/8 of
+    UUIDs start with a hex digit 0-9, so an unprefixed slug fails against the real API
+    for most orgs (caught live against a real Fivetran connector, not by the fixture
+    tests, which never exercised this constraint).
     """
     slug = re.sub(r"[^a-z0-9]+", "_", str(org_id).lower()).strip("_")
-    return f"{slug}__meta_ads"
+    return f"org_{slug}__meta_ads"
 
 
 def _redirect_uri(settings: Settings) -> str:

@@ -8,7 +8,7 @@ from cs.connectors.fivetran import connect
 def test_schema_for_is_stable_and_sanitized():
     org = UUID("01234567-89ab-cdef-0123-456789abcdef")
     schema = connect.schema_for(org)
-    assert schema == "01234567_89ab_cdef_0123_456789abcdef__meta_ads"
+    assert schema == "org_01234567_89ab_cdef_0123_456789abcdef__meta_ads"
     assert schema == connect.schema_for(org)  # deterministic
 
 
