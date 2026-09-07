@@ -2087,8 +2087,8 @@ git commit -m "chore: remove dead Meta OAuth/Graph-API connector code"
 
 **Files:**
 - Delete: `scripts/seed_dev_account.py`
-- Create: `scripts/seed_dev_fivetran.py`
-- Modify: `Makefile`, `README.md`, `src/cs/tagging/jobs.py` (drop its `CS_FAKE_CONNECTOR` branch), `web/tests/e2e/onboarding-to-review.spec.ts`, `tests/e2e/test_loop.py`
+- Create: `src/cs/ingest/fivetran_fixtures.py`, `scripts/seed_dev_fivetran.py`
+- Modify: `Makefile`, `README.md`, `src/cs/tagging/jobs.py` (drop its `CS_FAKE_CONNECTOR` branch, if applicable), `web/tests/e2e/onboarding-to-review.spec.ts`, `tests/e2e/test_loop.py`
 
 **Interfaces:**
 - Consumes: `fivetran_transform.discover_and_sync_entities`, `fivetran_insights.sync_insights` (Tasks 6-7) — the demo/e2e path now exercises the *real* transform against fixture-seeded schema tables, not a separate fake code path.
@@ -2098,31 +2098,21 @@ git commit -m "chore: remove dead Meta OAuth/Graph-API connector code"
 
 Read the block at `src/cs/tagging/jobs.py:236` (`if os.environ.get("CS_FAKE_CONNECTOR"):`) in full before touching it — confirm exactly what it fakes (likely the tagging model call, not the connector, given its location in `tagging/jobs.py` rather than `ingest/`) so Step 4 below removes only what's actually about the deleted `FakeConnector`/ingest path, not an unrelated tagging fake that should stay for the demo loop to remain cheap to run.
 
-- [ ] **Step 2: Write the seed script**
+- [ ] **Step 2: Factor the fixture-schema SQL into a reusable module**
 
-Create `scripts/seed_dev_fivetran.py`, replacing `scripts/seed_dev_account.py`:
+Both the seed script and `tests/e2e/test_loop.py` need the same Fivetran-shaped tables, with different rows in them. Rather than duplicate the DDL, extract it into `src/cs/ingest/fivetran_fixtures.py`, alongside the other test/dev fakes this codebase already keeps under `src/cs/*/fakes.py` (e.g. `cs.generation.fakes`, `cs.tagging.fakes`):
 
 ```python
-"""Seed a fake Fivetran-landed schema plus a meta_connection for the dev org, so the e2e
-flow can activate an account and exercise the real transform without a live Fivetran
-connector or Meta credentials."""
+"""Fivetran-shaped fixture schema for local demo/e2e runs -- no live Fivetran connector or
+Meta credentials needed. create_fixture_schema builds the tables fivetran_transform.py /
+fivetran_insights.py read; callers insert their own rows into them."""
 
-import asyncio
-import os
+from __future__ import annotations
 
-from cs.connectors.fivetran.connect import schema_for
-from cs.core.config import get_settings
 from cs.core.db import Database
-from cs.ingest.repo import upsert_meta_connection
-from cs.orgs.repo import get_or_create_org
 
 
-async def main() -> None:
-    s = get_settings()
-    db = await Database.connect(s.database_url)
-    org = await get_or_create_org(db, os.environ.get("NEXT_PUBLIC_DEV_ORG", "org_dev"), "Dev org")
-    schema = schema_for(org)
-
+async def create_fixture_schema(db: Database, schema: str) -> None:
     await db.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
     await db.execute(f'CREATE SCHEMA "{schema}"')
     await db.execute(f"""
@@ -2160,28 +2150,105 @@ async def main() -> None:
         await db.execute(f'CREATE TABLE "{schema}".{t} '
                           f'(ad_id TEXT, date DATE, action_type TEXT, index INT, value NUMERIC)')
 
+
+async def insert_campaign_ad_creative(
+    db: Database,
+    schema: str,
+    *,
+    campaign_id: str,
+    account_id: str,
+    adset_id: str,
+    ad_id: str,
+    creative_id: str,
+    name: str,
+    headline: str,
+    image_url: str,
+) -> None:
+    await db.execute(
+        f'INSERT INTO "{schema}".campaign_history VALUES ($1, $2, $3, now())',
+        campaign_id, account_id, f"Campaign {name}",
+    )
+    await db.execute(
+        f'INSERT INTO "{schema}".ad_history VALUES ($1, $2, $3, $4, $5, $6, $7, now())',
+        ad_id, account_id, adset_id, campaign_id, creative_id, name, "ACTIVE",
+    )
+    await db.execute(
+        f'INSERT INTO "{schema}".creative_history VALUES '
+        f'($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, NULL, now())',
+        creative_id, account_id, name, headline, "Primary text", "SHOP_NOW",
+        image_url, None, "https://example.com",
+    )
+
+
+async def insert_daily_insight(
+    db: Database,
+    schema: str,
+    *,
+    ad_id: str,
+    day: str,
+    spend: float,
+    impressions: int,
+    clicks: int,
+    link_clicks: int,
+    placement: tuple[str, str] = ("facebook", "feed"),
+) -> None:
+    await db.execute(
+        f'INSERT INTO "{schema}".ad_insights VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+        ad_id, day, placement[0], placement[1], spend, impressions, clicks, link_clicks,
+    )
+```
+
+- [ ] **Step 3: Write the seed script**
+
+Create `scripts/seed_dev_fivetran.py`, replacing `scripts/seed_dev_account.py`:
+
+```python
+"""Seed a fake Fivetran-landed schema plus a meta_connection for the dev org, so the e2e
+flow can activate an account and exercise the real transform without a live Fivetran
+connector or Meta credentials."""
+
+import asyncio
+import os
+
+from cs.connectors.fivetran.connect import schema_for
+from cs.core.blobs import blob_store_from_settings
+from cs.core.config import get_settings
+from cs.core.db import Database
+from cs.ingest.fivetran_fixtures import (
+    create_fixture_schema,
+    insert_campaign_ad_creative,
+    insert_daily_insight,
+)
+from cs.ingest.fivetran_transform import discover_and_sync_entities
+from cs.ingest.repo import upsert_meta_connection
+from cs.jobs.registry import JobContext
+from cs.orgs.repo import get_or_create_org
+
+
+async def main() -> None:
+    s = get_settings()
+    db = await Database.connect(s.database_url)
+    org = await get_or_create_org(db, os.environ.get("NEXT_PUBLIC_DEV_ORG", "org_dev"), "Dev org")
+    schema = schema_for(org)
+
+    await create_fixture_schema(db, schema)
     for name, headline in (("demo_a", "Headline demo_a"), ("demo_b", "Headline demo_b")):
-        await db.execute(
-            f'INSERT INTO "{schema}".campaign_history VALUES ($1, $2, $3, now())',
-            f"c_{name}", "1", f"Campaign {name}",
+        await insert_campaign_ad_creative(
+            db, schema, campaign_id=f"c_{name}", account_id="1", adset_id=f"as_{name}",
+            ad_id=f"ad_{name}", creative_id=name, name=name, headline=headline,
+            image_url=f"https://placehold.co/600x600.png?text={name}",
         )
-        await db.execute(
-            f'INSERT INTO "{schema}".ad_history VALUES ($1, $2, $3, $4, $5, $6, $7, now())',
-            f"ad_{name}", "1", f"as_{name}", f"c_{name}", name, name, "ACTIVE",
-        )
-        await db.execute(
-            f'INSERT INTO "{schema}".creative_history VALUES '
-            f'($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, NULL, now())',
-            name, "1", name, headline, "Primary text", "SHOP_NOW",
-            f"https://placehold.co/600x600.png?text={name}", None, "https://example.com",
-        )
-        await db.execute(
-            f'INSERT INTO "{schema}".ad_insights VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-            f"ad_{name}", "2026-09-01", "facebook", "feed", 10, 1000, 20, 20,
+        await insert_daily_insight(
+            db, schema, ad_id=f"ad_{name}", day="2026-09-01", spend=10, impressions=1000,
+            clicks=20, link_clicks=20,
         )
 
-    await upsert_meta_connection(db, org, "dev_fake_connector", schema)
-    await db.execute("UPDATE meta_connection SET sync_status='ready' WHERE org_id=$1", org)
+    conn_id = await upsert_meta_connection(db, org, "dev_fake_connector", schema)
+    await db.execute("UPDATE meta_connection SET sync_status='ready' WHERE id=$1", conn_id)
+    connection = await db.fetchrow("SELECT * FROM meta_connection WHERE id=$1", conn_id)
+    ctx = JobContext(db=db, blobs=blob_store_from_settings(s), settings=s, job=None)
+    await discover_and_sync_entities(ctx, org, connection)
+
     await db.close()
     print("seeded")
 
@@ -2190,7 +2257,7 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-(Fixture data mirrors what `service.py`'s old `CS_FAKE_CONNECTOR` block registered: two creatives, `demo_a`/`demo_b`, each with a headline and an image URL a real HTTP client can fetch — `placehold.co` serves a real PNG, so `meta.download_creative` mirrors something real instead of failing.)
+(Fixture data mirrors what `service.py`'s old `CS_FAKE_CONNECTOR` block registered: two creatives, `demo_a`/`demo_b`, each with a headline and an image URL a real HTTP client can fetch -- `placehold.co` serves a real PNG, so `meta.download_creative` mirrors something real instead of failing. Running `discover_and_sync_entities` once at seed time, rather than leaving discovery to the first real job, is what leaves a `paused` `ad_account` row ready for the onboarding page's "Activate" button -- exactly what `scripts/seed_dev_account.py` used to leave.)
 
 Delete the old script:
 
@@ -2198,7 +2265,7 @@ Delete the old script:
 git rm scripts/seed_dev_account.py
 ```
 
-- [ ] **Step 3: Update the Makefile's `demo` target**
+- [ ] **Step 4: Update the Makefile's `demo` target**
 
 In `Makefile`, the `demo` target currently reads:
 
@@ -2215,50 +2282,90 @@ demo:
 	AUTH_MODE=dev $(MAKE) -j3 api worker scheduler
 ```
 
-- [ ] **Step 4: Remove the `CS_FAKE_CONNECTOR` branch from `tagging/jobs.py` only if Step 1 found it's about the deleted connector**
+- [ ] **Step 5: Remove the `CS_FAKE_CONNECTOR` branch from `tagging/jobs.py` only if Step 1 found it's about the deleted connector**
 
-If Step 1 confirmed the block at `src/cs/tagging/jobs.py:236` fakes the tagging/embedding model call (not the ingest connector), leave it entirely alone — it's an unrelated fake this plan has no reason to touch. If it turns out to reference `cs.connectors.fakes` or `cs.ingest.service.CONNECTOR_FACTORY` directly, remove exactly that reference the same way Task 10 removed other `FakeConnector` call sites, and re-run `pytest tests/tagging/ -v` to confirm nothing else in that file depended on it.
+If Step 1 confirmed the block at `src/cs/tagging/jobs.py:236` fakes the tagging/embedding model call (not the ingest connector), leave it entirely alone -- it's an unrelated fake this plan has no reason to touch. If it turns out to reference `cs.connectors.fakes` or `cs.ingest.service.CONNECTOR_FACTORY` directly, remove exactly that reference the same way Task 10 removed other `FakeConnector` call sites, and re-run `pytest tests/tagging/ -v` to confirm nothing else in that file depended on it.
 
-- [ ] **Step 5: Update the Playwright e2e spec**
+- [ ] **Step 6: Update the Playwright e2e spec's header comment**
 
 In `web/tests/e2e/onboarding-to-review.spec.ts`, update the header comment (no more `CS_FAKE_CONNECTOR`):
 
 ```ts
 // Requires: `AUTH_MODE=dev make api` and `AUTH_MODE=dev make worker` running, and a fixture
 // meta_connection + Fivetran-shaped schema for the dev org inserted by
-// `scripts/seed_dev_fivetran.py` (see Step 4 in the demo/e2e migration task).
+// `scripts/seed_dev_fivetran.py`.
 // NEXT_PUBLIC_DEV_ORG must match the seeded org.
 ```
 
-The test body itself (`await page.goto('/onboarding'); await page.getByRole('button', { name: 'Activate' }).first().click(); ...`) is unchanged — `/accounts/{id}/activate` still exists (Task 4) and still enqueues a sync job; the only thing that changed is what data that job reads. Confirm the onboarding page currently lists a `paused` account for the seeded org to click "Activate" on — if `seed_dev_fivetran.py`'s `meta_connection` row has no `ad_account` yet (accounts are discovered by the transform, not created at seed time), the onboarding page has nothing to activate. Fix this by running the transform once at the end of `main()` in `scripts/seed_dev_fivetran.py` instead of leaving discovery to the first real job:
+The test body itself is unchanged -- `/accounts/{id}/activate` still exists (Task 4) and still enqueues a sync job; `scripts/seed_dev_fivetran.py` (Step 3) already runs the transform once so the onboarding page has a `paused` account ready to activate.
+
+- [ ] **Step 7: Rewrite `tests/e2e/test_loop.py`'s ingest setup**
+
+This plan assumes `docs/superpowers/plans/2026-09-06-drop-meta-publish.md` has already landed, which already replaced this file's `# 4. approve + publish` / `# 5. next sync closes the loop` tail with a plain approve-and-check-download-fields assertion (that plan's Task 2, Step 12). What's left for this plan is the *setup* -- `test_full_loop` currently opens with a `FakeConnector` built from `PlatformAd`/`PlatformCreative`/`MetricRow` dataclasses and a `CONNECTOR_FACTORY` monkeypatch, neither of which exist anymore (Task 8 deleted `CONNECTOR_FACTORY`; Task 10 deleted `FakeConnector`).
+
+Replace the file's import block (currently `from cs.connectors.base import MetricRow, PlatformAd, PlatformCreative`, `from cs.connectors.fakes import FakeConnector`, and `from cs.ingest import service as ingest_service`) with:
 
 ```python
-    from cs.core.blobs import blob_store_from_settings
-    from cs.ingest.fivetran_transform import discover_and_sync_entities
-    from cs.jobs.registry import JobContext
-
-    conn_id = await upsert_meta_connection(db, org, "dev_fake_connector", schema)
-    await db.execute("UPDATE meta_connection SET sync_status='ready' WHERE id=$1", conn_id)
-    connection = await db.fetchrow("SELECT * FROM meta_connection WHERE id=$1", conn_id)
-    ctx = JobContext(db=db, blobs=blob_store_from_settings(s), settings=s, job=None)
-    await discover_and_sync_entities(ctx, org, connection)
+from cs.connectors.fivetran.connect import schema_for
+from cs.ingest import fivetran_insights, fivetran_transform
+from cs.ingest import repo as ingest_repo
+from cs.ingest.fivetran_fixtures import (
+    create_fixture_schema,
+    insert_campaign_ad_creative,
+    insert_daily_insight,
+)
+from cs.jobs.registry import JobContext
 ```
 
-(Replace the two-line `upsert_meta_connection` + `UPDATE ... sync_status='ready'` block from Step 2 with this expanded version, so the seed script leaves a `paused` `ad_account` row ready for the onboarding page's "Activate" button — exactly what `scripts/seed_dev_account.py` used to leave.)
+Delete the `monkeypatch.setattr(ingest_service, "CONNECTOR_FACTORY", lambda s, a, http, b: fake)` line and the `fake = FakeConnector()` line above it.
 
-- [ ] **Step 6: Update `tests/e2e/test_loop.py`**
+Replace the whole block from `days = [date.today() - timedelta(days=i + 1) for i in range(10)]` down through the end of the original `# 1. connect + activate (backfill)` section (i.e. everything up to and including `assert await db.fetchval("SELECT count(*) FROM tag_run WHERE status='done'") == 12`) with:
 
-Read `tests/e2e/test_loop.py` in full (it wasn't excerpted during planning) and apply the same substitution pattern as Step 5: wherever it seeds an `ad_account` via `encrypt_str`/`FakeConnector` to drive the ingest half of the loop, replace it with a call into the same fixture-seeding helper `scripts/seed_dev_fivetran.py` uses (factor the schema-creation/insert logic in that script into a small importable helper, e.g. `scripts/seed_dev_fivetran.py`'s body moved into a function `seed_fixture_schema(db, org, schema)` that both the script's `main()` and this test import, rather than duplicating the SQL) so the test still runs the real transform end-to-end.
+```python
+    # 1. seed a fixture Fivetran schema (no live connector/Meta creds needed), run the
+    # transform directly to discover the account (mirroring what meta.sync_from_fivetran
+    # does after a real Fivetran connector's first sync completes), then activate it.
+    org_id = UUID((await client.get("/me", headers=H)).json()["org_id"])
+    schema = schema_for(org_id)
+    await create_fixture_schema(db, schema)
+    for i in range(12):
+        name = f"q{i}" if i < 6 else f"s{i}"
+        ctr_clicks = 30 if i < 6 else 10
+        await insert_campaign_ad_creative(
+            db, schema, campaign_id="c1", account_id="1", adset_id="as1",
+            ad_id=f"ad_{name}", creative_id=name, name=name, headline=name,
+            image_url=f"https://img/{name}",
+        )
+        for d in (date.today() - timedelta(days=n + 1) for n in range(10)):
+            await insert_daily_insight(
+                db, schema, ad_id=f"ad_{name}", day=d.isoformat(), spend=30,
+                impressions=1000, clicks=ctr_clicks, link_clicks=ctr_clicks,
+            )
 
-- [ ] **Step 7: Run everything**
+    conn_id = await ingest_repo.upsert_meta_connection(db, org_id, "conn_e2e", schema)
+    await db.execute("UPDATE meta_connection SET sync_status='ready' WHERE id=$1", conn_id)
+    connection = await ingest_repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    await fivetran_insights.sync_insights(ctx, org_id, connection)
+
+    acct = (await ingest_repo.list_ad_accounts(db, org_id))[0]["id"]
+    await client.post(f"/accounts/{acct}/activate", headers=H)
+    await _drain(db, blobs, settings)
+    assert await db.fetchval("SELECT count(*) FROM tag_run WHERE status='done'") == 12
+```
+
+Note `acct` here replaces the old `acct = await ingest_repo.upsert_ad_account(...)` variable used later in the file. Per the publish-removal plan, the now-truncated `# 4.` section no longer references `acct` at all, so nothing downstream strictly depends on it -- it stays defined here in case a future test extends the file. The `from uuid import UUID` import already present mid-function in the original file (inline at the top of the old `# 1.` section) moves to the top-level import block alongside the new imports listed above, replacing its old inline placement.
+
+- [ ] **Step 8: Run everything**
 
 Run: `pytest tests/ -v && cd web && npx vitest run && npx tsc --noEmit`
 Expected: PASS
 
-Run (manual, not automated — confirms the actual demo loop): `make demo` in one terminal, then `cd web && npx playwright test onboarding-to-review` in another.
+Run (manual, not automated -- confirms the actual demo loop): `make demo` in one terminal, then `cd web && npx playwright test onboarding-to-review` in another.
 Expected: the Playwright spec passes against the freshly seeded fixture data.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add -A
