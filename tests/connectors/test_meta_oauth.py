@@ -16,7 +16,7 @@ def test_authorize_url(settings):
     url = oauth.authorize_url(_settings(settings), state="abc")
     assert url.startswith("https://www.facebook.com/v21.0/dialog/oauth?")
     assert "client_id=app1" in url and "state=abc" in url
-    assert "scope=ads_read%2Cads_management%2Cbusiness_management" in url
+    assert "scope=ads_read" in url
 
 
 @respx.mock

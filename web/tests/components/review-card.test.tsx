@@ -25,7 +25,7 @@ describe('ReviewCard', () => {
 
     const link = screen.getByRole('link', { name: /download/i });
     expect(link).toHaveAttribute('href', '/blobs/org1/creatives/a1.jpg');
-    expect(link).toHaveAttribute('download');
+    expect(link).toHaveAttribute('download', 'a1-1x1.jpg');
 
     await userEvent.click(screen.getByRole('button', { name: /copy details/i }));
     expect(writeText).toHaveBeenCalledWith('H\n\nP\n\nCTA: SHOP_NOW');
@@ -36,5 +36,17 @@ describe('ReviewCard', () => {
     expect(screen.getByRole('button', { name: /approve/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /reject/i })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /download/i })).not.toBeInTheDocument();
+  });
+
+  it('shows an error message when the clipboard write fails', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('denied'));
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+
+    render(<ReviewCard asset={asset} />);
+
+    await userEvent.click(screen.getByRole('button', { name: /copy details/i }));
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Copy failed — select the text above instead.',
+    );
   });
 });

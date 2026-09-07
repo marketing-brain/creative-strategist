@@ -28,9 +28,13 @@ export function ReviewCard({ asset }: { asset: GeneratedAsset }) {
     }
   };
   const copyDetails = async () => {
-    await navigator.clipboard.writeText(`${asset.headline}\n\n${asset.primary_text}\n\nCTA: ${asset.cta_type}`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(`${asset.headline}\n\n${asset.primary_text}\n\nCTA: ${asset.cta_type}`);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError('Copy failed — select the text above instead.');
+    }
   };
   return (
     <Card size="sm">
@@ -63,7 +67,11 @@ export function ReviewCard({ asset }: { asset: GeneratedAsset }) {
           )}
           {state === 'approved' && (
             <>
-              <a href={blobUrl(asset.url)} download className={cn(buttonVariants({ size: 'sm' }))}>
+              <a
+                href={blobUrl(asset.url)}
+                download={`${asset.id}-${asset.aspect.replace(':', 'x')}.${asset.kind === 'video' ? 'mp4' : 'jpg'}`}
+                className={cn(buttonVariants({ size: 'sm' }))}
+              >
                 Download
               </a>
               <Button size="sm" variant="outline" onClick={copyDetails}>

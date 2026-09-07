@@ -8,7 +8,7 @@ import httpx
 
 from cs.core.config import Settings
 
-SCOPES = "ads_read,ads_management,business_management"
+SCOPES = "ads_read"
 
 
 class OAuthError(RuntimeError):
