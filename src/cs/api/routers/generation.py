@@ -87,18 +87,6 @@ async def get_gen(
     return {**_ser(g), "assets": assets}
 
 
-class PublishBody(BaseModel):
-    ad_account_id: UUID
-    campaign_id: str
-    adset_id: str
-    page_id: str
-    link_url: str
-    headline: str | None = None
-    primary_text: str | None = None
-    cta_type: str | None = None
-    status: str = "PAUSED"
-
-
 @router.get("/review-queue")
 async def review_queue(
     state: str = "draft",
@@ -124,62 +112,3 @@ async def reject(
     aid: UUID, auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)
 ) -> dict:
     return {"ok": await repo.set_review_state(db, auth.org_id, aid, "rejected", auth.user_id)}
-
-
-@router.post("/generated-assets/{aid}/publish")
-async def publish(
-    aid: UUID,
-    body: PublishBody,
-    auth: AuthContext = Depends(require_admin),
-    db: Database = Depends(get_db),
-) -> dict:
-    from cs.core.ids import new_id
-    from cs.ingest import repo as ingest_repo
-
-    a = await repo.get_generated_asset(db, auth.org_id, aid)
-    if not a:
-        raise HTTPException(404)
-    if a["review_state"] != "approved":
-        raise HTTPException(409, "asset must be approved before publishing")
-    if body.status not in ("PAUSED", "ACTIVE"):
-        raise HTTPException(400, "status must be PAUSED or ACTIVE")
-    if not await ingest_repo.get_ad_account(db, auth.org_id, body.ad_account_id):
-        raise HTTPException(404, "ad_account not found")
-    pj = new_id()
-    form = body.model_dump(mode="json")
-    await db.execute(
-        "INSERT INTO publish_job (id, org_id, generated_asset_id, ad_account_id, campaign_id, "
-        "adset_id, ad_status_requested, form, status) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending')",
-        pj,
-        auth.org_id,
-        aid,
-        body.ad_account_id,
-        body.campaign_id,
-        body.adset_id,
-        body.status,
-        form,
-    )
-    # A publish job has an external financial/creative side effect on the customer's real Meta
-    # account -- don't let the queue's default retry-from-scratch policy fire a second create-ad
-    # call if this job fails after partially succeeding. See publish.jobs.publish_meta's status
-    # guard for the complementary half of this idempotency fix.
-    await queue.enqueue(
-        db,
-        auth.org_id,
-        "publish.meta",
-        {"publish_job_id": str(pj)},
-        dedup_key=f"publish:{pj}",
-        max_attempts=1,
-    )
-    return {"publish_job_id": str(pj)}
-
-
-@router.get("/publish-jobs")
-async def publish_jobs(
-    auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)
-) -> list[dict]:
-    rows = await db.fetch(
-        "SELECT * FROM publish_job WHERE org_id=$1 ORDER BY created_at DESC LIMIT 100", auth.org_id
-    )
-    return [_ser(r) for r in rows]

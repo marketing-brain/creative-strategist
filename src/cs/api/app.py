@@ -11,7 +11,6 @@ from cs.api.routers import (
     health,
     insights,
     meta_oauth,
-    meta_targets,
     tags,
 )
 from cs.core.blobs import BlobStore
@@ -35,7 +34,6 @@ def create_app(settings: Settings, db: Database, blobs_store: BlobStore) -> Fast
     app.include_router(blobs.router)
     app.include_router(meta_oauth.router)
     app.include_router(accounts.router)
-    app.include_router(meta_targets.router)
     app.include_router(creatives.router)
     app.include_router(tags.router)
     app.include_router(insights.router)

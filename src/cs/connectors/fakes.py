@@ -11,8 +11,6 @@ class FakeConnector:
         self.creatives: dict[str, PlatformCreative] = {}
         self.assets: dict[str, tuple[bytes, str]] = {}
         self.metrics: list[MetricRow] = []
-        self.uploads: list[tuple[str, str, int]] = []
-        self.created_ads: list[dict] = []
         self.fail_downloads: set[str] = set()
         self.fail_creatives: set[str] = set()
 
@@ -50,30 +48,3 @@ class FakeConnector:
 
     async def fetch_metrics(self, account_id: str, since: date, until: date) -> list[MetricRow]:
         return [m for m in self.metrics if since <= m.day <= until]
-
-    async def upload_image(self, account_id: str, data: bytes, name: str) -> str:
-        self.uploads.append(("image", name, len(data)))
-        return f"hash_{len(self.uploads)}"
-
-    async def upload_video(self, account_id: str, data: bytes, name: str) -> str:
-        self.uploads.append(("video", name, len(data)))
-        return f"vid_{len(self.uploads)}"
-
-    async def create_ad(self, account_id, adset_id, name, creative_spec, status) -> tuple[str, str]:
-        n = len(self.created_ads) + 1
-        self.created_ads.append(
-            {
-                "account_id": account_id,
-                "adset_id": adset_id,
-                "name": name,
-                "creative_spec": creative_spec,
-                "status": status,
-            }
-        )
-        return f"cr_new_{n}", f"ad_new_{n}"
-
-    async def list_campaigns(self, account_id: str) -> list[dict]:
-        return [{"id": "c1", "name": "Campaign 1", "status": "ACTIVE"}]
-
-    async def list_adsets(self, account_id: str, campaign_id: str) -> list[dict]:
-        return [{"id": "as1", "name": "Ad set 1", "status": "ACTIVE", "campaign_id": campaign_id}]

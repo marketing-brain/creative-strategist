@@ -107,9 +107,8 @@ async def delete_generated_assets(db: Database, org_id: UUID, generation_id: UUI
     Called at the top of a generation.run attempt so a job-queue retry after a partial
     failure regenerates from scratch instead of piling duplicate drafts (and duplicate spend)
     on top of whatever an earlier, failed attempt already inserted. Scoped to exclude
-    'approved' rows only: approving is the one decision that must survive a retry -- it may
-    already be referenced by a publish_job (generated_asset_id has no ON DELETE clause), so
-    deleting it would raise a foreign-key violation instead of a clean retry. A 'rejected' row
+    'approved' rows only: approving is the one decision that must survive a retry, and deleting
+    it would silently discard that human call. A 'rejected' row
     is deliberately NOT protected: rejecting a draft means "try again for this slot," not
     "never fill this slot again," so a retry is free to clear and regenerate it same as a
     plain draft.

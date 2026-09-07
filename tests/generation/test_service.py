@@ -110,10 +110,8 @@ async def test_retry_does_not_duplicate_generated_assets(db, blobs, settings, or
 
 async def test_retry_preserves_already_reviewed_assets(db, blobs, settings, org_id, kit):
     """A retry's cleanup must not delete a generated_asset a human already approved: doing so
-    would (a) silently discard that decision, and (b) if the asset had already been
-    published, violate publish_job's FK to generated_asset (asyncpg.ForeignKeyViolationError)
-    since publish_job.generated_asset_id has no ON DELETE clause. Only non-approved rows
-    (draft or rejected) are cleared before a retry regenerates."""
+    would silently discard that decision. Only non-approved rows (draft or rejected) are
+    cleared before a retry regenerates."""
     gid = await repo.create_generation(db, org_id, kit.id, "static", 2, "u1", concept="c")
     ctx = _ctx(db, blobs, settings, org_id)
     await service.run_generation(

@@ -1,4 +1,4 @@
-"""Backfill -> tag -> insight -> generate -> approve -> publish -> sync closes the loop.
+"""Backfill -> tag -> insight -> generate -> approve, ready to download.
 
 All on fakes.
 """
@@ -123,46 +123,9 @@ async def test_full_loop(client, db, blobs, settings, monkeypatch):
     detail = (await client.get(f"/generations/{gid}", headers=H)).json()
     assert detail["status"] == "done" and len(detail["assets"]) == 3
 
-    # 4. approve + publish
+    # 4. approve -> asset is ready to download, with its ad copy alongside it
     aid = detail["assets"][0]["id"]
     await client.post(f"/generated-assets/{aid}/approve", headers=H)
-    r = await client.post(
-        f"/generated-assets/{aid}/publish",
-        headers=H,
-        json={
-            "ad_account_id": str(acct),
-            "campaign_id": "c1",
-            "adset_id": "as1",
-            "page_id": "p",
-            "link_url": "https://x",
-            "status": "PAUSED",
-        },
-    )
-    assert r.status_code == 200
-    await _drain(db, blobs, settings)
-    pj = (await client.get("/publish-jobs", headers=H)).json()[0]
-    assert pj["status"] == "done" and pj["platform_ad_id"] == "ad_new_1"
-
-    # 5. next sync closes the loop
-    fake.add_creative(
-        PlatformCreative(
-            "cr_new_1",
-            "image",
-            "Sleep deeper",
-            "P",
-            None,
-            "SHOP_NOW",
-            "https://x",
-            "https://img/new",
-            "image/png",
-            {},
-        ),
-        solid_png(64, 64),
-    )
-    fake.add_ad(PlatformAd("ad_new_1", "CS ad", "PAUSED", "as1", "c1", "cr_new_1"))
-    await client.post(f"/accounts/{acct}/sync", headers=H)
-    await _drain(db, blobs, settings)
-    linked = await db.fetchval(
-        "SELECT generated_asset_id FROM creative WHERE platform_creative_id='cr_new_1'"
-    )
-    assert str(linked) == aid
+    approved = (await client.get("/review-queue?state=approved", headers=H)).json()
+    asset = next(a for a in approved if a["id"] == aid)
+    assert asset["url"] and asset["headline"] and asset["primary_text"] and asset["cta_type"]
