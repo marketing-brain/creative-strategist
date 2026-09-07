@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+import base64
+
+import httpx
+
+from cs.core.config import Settings
+
+API_BASE = "https://api.fivetran.com/v1"
+
+
+class FivetranError(RuntimeError):
+    pass
+
+
+def _auth_header(settings: Settings) -> str:
+    raw = f"{settings.fivetran_api_key}:{settings.fivetran_api_secret}".encode()
+    return f"Basic {base64.b64encode(raw).decode()}"
+
+
+async def _call(
+    settings: Settings, http: httpx.AsyncClient, method: str, path: str, json_body: dict | None = None
+) -> dict:
+    resp = await http.request(
+        method,
+        f"{API_BASE}{path}",
+        json=json_body,
+        headers={
+            "Authorization": _auth_header(settings),
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+    body = (
+        resp.json()
+        if resp.headers.get("content-type", "").startswith("application/json")
+        else {}
+    )
+    if resp.status_code >= 400:
+        raise FivetranError(
+            f"Fivetran {method} {path} failed ({resp.status_code}): {body.get('message', 'unknown error')}"
+        )
+    return body.get("data", {})
+
+
+async def create_connector(
+    settings: Settings,
+    http: httpx.AsyncClient,
+    *,
+    service: str,
+    group_id: str,
+    schema: str,
+    redirect_uri: str,
+) -> dict:
+    """Create a paused connector with an embedded Connect Card.
+
+    The create response already contains connect_card.uri (the authorize URL) -- no
+    second call needed.
+    """
+    return await _call(
+        settings,
+        http,
+        "POST",
+        "/connectors",
+        {
+            "service": service,
+            "group_id": group_id,
+            "run_setup_tests": False,
+            "paused": True,
+            "config": {"schema": schema, "pause_after_trial": True},
+            "connect_card_config": {"redirect_uri": redirect_uri, "hide_setup_guide": True},
+        },
+    )
+
+
+async def get_connector(settings: Settings, http: httpx.AsyncClient, connector_id: str) -> dict:
+    return await _call(settings, http, "GET", f"/connectors/{connector_id}")
+
+
+async def delete_connector(settings: Settings, http: httpx.AsyncClient, connector_id: str) -> None:
+    await _call(settings, http, "DELETE", f"/connectors/{connector_id}")
+
+
+async def find_connector_by_schema(
+    settings: Settings, http: httpx.AsyncClient, group_id: str, schema: str
+) -> str | None:
+    """Single page (limit 1000) -- paginate if a group ever exceeds that."""
+    data = await _call(settings, http, "GET", f"/groups/{group_id}/connectors?limit=1000")
+    for c in data.get("items", []):
+        if c.get("schema") == schema:
+            return c["id"]
+    return None
