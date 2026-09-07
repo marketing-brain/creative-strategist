@@ -37,6 +37,18 @@ def _carousel_urls(raw: str | None) -> list[str] | None:
     return urls or None
 
 
+def _pid(value: object) -> str | None:
+    """Fivetran lands Meta's numeric IDs (account_id, id, campaign_id, ad_set_id,
+    creative_id, ...) as bigint -- confirmed against a real connector, not assumed --
+    but every platform-id field downstream (ad_account.platform_account_id,
+    ad.platform_ad_id, PlatformAd/PlatformCreative, dict keys used to join ads to
+    creatives/accounts) is text. asyncpg refuses to bind an int for a text column
+    parameter, so every id read from a landed table must be stringified before use.
+    None passes through unchanged -- campaign_id/ad_set_id can be genuinely absent on
+    some ad types."""
+    return None if value is None else str(value)
+
+
 def _format_and_urls(row: asyncpg.Record) -> tuple[str, str | None, list[str] | None]:
     if row["video_id"]:
         return "video", None, None
@@ -53,7 +65,9 @@ async def _discover_accounts(db, org_id: UUID, connection_id: UUID, schema: str)
     rows = await db.fetch(f"SELECT DISTINCT account_id FROM {_q(schema, 'campaign_history')}")
     by_platform_id: dict[str, UUID] = {}
     for r in rows:
-        pid = r["account_id"]
+        pid = _pid(r["account_id"])
+        if pid is None:
+            continue
         aid = await repo.upsert_ad_account(db, org_id, pid, pid, "USD", connection_id)
         by_platform_id[pid] = aid
     return by_platform_id
@@ -68,7 +82,7 @@ async def _sync_ads_and_creatives(
           FROM {_q(schema, "creative_history")}
         ) t WHERE rn = 1
     """)
-    creatives_by_platform_id: dict[str, asyncpg.Record] = {r["id"]: r for r in creative_rows}
+    creatives_by_platform_id: dict[str, asyncpg.Record] = {_pid(r["id"]): r for r in creative_rows}
 
     ad_rows = await db.fetch(f"""
         SELECT * FROM (
@@ -82,15 +96,15 @@ async def _sync_ads_and_creatives(
     failed = 0
     for ad_row in ad_rows:
         try:
-            acct_id = accounts_by_platform_id.get(ad_row["account_id"])
+            acct_id = accounts_by_platform_id.get(_pid(ad_row["account_id"]))
             if acct_id is None:
                 continue  # not discovered yet, or discovered but not activated by the user
-            cr = creatives_by_platform_id.get(ad_row["creative_id"])
+            cr = creatives_by_platform_id.get(_pid(ad_row["creative_id"]))
             if cr is None:
                 continue  # ad references a creative Fivetran hasn't landed yet
             fmt, asset_url, child_urls = _format_and_urls(cr)
             platform_creative = PlatformCreative(
-                platform_creative_id=cr["id"],
+                platform_creative_id=_pid(cr["id"]),
                 format=fmt,
                 headline=cr["title"],
                 primary_text=cr["body"],
@@ -108,12 +122,12 @@ async def _sync_ads_and_creatives(
             new_creatives += int(created)
 
             platform_ad = PlatformAd(
-                platform_ad_id=ad_row["id"],
+                platform_ad_id=_pid(ad_row["id"]),
                 name=ad_row["name"] or "",
                 status=ad_row["status"] or "",
-                adset_id=ad_row["ad_set_id"],
-                campaign_id=ad_row["campaign_id"],
-                platform_creative_id=cr["id"],
+                adset_id=_pid(ad_row["ad_set_id"]),
+                campaign_id=_pid(ad_row["campaign_id"]),
+                platform_creative_id=_pid(cr["id"]),
             )
             await repo.upsert_ad(db, org_id, acct_id, platform_ad, creative_id)
             synced_ads += 1

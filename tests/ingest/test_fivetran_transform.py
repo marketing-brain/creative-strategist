@@ -218,6 +218,68 @@ async def test_one_malformed_ad_does_not_abort_the_whole_sync(
     assert len(creatives) == 1 and creatives[0]["platform_creative_id"] == "good"
 
 
+async def test_bigint_platform_ids_are_stringified(db, blobs, settings, org_id):
+    """Regression test: confirmed against a real Fivetran connector that campaign_history/
+    ad_set_history/ad_history/creative_history all land id/account_id/campaign_id/
+    ad_set_id/creative_id as bigint, not text -- the fixture schema (and every other test
+    in this file) uses TEXT columns with human-readable ids for readability, which never
+    exercised this. Without str() coercion, asyncpg raises DataError binding an int for
+    ad_account.platform_account_id's TEXT column, and the whole sync throws before any
+    account is even discovered."""
+    schema = "bigint_org__meta_ads"
+    await db.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+    await db.execute(f'CREATE SCHEMA "{schema}"')
+    await db.execute(
+        f'CREATE TABLE "{schema}".campaign_history (id BIGINT, account_id BIGINT, '
+        f"name TEXT, _fivetran_synced TIMESTAMPTZ)"
+    )
+    await db.execute(
+        f'CREATE TABLE "{schema}".ad_history (id BIGINT, account_id BIGINT, '
+        f"ad_set_id BIGINT, campaign_id BIGINT, creative_id BIGINT, name TEXT, "
+        f"status TEXT, _fivetran_synced TIMESTAMPTZ)"
+    )
+    await db.execute(
+        f'CREATE TABLE "{schema}".creative_history (id BIGINT, account_id BIGINT, '
+        f"name TEXT, title TEXT, body TEXT, call_to_action_type TEXT, "
+        f"image_url TEXT, thumbnail_url TEXT, object_story_link_data_link TEXT, "
+        f"video_id BIGINT, object_story_link_data_child_attachments JSONB, "
+        f"_fivetran_synced TIMESTAMPTZ)"
+    )
+    await db.execute(
+        f'INSERT INTO "{schema}".campaign_history '
+        "VALUES (5001, 266634581427459, 'Campaign', now())"
+    )
+    await db.execute(
+        f'INSERT INTO "{schema}".ad_history VALUES '
+        f"(9001, 266634581427459, 7001, 5001, 3001, 'Ad', 'ACTIVE', now())"
+    )
+    await db.execute(
+        f'INSERT INTO "{schema}".creative_history VALUES '
+        f"(3001, 266634581427459, 'name', 'Headline', 'Body', 'SHOP_NOW', "
+        f"'https://img/orig.jpg', NULL, 'https://dest.example', NULL, NULL, now())"
+    )
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", schema)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    summary = await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    assert summary["accounts_discovered"] == 1
+    assert summary["failed"] == 0
+
+    account = (await repo.list_ad_accounts(db, org_id))[0]
+    assert account["platform_account_id"] == "266634581427459"
+    await repo.set_ad_account_status(db, org_id, account["id"], "active")
+
+    summary2 = await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    assert summary2["failed"] == 0
+    assert summary2["synced_ads"] == 1
+
+    ad = await db.fetchrow("SELECT * FROM ad WHERE org_id=$1", org_id)
+    assert ad["platform_ad_id"] == "9001"
+    creative = await db.fetchrow("SELECT * FROM creative WHERE org_id=$1", org_id)
+    assert creative["platform_creative_id"] == "3001"
+
+
 def test_carousel_urls_returns_none_for_malformed_shapes():
     """Regression test: a valid-but-non-list JSON value (e.g. a bare number) must return
     None gracefully instead of raising a TypeError out of the list comprehension."""

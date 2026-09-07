@@ -60,3 +60,57 @@ async def test_sync_insights_folds_action_breakdowns_into_metric_daily(db, blobs
     assert row["spend"] == 10 and row["impressions"] == 1000 and row["clicks"] == 20
     assert row["conversions"] == 2 and row["conversion_value"] == 100
     assert row["video_thruplay"] == 5 and row["video_3s_views"] == 0
+
+
+async def test_bigint_ad_id_still_joins_against_our_text_ad_table(db, blobs, settings, org_id):
+    """Regression test: Meta's ad_id lands as bigint everywhere else Fivetran syncs it
+    (confirmed against a real connector for the entity tables) -- ad_insights almost
+    certainly follows the same convention once its custom report is configured. Without
+    str() coercion this doesn't crash: it silently fails to match ad.platform_ad_id
+    (text) in a dict lookup, so every metric row gets counted as skipped with no error
+    at all -- a much easier bug to miss than the entity-sync crash."""
+    schema = "bigint_insights_org__meta_ads"
+    await db.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+    await db.execute(f'CREATE SCHEMA "{schema}"')
+    await db.execute(
+        f'CREATE TABLE "{schema}".ad_insights (ad_id BIGINT, date DATE, '
+        f"publisher_platform TEXT, platform_position TEXT, spend NUMERIC, "
+        f"impressions INT, clicks INT, inline_link_clicks INT)"
+    )
+    for t in (
+        "ad_insights_actions",
+        "ad_insights_action_values",
+        "ad_insights_video_play_actions",
+        "ad_insights_video_thruplay_watched_actions",
+        "ad_insights_video_p50_watched_actions",
+        "ad_insights_video_p100_watched_actions",
+    ):
+        await db.execute(
+            f'CREATE TABLE "{schema}".{t} '
+            f"(ad_id BIGINT, date DATE, action_type TEXT, index INT, value NUMERIC)"
+        )
+    await db.execute(
+        f"INSERT INTO \"{schema}\".ad_insights VALUES (9001, '2026-09-01', 'facebook', "
+        f"'feed', 10.0, 1000, 20, 20)"
+    )
+
+    acct = await repo.upsert_ad_account(db, org_id, "999", "Main", "USD")
+    cid, _ = await repo.upsert_creative(
+        db,
+        org_id,
+        acct,
+        PlatformCreative("cr1", "image", "H", "P", None, "SHOP_NOW", "https://x", None, None, {}),
+        "",
+    )
+    ad = PlatformAd("9001", "A", "ACTIVE", None, None, "cr1")
+    await repo.upsert_ad(db, org_id, acct, ad, cid)
+
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", schema)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    summary = await fivetran_insights.sync_insights(ctx, org_id, connection)
+    assert summary["written"] == 1 and summary["skipped"] == 0
+
+    row = await db.fetchrow("SELECT * FROM metric_daily WHERE org_id=$1", org_id)
+    assert row["ad_account_id"] == acct and row["spend"] == 10

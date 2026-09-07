@@ -27,6 +27,15 @@ def _q(schema: str, table: str) -> str:
     return f'"{schema}".{table}'
 
 
+def _pid(value: object) -> str | None:
+    """Meta's ad_id lands as bigint (confirmed against a real connector for the entity
+    tables; ad_insights follows the same convention) but ad.platform_ad_id -- what this
+    joins against -- is text. Without this, every metric row would silently fail to
+    match any ad (int != str in a dict lookup) and get counted as skipped rather than
+    written, with no error raised."""
+    return None if value is None else str(value)
+
+
 async def _action_totals(db, schema: str, table: str) -> dict[tuple[str, date], dict[str, Decimal]]:
     """(ad_id, date) -> {action_type: value}, summed across `index` (Meta can report the
     same action_type more than once per breakdown row)."""
@@ -36,7 +45,8 @@ async def _action_totals(db, schema: str, table: str) -> dict[tuple[str, date], 
     """)
     out: dict[tuple[str, date], dict[str, Decimal]] = {}
     for r in rows:
-        out.setdefault((r["ad_id"], r["date"]), {})[r["action_type"]] = Decimal(str(r["total"]))
+        bucket = out.setdefault((_pid(r["ad_id"]), r["date"]), {})
+        bucket[r["action_type"]] = Decimal(str(r["total"]))
     return out
 
 
@@ -69,12 +79,12 @@ async def sync_insights(
     base_rows = await db.fetch(f"SELECT * FROM {_q(schema, 'ad_insights')}")
     metric_rows: list[MetricRow] = []
     for r in base_rows:
-        key = (r["ad_id"], r["date"])
+        key = (_pid(r["ad_id"]), r["date"])
         publisher = r["publisher_platform"] or "unknown"
         position = r["platform_position"] or "unknown"
         metric_rows.append(
             MetricRow(
-                platform_ad_id=r["ad_id"],
+                platform_ad_id=_pid(r["ad_id"]),
                 day=r["date"],
                 placement=f"{publisher}:{position}",
                 spend=Decimal(str(r["spend"] or 0)),
