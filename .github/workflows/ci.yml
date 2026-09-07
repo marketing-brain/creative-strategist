@@ -20,6 +20,9 @@ jobs:
       - uses: astral-sh/setup-uv@v3
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: curl -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64 && sudo chmod +x /usr/local/bin/dbmate
+      # tools/video-gen/node_modules is gitignored; tests/generation/test_video_gen.py shells
+      # out to node on tools/video-gen/index.mjs, so it needs installing on every fresh checkout.
+      - run: npm ci --prefix tools/video-gen
       - run: uv sync --extra dev
       - run: make lint
       - run: make test
