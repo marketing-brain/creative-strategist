@@ -68,10 +68,22 @@ async def sync_from_fivetran(ctx: JobContext) -> None:
         return
     try:
         entities = await fivetran_transform.discover_and_sync_entities(ctx, ctx.job.org_id, conn)
-        metrics = await fivetran_insights.sync_insights(ctx, ctx.job.org_id, conn)
     except Exception as exc:
         await repo.set_meta_connection_status(ctx.db, conn_id, "error", last_error=str(exc)[:500])
         raise
+    # Insights failing must not undo a successful entity sync, and must not be retried
+    # forever: the most common cause is the ad_insights custom report not being
+    # configured in Fivetran yet, which retrying does nothing to fix. Ads/creatives are
+    # still fully usable without metrics, so the connection stays "ready" either way.
+    try:
+        metrics = await fivetran_insights.sync_insights(ctx, ctx.job.org_id, conn)
+    except Exception as exc:
+        metrics = {}
+        log.warning(
+            "insights sync failed (entity sync still succeeded) -- likely ad_insights "
+            "custom report not yet configured in Fivetran",
+            extra={"org_id": str(ctx.job.org_id), "error": str(exc)[:500]},
+        )
     await repo.set_meta_connection_status(
         ctx.db, conn_id, "ready", last_synced_at=datetime.now(UTC)
     )

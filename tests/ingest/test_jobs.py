@@ -4,6 +4,7 @@ import respx
 from cs.core import queue
 from cs.ingest import jobs as ingest_jobs
 from cs.ingest import repo
+from cs.ingest.fivetran_fixtures import create_fixture_schema, insert_campaign_ad_creative
 from cs.jobs.worker import run_once
 
 F = "https://api.fivetran.com/v1"
@@ -61,6 +62,41 @@ async def test_await_first_sync_marks_broken_connector_as_error(db, blobs, setti
     assert await run_once(db, blobs, settings, "w1") is True
     row = await repo.get_meta_connection_by_id(db, conn_id)
     assert row["sync_status"] == "error" and "reconnect" in row["last_error"].lower()
+
+
+async def test_sync_from_fivetran_stays_ready_when_insights_table_is_missing(
+    db, blobs, settings, org_id
+):
+    """Regression test: the ad_insights custom report is a separate, manual Fivetran
+    dashboard step that may not be configured yet -- confirmed live against a real
+    connector, this crashes sync_insights with UndefinedTableError. That must not undo
+    a successful entity sync or leave the connection stuck in 'error': ads/creatives are
+    fully usable without metrics, and retrying does nothing to fix a table that doesn't
+    exist until someone configures the report."""
+    schema = "no_insights_org__meta_ads"
+    await create_fixture_schema(db, schema)
+    await db.execute(f'DROP TABLE "{schema}".ad_insights CASCADE')
+    await insert_campaign_ad_creative(
+        db,
+        schema,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="ad1",
+        creative_id="cr1",
+        name="name",
+        headline="Headline",
+        image_url="https://img/orig.jpg",
+    )
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", schema)
+
+    await queue.enqueue(db, org_id, "meta.sync_from_fivetran", {"meta_connection_id": str(conn_id)})
+    assert await run_once(db, blobs, settings, "w1") is True
+
+    row = await repo.get_meta_connection_by_id(db, conn_id)
+    assert row["sync_status"] == "ready"
+    assert await db.fetchval("SELECT status FROM job") == "done"
+    assert await db.fetchval("SELECT count(*) FROM ad_account WHERE org_id=$1", org_id) == 1
 
 
 async def test_nightly_sync_enqueues_sync_for_ready_connections_with_active_account(
