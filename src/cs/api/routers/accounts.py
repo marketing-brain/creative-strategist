@@ -25,16 +25,19 @@ async def activate(
     auth: AuthContext = Depends(require_admin),
     db: Database = Depends(get_db),
 ) -> dict:
-    if not await repo.get_ad_account(db, auth.org_id, account_id):
+    acct = await repo.get_ad_account(db, auth.org_id, account_id)
+    if not acct:
         raise HTTPException(404)
     await repo.set_ad_account_status(db, auth.org_id, account_id, "active")
-    jid = await queue.enqueue(
-        db,
-        auth.org_id,
-        "meta.backfill",
-        {"ad_account_id": str(account_id)},
-        dedup_key=f"backfill:{account_id}",
-    )
+    jid = None
+    if acct["meta_connection_id"]:
+        jid = await queue.enqueue(
+            db,
+            auth.org_id,
+            "meta.sync_from_fivetran",
+            {"meta_connection_id": str(acct["meta_connection_id"])},
+            dedup_key=str(acct["meta_connection_id"]),
+        )
     return {"job_id": str(jid) if jid else None}
 
 
@@ -44,13 +47,16 @@ async def sync(
     auth: AuthContext = Depends(require_admin),
     db: Database = Depends(get_db),
 ) -> dict:
-    if not await repo.get_ad_account(db, auth.org_id, account_id):
+    acct = await repo.get_ad_account(db, auth.org_id, account_id)
+    if not acct:
         raise HTTPException(404)
+    if not acct["meta_connection_id"]:
+        raise HTTPException(409, "account has no Fivetran connection")
     jid = await queue.enqueue(
         db,
         auth.org_id,
-        "meta.sync_incremental",
-        {"ad_account_id": str(account_id)},
-        dedup_key=str(account_id),
+        "meta.sync_from_fivetran",
+        {"meta_connection_id": str(acct["meta_connection_id"])},
+        dedup_key=str(acct["meta_connection_id"]),
     )
     return {"job_id": str(jid) if jid else None}

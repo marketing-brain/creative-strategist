@@ -5,12 +5,12 @@ from cs.api.routers import (
     accounts,
     blobs,
     brand,
+    connections,
     copilot,
     creatives,
     generation,
     health,
     insights,
-    meta_oauth,
     tags,
 )
 from cs.core.blobs import BlobStore
@@ -32,7 +32,7 @@ def create_app(settings: Settings, db: Database, blobs_store: BlobStore) -> Fast
     app.state.blobs = blobs_store
     app.include_router(health.router)
     app.include_router(blobs.router)
-    app.include_router(meta_oauth.router)
+    app.include_router(connections.router)
     app.include_router(accounts.router)
     app.include_router(creatives.router)
     app.include_router(tags.router)

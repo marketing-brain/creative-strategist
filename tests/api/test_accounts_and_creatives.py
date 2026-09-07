@@ -55,13 +55,17 @@ async def _seed(db, settings, client):
     return org_id, acct, cid, ad
 
 
-async def test_accounts_activate_enqueues_backfill(client, db, settings):
-    _, acct, _, _ = await _seed(db, settings, client)
+async def test_accounts_activate_enqueues_sync(client, db, settings):
+    org_id, acct, _, _ = await _seed(db, settings, client)
+    from cs.ingest import repo as ingest_repo
+
+    conn_id = await ingest_repo.upsert_meta_connection(db, org_id, "conn_1", "s")
+    await db.execute("UPDATE ad_account SET meta_connection_id=$2 WHERE id=$1", acct, conn_id)
     r = await client.get("/accounts", headers=H)
     assert r.json()[0]["status"] == "paused"
     r = await client.post(f"/accounts/{acct}/activate", headers=H)
     assert r.status_code == 200 and r.json()["job_id"]
-    assert await db.fetchval("SELECT job_type FROM job") == "meta.backfill"
+    assert await db.fetchval("SELECT job_type FROM job") == "meta.sync_from_fivetran"
     assert (await client.get("/accounts", headers=H)).json()[0]["status"] == "active"
 
 
