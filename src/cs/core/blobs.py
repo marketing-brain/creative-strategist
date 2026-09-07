@@ -53,9 +53,19 @@ class LocalBlobStore:
 class S3BlobStore:
     def __init__(self, bucket: str, endpoint_url: str | None = None):
         import boto3
+        from botocore.config import Config
 
         self.bucket = bucket
-        self.client = boto3.client("s3", endpoint_url=endpoint_url)
+        # Path-style addressing + explicit SigV4: S3-compatible gateways that
+        # aren't AWS itself (e.g. Supabase Storage) reject presigned URLs
+        # generated with boto3's virtual-hosted-style default -- the request
+        # comes back "AccessDenied: Missing signature" even though direct
+        # put/get/delete calls (which don't go through this code path) work.
+        self.client = boto3.client(
+            "s3",
+            endpoint_url=endpoint_url,
+            config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+        )
 
     async def put(self, key: str, data: bytes, content_type: str) -> str:
         _check_key(key)
