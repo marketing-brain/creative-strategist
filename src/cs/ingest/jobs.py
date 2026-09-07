@@ -1,83 +1,98 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from uuid import UUID
 
 import httpx
 
+from cs.connectors.fivetran import client as fivetran_client
 from cs.core import queue
 from cs.core.config import Settings
 from cs.core.db import Database
-from cs.ingest import repo, service
+from cs.ingest import fivetran_insights, fivetran_transform, repo, service
 from cs.jobs.registry import JobContext, handler
 from cs.jobs.scheduler import register_schedule
 
 log = logging.getLogger("cs.ingest")
 
 
-async def _account(ctx: JobContext):
-    acct = await repo.get_ad_account(ctx.db, ctx.job.org_id, UUID(ctx.job.payload["ad_account_id"]))
-    if acct is None:
-        raise RuntimeError("ad_account not found")
-    return acct
+@handler("meta.await_first_sync")
+async def await_first_sync(ctx: JobContext) -> None:
+    conn_id = UUID(ctx.job.payload["meta_connection_id"])
+    conn = await repo.get_meta_connection_by_id(ctx.db, conn_id)
+    if conn is None:
+        return  # connection was replaced by a newer connect attempt
+    async with httpx.AsyncClient(timeout=30) as http:
+        detail = await fivetran_client.get_connector(
+            ctx.settings, http, conn["fivetran_connector_id"]
+        )
+    status = detail.get("status") or {}
+    if status.get("setup_state") == "broken":
+        await repo.set_meta_connection_status(
+            ctx.db,
+            conn_id,
+            "error",
+            last_error="Fivetran setup is broken -- reconnect from Settings.",
+        )
+        return
+    if detail.get("succeeded_at"):
+        await repo.set_meta_connection_status(ctx.db, conn_id, "ready")
+        await queue.enqueue(
+            ctx.db,
+            ctx.job.org_id,
+            "meta.sync_from_fivetran",
+            {"meta_connection_id": str(conn_id)},
+            dedup_key=str(conn_id),
+        )
+        return
+    if ctx.job.attempts >= ctx.job.max_attempts:
+        await repo.set_meta_connection_status(
+            ctx.db,
+            conn_id,
+            "error",
+            last_error=(
+                "Fivetran's first sync did not finish in time -- "
+                "check the connector in the Fivetran dashboard."
+            ),
+        )
+        return
+    raise RuntimeError("Fivetran has not completed its first sync yet")
 
 
-@handler("meta.backfill")
-async def backfill(ctx: JobContext) -> None:
-    acct = await _account(ctx)
-    since, until = service.window(service.BACKFILL_DAYS)
-    async with httpx.AsyncClient(timeout=60) as http:
-        connector = service.CONNECTOR_FACTORY(ctx.settings, acct, http, ctx.blobs)
-        result = await service.sync_account(ctx, acct, connector, since, until)
-    log.info("sync complete", extra={**result, "ad_account_id": str(acct["id"])})
-
-
-@handler("meta.sync_incremental")
-async def sync_incremental(ctx: JobContext) -> None:
-    acct = await _account(ctx)
-    since, until = service.window(service.INCREMENTAL_DAYS)
-    async with httpx.AsyncClient(timeout=60) as http:
-        connector = service.CONNECTOR_FACTORY(ctx.settings, acct, http, ctx.blobs)
-        result = await service.sync_account(ctx, acct, connector, since, until)
-    log.info("sync complete", extra={**result, "ad_account_id": str(acct["id"])})
+@handler("meta.sync_from_fivetran")
+async def sync_from_fivetran(ctx: JobContext) -> None:
+    conn_id = UUID(ctx.job.payload["meta_connection_id"])
+    conn = await repo.get_meta_connection_by_id(ctx.db, conn_id)
+    if conn is None:
+        return
+    try:
+        entities = await fivetran_transform.discover_and_sync_entities(ctx, ctx.job.org_id, conn)
+        metrics = await fivetran_insights.sync_insights(ctx, ctx.job.org_id, conn)
+    except Exception as exc:
+        await repo.set_meta_connection_status(ctx.db, conn_id, "error", last_error=str(exc)[:500])
+        raise
+    await repo.set_meta_connection_status(
+        ctx.db, conn_id, "ready", last_synced_at=datetime.now(UTC)
+    )
+    log.info("fivetran sync complete", extra={**entities, **metrics, "org_id": str(ctx.job.org_id)})
 
 
 @handler("meta.download_creative")
 async def download_creative(ctx: JobContext) -> None:
     p = ctx.job.payload
     creative_id = UUID(p["creative_id"])
-    acct = await ctx.db.fetchrow(
-        "SELECT a.* FROM ad_account a JOIN creative c ON c.ad_account_id = a.id "
-        "WHERE c.id = $1 AND c.org_id = $2",
-        creative_id,
-        ctx.job.org_id,
-    )
-    if acct is None:
-        raise RuntimeError("ad_account not found for creative")
     async with httpx.AsyncClient(timeout=120) as http:
-        connector = service.CONNECTOR_FACTORY(ctx.settings, acct, http, ctx.blobs)
-        await service.download_creative(ctx, connector, creative_id, p["asset_url"], p["kind"])
-    log.info(
-        "creative downloaded",
-        extra={"creative_id": str(creative_id), "ad_account_id": str(acct["id"])},
-    )
+        await service.download_creative(ctx, http, creative_id, p["asset_url"], p["kind"])
+    log.info("creative downloaded", extra={"creative_id": str(creative_id)})
 
 
 @handler("meta.download_carousel")
 async def download_carousel(ctx: JobContext) -> None:
     p = ctx.job.payload
     creative_id = UUID(p["creative_id"])
-    acct = await ctx.db.fetchrow(
-        "SELECT a.* FROM ad_account a JOIN creative c ON c.ad_account_id = a.id "
-        "WHERE c.id = $1 AND c.org_id = $2",
-        creative_id,
-        ctx.job.org_id,
-    )
-    if acct is None:
-        raise RuntimeError("ad_account not found for creative")
     async with httpx.AsyncClient(timeout=120) as http:
-        connector = service.CONNECTOR_FACTORY(ctx.settings, acct, http, ctx.blobs)
-        await service.download_carousel(ctx, connector, creative_id, p["asset_urls"])
+        await service.download_carousel(ctx, http, creative_id, p["asset_urls"])
     log.info(
         "carousel downloaded",
         extra={"creative_id": str(creative_id), "cards": len(p["asset_urls"])},
@@ -86,12 +101,11 @@ async def download_carousel(ctx: JobContext) -> None:
 
 @register_schedule("ingest.nightly_sync", every_seconds=86400)
 async def nightly_sync(db: Database, settings: Settings) -> None:
-    accounts = await db.fetch("SELECT id, org_id FROM ad_account WHERE status = 'active'")
-    for a in accounts:
+    for c in await repo.list_ready_meta_connections_with_active_account(db):
         await queue.enqueue(
             db,
-            a["org_id"],
-            "meta.sync_incremental",
-            {"ad_account_id": str(a["id"])},
-            dedup_key=str(a["id"]),
+            c["org_id"],
+            "meta.sync_from_fivetran",
+            {"meta_connection_id": str(c["id"])},
+            dedup_key=str(c["id"]),
         )
