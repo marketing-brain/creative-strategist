@@ -1,10 +1,12 @@
 import { BatteryWarning } from 'lucide-react';
 import { InsightCard } from '@/components/insight-card';
 import { api } from '@/lib/api';
+import { requireAuth } from '@/lib/require-auth.server';
 
 export const metadata = { title: 'Fatigue' };
 
 export default async function Fatigue() {
+  await requireAuth();
   const alerts = await api.fatigue();
   return (
     <div className="space-y-6">

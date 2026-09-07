@@ -1,9 +1,11 @@
 import { CopilotChat } from '@/components/copilot-chat';
 import { api } from '@/lib/api';
+import { requireAuth } from '@/lib/require-auth.server';
 
 export const metadata = { title: 'Copilot' };
 
 export default async function Copilot() {
+  await requireAuth();
   const conversations = await api.conversations();
   return (
     <div className="flex h-full flex-col space-y-4">

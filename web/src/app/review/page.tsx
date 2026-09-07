@@ -3,12 +3,14 @@ import { ReviewCard } from '@/components/review-card';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from 'cn';
 import { api } from '@/lib/api';
+import { requireAuth } from '@/lib/require-auth.server';
 
 export const metadata = { title: 'Review' };
 
 const states = ['draft', 'approved', 'rejected'] as const;
 
 export default async function Review({ searchParams }: { searchParams: Promise<{ state?: string }> }) {
+  await requireAuth();
   const { state = 'draft' } = await searchParams;
   const [assets, accounts, jobs, me] = await Promise.all([api.reviewQueue(state), api.accounts(), api.publishJobs(), api.me()]);
   const isAdmin = me.role === 'admin';

@@ -1,10 +1,12 @@
 import { Sparkles } from 'lucide-react';
 import { InsightCard } from '@/components/insight-card';
 import { api } from '@/lib/api';
+import { requireAuth } from '@/lib/require-auth.server';
 
 export const metadata = { title: 'Insights' };
 
 export default async function Insights() {
+  await requireAuth();
   const insights = await api.insights('pattern');
   return (
     <div className="space-y-6">

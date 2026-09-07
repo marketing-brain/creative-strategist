@@ -4,10 +4,12 @@ import { TagList } from '@/components/tag-list';
 import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { blobUrl } from '@/lib/blob-url';
+import { requireAuth } from '@/lib/require-auth.server';
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
 export default async function CreativeDetail({ params }: { params: Promise<{ id: string }> }) {
+  await requireAuth();
   const { id } = await params;
   const until = new Date();
   const since = new Date(until.getTime() - 89 * 86400000);

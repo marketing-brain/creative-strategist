@@ -3,10 +3,12 @@ import { CheckCircle2, Sparkles } from 'lucide-react';
 import { GenerateForm } from '@/components/generate-form';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { api } from '@/lib/api';
+import { requireAuth } from '@/lib/require-auth.server';
 
 export const metadata = { title: 'Generate' };
 
 export default async function Generate({ searchParams }: { searchParams: Promise<{ insight?: string; created?: string }> }) {
+  await requireAuth();
   const sp = await searchParams;
   const [insights, generations, me] = await Promise.all([api.insights('pattern'), api.generations(), api.me()]);
   const options = insights.map((i) => ({ id: i.id, label: `${i.dimension} = ${i.value} (${i.lift >= 0 ? '+' : ''}${Math.round(i.lift * 100)}% ${i.metric.toUpperCase()})` }));

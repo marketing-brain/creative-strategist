@@ -1,12 +1,14 @@
 import { FileText } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { api } from '@/lib/api';
+import { requireAuth } from '@/lib/require-auth.server';
 
 export const metadata = { title: 'Briefs' };
 
 const formatWeek = (iso: string) => new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).format(new Date(iso));
 
 export default async function Briefs() {
+  await requireAuth();
   const briefs = await api.briefs();
   return (
     <div className="space-y-6">

@@ -1,8 +1,8 @@
 # WorkOS Auth — Replace Clerk Design
 
 **Date:** 2026-09-06
-**Status:** Approved for planning
-**Scope:** Replace Clerk with WorkOS AuthKit as the app's identity provider. Adds a real login page and auth enforcement (neither exists today — `ClerkProvider`/`clerkMiddleware()` are wired up but nothing currently requires a session or redirects an unauthenticated user anywhere). Supersedes the original design's "Auth: Managed provider (Clerk)" decision and its "SSO" non-goal.
+**Status:** Abandoned — during implementation planning, WorkOS's client SDK (`@workos-inc/authkit-nextjs`) turned out to expose the access token only via React hooks (`useAuth()`/`useAccessToken()`), with no non-hook accessor equivalent to Clerk's `window.Clerk.session.getToken()`. Fixing that required routing every client-side API call through server-side proxy routes rather than a drop-in provider swap, which raised the real cost well above the value of switching providers with no other driver behind it. Superseded by the bounded task "add login enforcement to the existing Clerk integration" (see `docs/superpowers/plans/` or recent commits) — Clerk remains the auth provider.
+**Scope (as originally designed, not implemented):** Replace Clerk with WorkOS AuthKit as the app's identity provider. Adds a real login page and auth enforcement (neither exists today — `ClerkProvider`/`clerkMiddleware()` are wired up but nothing currently requires a session or redirects an unauthenticated user anywhere). Supersedes the original design's "Auth: Managed provider (Clerk)" decision and its "SSO" non-goal.
 
 ## 1. Goals and non-goals
 

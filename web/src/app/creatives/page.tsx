@@ -2,10 +2,12 @@ import { ImageOff } from 'lucide-react';
 import { CreativeCard } from '@/components/creative-card';
 import { CreativeFilters } from '@/components/creative-filters';
 import { api } from '@/lib/api';
+import { requireAuth } from '@/lib/require-auth.server';
 
 export const metadata = { title: 'Creatives' };
 
 export default async function Creatives({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
+  await requireAuth();
   const sp = await searchParams;
   const q = new URLSearchParams();
   if (sp.account_id) q.set('account_id', sp.account_id);
