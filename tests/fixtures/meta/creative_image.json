@@ -1,5 +1,0 @@
-{"id": "5001", "name": "Static A", "title": "Sleep better", "body": "Tired of waking up tired?",
- "call_to_action_type": "SHOP_NOW", "link_url": "https://example.com/p",
- "image_url": "https://scontent.example/img5001.jpg", "image_hash": "abc",
- "object_story_spec": {"link_data": {"message": "Tired of waking up tired?", "name": "Sleep better",
-   "description": "Free shipping", "link": "https://example.com/p", "call_to_action": {"type": "SHOP_NOW"}}}}

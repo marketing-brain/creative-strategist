@@ -19,7 +19,6 @@ DBMATE = shutil.which("dbmate") or str(Path.home() / ".local/bin/dbmate")
 
 @pytest.fixture(scope="session")
 def settings() -> Settings:
-    os.environ.setdefault("TOKEN_ENCRYPTION_KEY", "piCYmkw56Goak3cRFwGNnH1Rze5W0zL1jcO2MXu27Ww=")
     os.environ.setdefault("DATABASE_URL", "postgres://cs:cs@127.0.0.1:5432/cs?sslmode=disable")
     os.environ.setdefault(
         "DATABASE_URL_TEST", "postgres://cs:cs@127.0.0.1:5432/cs_test?sslmode=disable"

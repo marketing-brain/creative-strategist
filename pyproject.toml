@@ -38,6 +38,10 @@ packages = ["src/cs"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# tests/e2e/test_loop.py fails to import after Task 10 removed cs.connectors.fakes
+# (FakeConnector); Task 11 replaces it with Fivetran-based fixtures. Without this,
+# that one collection error aborts the entire run before any other test executes.
+addopts = "--continue-on-collection-errors"
 
 [tool.ruff]
 line-length = 100

@@ -1,3 +1,0 @@
-{"id": "5002", "name": "Video B", "video_id": "7002", "thumbnail_url": "https://scontent.example/thumb.jpg",
- "object_story_spec": {"video_data": {"message": "Watch this", "title": "Real results",
-   "call_to_action": {"type": "LEARN_MORE", "value": {"link": "https://example.com/v"}}, "video_id": "7002"}}}

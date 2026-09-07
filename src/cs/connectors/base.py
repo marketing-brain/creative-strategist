@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
-from typing import Literal, Protocol
+from typing import Literal
 
 Format = Literal["image", "video", "carousel"]
 
@@ -49,10 +49,3 @@ class MetricRow:
     video_p50: int
     video_p100: int
     raw: dict = field(default_factory=dict)
-
-
-class AdPlatformConnector(Protocol):
-    async def list_ads(self, account_id: str) -> list[PlatformAd]: ...
-    async def get_creative(self, creative_id: str) -> PlatformCreative: ...
-    async def download_asset(self, url: str) -> tuple[bytes, str]: ...
-    async def fetch_metrics(self, account_id: str, since: date, until: date) -> list[MetricRow]: ...

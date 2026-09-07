@@ -20,18 +20,12 @@ class Settings(BaseSettings):
     clerk_jwks_url: str = ""
     clerk_issuer: str = ""
 
-    token_encryption_key: str
     public_base_url: str = "http://localhost:8000"
 
     fivetran_api_key: str = ""
     fivetran_api_secret: str = ""
     fivetran_group_id: str = ""
     web_base_url: str = "http://localhost:3000"
-
-    meta_app_id: str = ""
-    meta_app_secret: str = ""
-    meta_redirect_uri: str = "http://localhost:8000/meta/oauth/callback"
-    meta_api_version: str = "v21.0"
 
     anthropic_api_key: str = ""
     claude_model_tagging: str = "claude-opus-5"
