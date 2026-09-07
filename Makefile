@@ -43,5 +43,5 @@ web-e2e:
 	AUTH_MODE=dev uv run python scripts/seed_dev_fivetran.py && cd web && npx playwright install chromium && npm run test:e2e
 
 demo:
-	AUTH_MODE=dev uv run python scripts/seed_dev_fivetran.py
-	AUTH_MODE=dev $(MAKE) -j3 api worker scheduler
+	CS_FAKE_CONNECTOR=1 AUTH_MODE=dev uv run python scripts/seed_dev_fivetran.py
+	CS_FAKE_CONNECTOR=1 AUTH_MODE=dev $(MAKE) -j3 api worker scheduler

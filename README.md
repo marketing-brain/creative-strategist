@@ -26,18 +26,17 @@ The Next.js front end lives in `web/` and talks to the API above.
     make web-test                         # vitest unit + component tests
     make web-e2e                          # seeds a fixture Fivetran schema, runs Playwright
 
-To click through the app without a live Fivetran connector or Meta credentials:
+To click through the app without real Meta or model credentials:
 
-    make demo       # seeds a fixture Fivetran schema, then api + worker + scheduler
+    make demo       # CS_FAKE_CONNECTOR=1: seeds a fixture Fivetran schema, then api + worker + scheduler
     make web-dev    # in a second terminal
 
 `make demo` runs `scripts/seed_dev_fivetran.py`, which drops a fixture
 `<schema>__meta_ads` schema (shaped like a real Fivetran-landed Meta Ads sync) for the
 dev org and runs the real transform against it once, leaving a `paused` ad account ready
-for onboarding's "Activate" button. Tagging and generation still call real models by
-default; add `CS_FAKE_CONNECTOR=1` before `make api`/`make worker` to fake the tagging
-pipeline (tagger/transcriber/embedder) too, if you want the loop to run without model
-credentials past ingest.
+for onboarding's "Activate" button. `CS_FAKE_CONNECTOR=1` fakes the tagging pipeline
+(tagger/transcriber/embedder), so onboarding, sync, the creative library, insights and
+the brief all work offline.
 
 ### Known limitations
 
