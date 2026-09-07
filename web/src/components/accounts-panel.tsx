@@ -13,8 +13,20 @@ export function AccountsPanel({ accounts }: { accounts: Account[] }) {
   const [msg, setMsg] = useState<string | null>(null);
   const connect = async () => {
     try {
-      const { url } = await api.metaOauthStart();
-      window.location.assign(url);
+      const { connect_card_url, connector_id } = await api.fivetranConnectStart();
+      const popup = window.open(connect_card_url, 'fivetran-connect', 'width=500,height=700');
+      const onMessage = async (e: MessageEvent) => {
+        if (e.origin !== window.location.origin || e.data?.type !== 'fivetran:return') return;
+        window.removeEventListener('message', onMessage);
+        popup?.close();
+        try {
+          await api.fivetranConnectFinalize(connector_id);
+          setMsg('Connected — accounts will appear once the first sync finishes.');
+        } catch (err) {
+          setMsg(`Failed to finish connecting: ${err instanceof Error ? err.message : 'Something went wrong.'}`);
+        }
+      };
+      window.addEventListener('message', onMessage);
     } catch (e) {
       if (e instanceof ApiError && e.status === 403) {
         setMsg("You don't have permission to do this — ask an admin.");
@@ -72,6 +84,9 @@ export function AccountsPanel({ accounts }: { accounts: Account[] }) {
                     <Badge variant={statusVariant[a.status]} className="capitalize">
                       {a.status}
                     </Badge>
+                    {a.connection_status === 'error' && (
+                      <Badge variant="destructive">{a.connection_error ?? 'Sync error'}</Badge>
+                    )}
                     {a.sync_cursor?.last_synced_until ? `synced through ${String(a.sync_cursor.last_synced_until)}` : null}
                   </div>
                 </div>
