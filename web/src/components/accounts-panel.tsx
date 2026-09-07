@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Plug } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -11,13 +11,23 @@ const statusVariant = { active: 'success', paused: 'secondary', disconnected: 'd
 
 export function AccountsPanel({ accounts }: { accounts: Account[] }) {
   const [msg, setMsg] = useState<string | null>(null);
+  const messageListenerRef = useRef<((e: MessageEvent) => void) | null>(null);
   const connect = async () => {
     try {
+      // If a previous connect attempt never completed (popup closed manually, or the
+      // Connect Card never sent the return message), drop its listener before adding a
+      // new one — otherwise a stale listener stays live and double-finalizes on the
+      // next successful return message, using its own (now-stale) connector_id.
+      if (messageListenerRef.current) {
+        window.removeEventListener('message', messageListenerRef.current);
+        messageListenerRef.current = null;
+      }
       const { connect_card_url, connector_id } = await api.fivetranConnectStart();
       const popup = window.open(connect_card_url, 'fivetran-connect', 'width=500,height=700');
       const onMessage = async (e: MessageEvent) => {
         if (e.origin !== window.location.origin || e.data?.type !== 'fivetran:return') return;
         window.removeEventListener('message', onMessage);
+        messageListenerRef.current = null;
         popup?.close();
         try {
           await api.fivetranConnectFinalize(connector_id);
@@ -26,6 +36,7 @@ export function AccountsPanel({ accounts }: { accounts: Account[] }) {
           setMsg(`Failed to finish connecting: ${err instanceof Error ? err.message : 'Something went wrong.'}`);
         }
       };
+      messageListenerRef.current = onMessage;
       window.addEventListener('message', onMessage);
     } catch (e) {
       if (e instanceof ApiError && e.status === 403) {
