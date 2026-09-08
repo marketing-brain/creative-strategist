@@ -1,12 +1,22 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 describe('authHeaders', () => {
-  it('returns dev headers in dev mode', async () => {
-    vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', 'dev');
-    vi.stubEnv('NEXT_PUBLIC_DEV_USER', 'u');
-    vi.stubEnv('NEXT_PUBLIC_DEV_ORG', 'o');
-    vi.stubEnv('NEXT_PUBLIC_DEV_ROLE', 'member');
+  afterEach(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (window as any).Clerk;
+  });
+
+  it('returns an Authorization header from the active Clerk session', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).Clerk = { session: { getToken: vi.fn().mockResolvedValue('jwt-token') } };
     const { authHeaders } = await import('@/lib/auth-headers');
-    expect(await authHeaders()).toEqual({ 'X-Dev-User': 'u', 'X-Dev-Org': 'o', 'X-Dev-Role': 'member' });
+    expect(await authHeaders()).toEqual({ Authorization: 'Bearer jwt-token' });
+  });
+
+  it('returns no headers when there is no active session', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).Clerk = { session: undefined };
+    const { authHeaders } = await import('@/lib/auth-headers');
+    expect(await authHeaders()).toEqual({});
   });
 });

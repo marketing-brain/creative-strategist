@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test';
 
-// Requires: `AUTH_MODE=dev make api` and `AUTH_MODE=dev make worker` running, and a fixture
-// meta_connection + Fivetran-shaped schema for the dev org inserted by
-// `scripts/seed_dev_fivetran.py`.
-// NEXT_PUBLIC_DEV_ORG must match the seeded org.
+// Requires: `make api` and `make worker` running, a fixture meta_connection +
+// Fivetran-shaped schema for the dev org inserted by `scripts/seed_dev_fivetran.py`,
+// and a real, signed-in Clerk session for that org (no dev-mode auth bypass exists) --
+// the latter isn't wired up yet; see README.md's Known limitations.
 test('onboarding -> creatives -> generate -> review', async ({ page }) => {
   await page.goto('/onboarding');
   await page.getByRole('button', { name: 'Activate' }).first().click();

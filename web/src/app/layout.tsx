@@ -22,13 +22,14 @@ export const viewport: Viewport = {
 const themeInitScript = `(function(){try{var t=localStorage.getItem('theme');var d=t?t==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.classList.toggle('dark',d);}catch(e){}})();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const body = (
-    <html lang="en" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable}`}>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
-      </head>
-      <body className="min-h-dvh bg-background font-sans text-foreground antialiased">{children}</body>
-    </html>
+  return (
+    <ClerkProvider>
+      <html lang="en" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable}`}>
+        <head>
+          <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        </head>
+        <body className="min-h-dvh bg-background font-sans text-foreground antialiased">{children}</body>
+      </html>
+    </ClerkProvider>
   );
-  return process.env.NEXT_PUBLIC_AUTH_MODE === 'clerk' ? <ClerkProvider>{body}</ClerkProvider> : body;
 }

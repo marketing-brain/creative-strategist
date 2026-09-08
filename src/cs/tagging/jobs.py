@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from uuid import UUID
 
 import httpx
@@ -206,12 +205,10 @@ async def batch_poll(ctx: JobContext) -> None:
         run_id = UUID(res["custom_id"])
         if res["ok"]:
             row = await ctx.db.fetchrow(
-                "SELECT tr.creative_id AS creative_id, tr.prompt_sha256 AS prompt_sha256, "
-                "c.format AS format FROM tag_run tr JOIN creative c ON c.id = tr.creative_id "
-                "WHERE tr.id=$1",
+                "SELECT tr.prompt_sha256 AS prompt_sha256, c.format AS format "
+                "FROM tag_run tr JOIN creative c ON c.id = tr.creative_id WHERE tr.id=$1",
                 run_id,
             )
-            creative_id = row["creative_id"]
             sha = row["prompt_sha256"]
             await tag_repo.finish_tag_run(
                 ctx.db,
@@ -222,20 +219,5 @@ async def batch_poll(ctx: JobContext) -> None:
                 res["input_tokens"],
                 res["output_tokens"],
             )
-            await queue.enqueue(
-                ctx.db,
-                org_id,
-                "tagging.embed_creative",
-                {"creative_id": str(creative_id)},
-                dedup_key=f"embed:{creative_id}",
-            )
         else:
             await tag_repo.fail_tag_run(ctx.db, org_id, run_id, res["error"] or "batch item failed")
-
-
-if os.environ.get("CS_FAKE_CONNECTOR"):
-    from cs.tagging.fakes import FakeEmbedder, FakeTagger, FakeTranscriber
-
-    TAGGER_FACTORY = lambda s: FakeTagger()  # noqa: E731
-    TRANSCRIBER_FACTORY = lambda s, http: FakeTranscriber()  # noqa: E731
-    EMBEDDER_FACTORY = lambda s, http: FakeEmbedder()  # noqa: E731

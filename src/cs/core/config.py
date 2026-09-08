@@ -1,7 +1,6 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,8 +18,11 @@ class Settings(BaseSettings):
     aws_secret_access_key: str = ""
     aws_default_region: str = "us-east-1"
 
-    auth_mode: Literal["dev", "clerk"] = "clerk"
-    clerk_jwks_url: str = ""
+    # No dev-mode auth bypass: every environment, including local development,
+    # authenticates through Clerk. A test-only auth override lives in
+    # tests/conftest.py, wired through FastAPI's dependency_overrides -- never
+    # through a Settings flag the running app could be misconfigured with.
+    clerk_jwks_url: str
     clerk_issuer: str = ""
 
     public_base_url: str = "http://localhost:8000"
@@ -47,12 +49,6 @@ class Settings(BaseSettings):
     job_lease_seconds: int = 600
 
     cors_origins: str = "http://localhost:3000"
-
-    @model_validator(mode="after")
-    def _check_clerk_config(self) -> "Settings":
-        if self.auth_mode == "clerk" and not self.clerk_jwks_url:
-            raise ValueError("CLERK_JWKS_URL is required when AUTH_MODE=clerk")
-        return self
 
     @property
     def cors_origins_list(self) -> list[str]:

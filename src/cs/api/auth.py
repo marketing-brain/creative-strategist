@@ -57,23 +57,12 @@ def _clerk_claims(request: Request, settings: Settings) -> tuple[str, str, str]:
     return sub, org, role
 
 
-def _dev_claims(request: Request) -> tuple[str, str, str]:
-    user = request.headers.get("x-dev-user")
-    org = request.headers.get("x-dev-org")
-    if not user or not org:
-        raise HTTPException(401, "dev auth requires X-Dev-User and X-Dev-Org")
-    return user, org, request.headers.get("x-dev-role", "admin")
-
-
 async def current_auth(
     request: Request,
     db: Database = Depends(get_db),
     settings: Settings = Depends(get_settings_dep),
 ) -> AuthContext:
-    if settings.auth_mode == "clerk":
-        user_id, clerk_org, role = _clerk_claims(request, settings)
-    else:
-        user_id, clerk_org, role = _dev_claims(request)
+    user_id, clerk_org, role = _clerk_claims(request, settings)
     org_id = await get_or_create_org(db, clerk_org, name=clerk_org)
     await ensure_membership(db, org_id, user_id, role)
     return AuthContext(user_id=user_id, org_id=org_id, role=role)

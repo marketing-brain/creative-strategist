@@ -1,4 +1,4 @@
-.PHONY: install up down migrate migrate-test test lint dev api worker scheduler evals web-dev web-test web-e2e demo
+.PHONY: install up down migrate migrate-test test lint dev api worker scheduler evals web-dev web-test web-e2e
 
 install:
 	uv sync --extra dev
@@ -39,9 +39,8 @@ web-dev:
 web-test:
 	cd web && npm test
 
+# Seeds fixture Fivetran-shaped data so sync/activate work without a live connector.
+# The Playwright run itself still needs a real, signed-in Clerk session -- see the
+# Known limitations section in README.md.
 web-e2e:
-	AUTH_MODE=dev uv run python scripts/seed_dev_fivetran.py && cd web && npx playwright install chromium && npm run test:e2e
-
-demo:
-	CS_FAKE_CONNECTOR=1 AUTH_MODE=dev uv run python scripts/seed_dev_fivetran.py
-	CS_FAKE_CONNECTOR=1 AUTH_MODE=dev $(MAKE) -j3 api worker scheduler
+	uv run python scripts/seed_dev_fivetran.py && cd web && npx playwright install chromium && npm run test:e2e

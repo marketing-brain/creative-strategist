@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { UserButton } from '@clerk/nextjs';
+import { OrganizationSwitcher, UserButton } from '@clerk/nextjs';
 import {
   BatteryWarning,
   ClipboardCheck,
@@ -60,6 +60,11 @@ export function Nav() {
           <Sparkles className="size-4 text-primary" aria-hidden="true" />
           Creative Strategist
         </Link>
+        {/* Every page here is org-scoped with no personal-account concept, so
+            hidePersonal keeps a user from switching to a context that would 403.
+            The switcher's own "Manage Organization" action already opens
+            OrganizationProfile (members + invite) as a modal -- no extra page needed. */}
+        <OrganizationSwitcher hidePersonal appearance={{ elements: { rootBox: 'w-full', organizationSwitcherTrigger: 'w-full justify-between px-2 py-1.5 rounded-lg hover:bg-sidebar-accent/60' } }} />
         <nav className="flex flex-1 flex-col gap-5" aria-label="Primary">
           {groups.map((group) => (
             <div key={group.label} className="flex flex-col gap-1">
@@ -78,7 +83,7 @@ export function Nav() {
             <Settings className="size-4 shrink-0" aria-hidden="true" />
             Settings
           </Link>
-          {process.env.NEXT_PUBLIC_AUTH_MODE === 'clerk' && <UserButton />}
+          <UserButton />
           <ThemeToggle />
         </div>
       </aside>
@@ -98,6 +103,7 @@ export function Nav() {
             {item.label}
           </Link>
         ))}
+        <OrganizationSwitcher hidePersonal />
         <Link
           href="/settings"
           aria-label="Settings"
@@ -109,7 +115,7 @@ export function Nav() {
         >
           <Settings className="size-4" aria-hidden="true" />
         </Link>
-        {process.env.NEXT_PUBLIC_AUTH_MODE === 'clerk' && <UserButton />}
+        <UserButton />
       </nav>
     </>
   );

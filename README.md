@@ -5,7 +5,7 @@ AI creative strategist for paid social. See `docs/superpowers/specs/` for the de
 ## Local setup
 
     brew install uv dbmate ffmpeg          # macOS
-    cp .env.example .env                    # fill TOKEN_ENCRYPTION_KEY at minimum
+    cp .env.example .env                    # fill ANTHROPIC_API_KEY for real tagging/insights/copilot
     make up                                 # postgres + minio
     make install migrate
     make test
@@ -21,28 +21,25 @@ AI creative strategist for paid social. See `docs/superpowers/specs/` for the de
 The Next.js front end lives in `web/` and talks to the API above.
 
     cd web && npm install && cd ..
-    cp web/.env.example web/.env.local   # NEXT_PUBLIC_API_URL, auth mode, dev identity
+    cp web/.env.example web/.env.local   # NEXT_PUBLIC_API_URL + your Clerk keys
     make web-dev                          # http://localhost:3000
     make web-test                         # vitest unit + component tests
     make web-e2e                          # seeds a fixture Fivetran schema, runs Playwright
 
-To click through the app without real Meta or model credentials:
-
-    make demo       # CS_FAKE_CONNECTOR=1: seeds a fixture Fivetran schema, then api + worker + scheduler
-    make web-dev    # in a second terminal
-
-`make demo` runs `scripts/seed_dev_fivetran.py`, which drops a fixture
-`<schema>__meta_ads` schema (shaped like a real Fivetran-landed Meta Ads sync) for the
-dev org and runs the real transform against it once, leaving a `paused` ad account ready
-for onboarding's "Activate" button. `CS_FAKE_CONNECTOR=1` fakes the tagging pipeline
-(tagger/transcriber/embedder), so onboarding, sync, the creative library, insights and
-the brief all work offline.
+There is no dev-mode auth bypass and no fake-connector demo mode: every environment,
+local development included, authenticates through Clerk and calls real Anthropic/AI
+Gateway APIs. `scripts/seed_dev_fivetran.py` still seeds a fixture
+`<schema>__meta_ads` schema (shaped like a real Fivetran-landed Meta Ads sync) so you
+don't need a live Fivetran connector to exercise sync/activate locally, but tagging,
+insights, briefs, and generation all need real `ANTHROPIC_API_KEY` /
+`AI_GATEWAY_API_KEY` credentials to do anything.
 
 ### Known limitations
 
-- `make web-e2e` cannot go fully green without real credentials: generation always needs a
-  working `ANTHROPIC_API_KEY` / `AI_GATEWAY_API_KEY`, and tagging does too unless you run
-  `make api`/`make worker` with `CS_FAKE_CONNECTOR=1`.
+- `make web-e2e` needs a real, signed-in Clerk session to get past the app's login —
+  Playwright can't click through it without either real test-user credentials or
+  Clerk's Testing Tokens integration (`@clerk/testing`), neither of which is wired up
+  yet. Until that's set up, `web/tests/e2e/onboarding-to-review.spec.ts` cannot run.
 - With `BLOB_BACKEND=local`, `GET /blobs/{key}` requires an auth header. The web
   app serves assets through its own `/blobs/...` route, which re-issues the
   request server-side with auth attached; never point an `<img src>` straight at
