@@ -34,7 +34,6 @@ export const api = {
   creativeMetrics: (id: string, since: string, until: string) =>
     apiFetch<import('./types').MetricDay[]>(`/creatives/${id}/metrics?since=${since}&until=${until}`),
   creativeTags: (id: string) => apiFetch<import('./types').Tag[]>(`/creatives/${id}/tags`),
-  similar: (id: string) => apiFetch<import('./types').Creative[]>(`/creatives/${id}/similar`),
   dimensions: () => apiFetch<import('./types').Dimension[]>('/tags/dimensions'),
   insights: (kind: string) => apiFetch<import('./types').Insight[]>(`/insights?kind=${kind}`),
   fatigue: () => apiFetch<import('./types').Insight[]>('/fatigue'),

@@ -68,8 +68,9 @@ async def test_tag_image_creative_persists_tags(db, blobs, settings, org_id, ima
         and run["input_tokens"] == 100
         and run["model"] == settings.claude_model_tagging
     )
+    # Similarity is disabled: tagging no longer chains an embed job.
     assert (
-        await db.fetchval("SELECT count(*) FROM job WHERE job_type='tagging.embed_creative'") == 1
+        await db.fetchval("SELECT count(*) FROM job WHERE job_type='tagging.embed_creative'") == 0
     )
 
 

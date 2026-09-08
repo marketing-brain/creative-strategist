@@ -124,11 +124,6 @@ class CopilotTools:
             await insight_repo.list_insights(self.db, self.org_id, "fatigue", None, min(limit, 50))
         )
 
-    async def similar_creatives(self, creative_id: str, k: int = 5) -> list[dict]:
-        return _rows(
-            await tag_repo.similar_creatives(self.db, self.org_id, UUID(creative_id), min(k, 20))
-        )
-
 
 class Copilot(Protocol):
     async def answer(self, history: list[dict], tools: CopilotTools) -> str: ...
@@ -197,23 +192,12 @@ class ClaudeCopilot:
             """
             return json.dumps(await t.fatigue_alerts(limit))
 
-        @beta_async_tool
-        async def similar_creatives(creative_id: str, k: int = 5) -> str:
-            """Nearest creatives by tag embedding.
-
-            Args:
-                creative_id: The creative UUID.
-                k: Number of neighbours.
-            """
-            return json.dumps(await t.similar_creatives(creative_id, k))
-
         return [
             metrics_by_creative,
             tags_for_creative,
             top_creatives_by_dimension,
             insights,
             fatigue_alerts,
-            similar_creatives,
         ]
 
     async def answer(self, history: list[dict], tools: CopilotTools) -> str:

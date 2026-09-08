@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from uuid import UUID
 
-from cs.core import queue
 from cs.core.blobs import sha256_hex
 from cs.ingest import repo as ingest_repo
 from cs.jobs.registry import JobContext
@@ -108,11 +107,4 @@ async def tag_creative(
     except Exception as exc:
         await repo.fail_tag_run(ctx.db, org_id, run_id, str(exc))
         raise
-    await queue.enqueue(
-        ctx.db,
-        org_id,
-        "tagging.embed_creative",
-        {"creative_id": str(creative_id)},
-        dedup_key=f"embed:{creative_id}",
-    )
     return run_id

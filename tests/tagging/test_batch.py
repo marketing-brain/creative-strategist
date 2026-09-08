@@ -75,8 +75,9 @@ async def test_batch_submit_and_poll_completes_runs(
     await db.execute("UPDATE job SET run_after = now() WHERE job_type='tagging.batch_poll'")
     await run_once(db, blobs, settings, "w")
     assert await db.fetchval("SELECT count(*) FROM tag_run WHERE status='done'") == 3
+    # Similarity is disabled: a finished batch item no longer chains an embed job.
     assert (
-        await db.fetchval("SELECT count(*) FROM job WHERE job_type='tagging.embed_creative'") == 3
+        await db.fetchval("SELECT count(*) FROM job WHERE job_type='tagging.embed_creative'") == 0
     )
 
 
@@ -226,12 +227,12 @@ async def test_batch_poll_race_does_not_double_process(
     )
 
     assert await db.fetchval("SELECT status FROM tag_batch WHERE id=$1", batch_id) == "ended"
-    # Exactly one of the two racing calls processed results: tag rows and
-    # embed jobs are not duplicated.
+    # Exactly one of the two racing calls processed results: tag rows are not duplicated.
     assert await db.fetchval("SELECT count(*) FROM tag_run WHERE status='done'") == 3
     assert await db.fetchval("SELECT count(*) FROM tag") == 3 * 4  # 4 DEFAULT_TAGS per creative
+    # Similarity is disabled: a finished batch item no longer chains an embed job.
     assert (
-        await db.fetchval("SELECT count(*) FROM job WHERE job_type='tagging.embed_creative'") == 3
+        await db.fetchval("SELECT count(*) FROM job WHERE job_type='tagging.embed_creative'") == 0
     )
 
 

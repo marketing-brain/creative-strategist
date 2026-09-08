@@ -1,4 +1,3 @@
-import { CreativeCard } from '@/components/creative-card';
 import { MetricChart } from '@/components/metric-chart';
 import { TagList } from '@/components/tag-list';
 import { Badge } from '@/components/ui/badge';
@@ -13,12 +12,11 @@ export default async function CreativeDetail({ params }: { params: Promise<{ id:
   const { id } = await params;
   const until = new Date();
   const since = new Date(until.getTime() - 89 * 86400000);
-  const [creative, tags, metrics, dims, similar] = await Promise.all([
+  const [creative, tags, metrics, dims] = await Promise.all([
     api.creative(id),
     api.creativeTags(id),
     api.creativeMetrics(id, iso(since), iso(until)),
     api.dimensions(),
-    api.similar(id),
   ]);
   const assetSrc = blobUrl(creative.primary_asset_url);
   return (
@@ -55,16 +53,6 @@ export default async function CreativeDetail({ params }: { params: Promise<{ id:
           {creative.format === 'carousel' && <p className="mb-2 text-xs text-muted-foreground">Carousel · tags reflect all cards</p>}
           {tags.length ? <TagList tags={tags} dimensions={dims} /> : <p className="text-sm text-muted-foreground">Not tagged yet.</p>}
         </section>
-        {similar.length > 0 && (
-          <section>
-            <h2 className="mb-3 text-sm font-semibold">Similar creatives</h2>
-            <div className="grid grid-cols-3 gap-3 md:grid-cols-5">
-              {similar.map((s) => (
-                <CreativeCard key={s.id} creative={s} />
-              ))}
-            </div>
-          </section>
-        )}
       </div>
     </div>
   );

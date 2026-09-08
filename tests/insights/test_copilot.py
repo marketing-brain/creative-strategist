@@ -26,7 +26,6 @@ async def test_tools_return_serializable_data(db, org_id, settings):
     )
     assert top[0]["creative_id"] == str(cid) and top[0]["ctr"] == 0.02
     assert await tools.insights() == [] and await tools.fatigue_alerts() == []
-    assert await tools.similar_creatives(str(cid)) == []
 
 
 async def test_conversation_persistence(db, org_id):

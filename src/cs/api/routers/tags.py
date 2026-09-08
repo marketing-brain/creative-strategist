@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from cs.api.auth import AuthContext, current_auth, require_admin
@@ -28,19 +28,6 @@ async def creative_tags(
         {**dict(r), "confidence": round(float(r["confidence"]), 4)}
         for r in await repo.latest_tags(db, auth.org_id, creative_id)
     ]
-
-
-@router.get("/creatives/{creative_id}/similar")
-async def similar(
-    creative_id: UUID,
-    k: int = Query(10, ge=1, le=50),
-    auth: AuthContext = Depends(current_auth),
-    db: Database = Depends(get_db),
-) -> list[dict]:
-    if not await ingest_repo.get_creative(db, auth.org_id, creative_id):
-        raise HTTPException(404)
-    rows = await repo.similar_creatives(db, auth.org_id, creative_id, k)
-    return [{**dict(r), "id": str(r["id"]), "distance": float(r["distance"])} for r in rows]
 
 
 @router.post("/creatives/{creative_id}/retag")

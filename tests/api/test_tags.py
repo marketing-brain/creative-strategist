@@ -1,5 +1,3 @@
-from uuid import uuid4
-
 from cs.connectors.base import PlatformCreative
 from cs.ingest import repo as ingest_repo
 from cs.tagging import repo
@@ -55,22 +53,6 @@ async def test_tags_endpoints(client, db, settings):
         r.status_code == 200
         and await db.fetchval("SELECT count(*) FROM job WHERE job_type='tagging.batch_submit'") == 1
     )
-    r = await client.get(f"/creatives/{cid}/similar", headers=H)
-    assert r.status_code == 200 and r.json() == []
-
-
-async def test_similar_404_on_nonexistent_creative(client, db, settings):
-    await _seed(client, db, settings)
-    r = await client.get(f"/creatives/{uuid4()}/similar", headers=H)
-    assert r.status_code == 404
-
-
-async def test_similar_rejects_out_of_range_k(client, db, settings):
-    cid = await _seed(client, db, settings)
-    r = await client.get(f"/creatives/{cid}/similar?k=-1", headers=H)
-    assert r.status_code == 422
-    r = await client.get(f"/creatives/{cid}/similar?k=0", headers=H)
-    assert r.status_code == 422
 
 
 async def test_backfill_rejects_out_of_range_limit(client, db, settings):
