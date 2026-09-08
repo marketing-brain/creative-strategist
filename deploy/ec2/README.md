@@ -59,7 +59,16 @@ created after the clone exists -- isn't there yet:
 sudo nano /opt/creative-strategist/web/.env.local
 # NEXT_PUBLIC_API_URL=http://<elastic-ip>:8000
 # NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=<production Clerk publishable key>
+# NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+# NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=/
+# NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=/
 ```
+
+The three `NEXT_PUBLIC_CLERK_SIGN_IN*`/`SIGN_UP*` lines matter: without them Clerk
+doesn't know the app has its own `/sign-in` page and falls back to redirecting
+through its hosted Account Portal, which can't complete the round trip back to
+a raw IP -- users get stuck on Clerk's own UI after logging in instead of
+landing back in the app.
 
 Run the same command again to finish (it's idempotent -- the clone is
 already done, so this pass installs deps, migrates, builds, and starts all
