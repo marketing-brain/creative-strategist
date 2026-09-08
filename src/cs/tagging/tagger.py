@@ -7,6 +7,7 @@ from typing import Protocol
 
 import anthropic
 
+from cs.core.claude_calls import fallback_kwargs
 from cs.core.config import Settings
 
 
@@ -58,11 +59,10 @@ class ClaudeTagger:
         resp = await self.client.beta.messages.create(
             model=self.model,
             max_tokens=16000,
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
             system=SYSTEM,
             messages=[{"role": "user", "content": build_content(images, user_text)}],
             output_config={"format": {"type": "json_schema", "schema": schema}},
+            **fallback_kwargs(self.model),
         )
         usage = getattr(resp, "usage", None)
         result = TagResult(

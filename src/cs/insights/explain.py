@@ -5,6 +5,7 @@ from typing import Protocol
 
 import anthropic
 
+from cs.core.claude_calls import fallback_kwargs
 from cs.core.config import Settings
 from cs.insights.types import InsightDraft
 
@@ -74,10 +75,9 @@ class ClaudeExplainer:
             model=self.model,
             max_tokens=2000,
             system=SYSTEM,
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
             messages=[{"role": "user", "content": _user(draft, context)}],
             output_config={"format": {"type": "json_schema", "schema": SCHEMA}, "effort": "low"},
+            **fallback_kwargs(self.model),
         )
         if resp.stop_reason == "refusal":
             return _template(draft)

@@ -6,6 +6,7 @@ from typing import Protocol
 
 import anthropic
 
+from cs.core.claude_calls import fallback_kwargs
 from cs.core.config import Settings
 from cs.generation.brand import BrandKit
 
@@ -75,10 +76,9 @@ class ClaudeCopyWriter:
             model=self.model,
             max_tokens=4000,
             system=system,
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
             messages=[{"role": "user", "content": user}],
             output_config={"format": {"type": "json_schema", "schema": schema}},
+            **fallback_kwargs(self.model),
         )
         if resp.stop_reason == "refusal":
             return {}
