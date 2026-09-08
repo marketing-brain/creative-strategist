@@ -10,6 +10,10 @@ export function CreativeCard({ creative }: { creative: Creative }) {
   const src = blobUrl(creative.primary_asset_url);
   const Icon = formatIcon[creative.format];
   const caption = creative.headline ?? creative.primary_text ?? creative.platform_creative_id;
+  const metrics =
+    creative.spend_30d > 0
+      ? `$${Math.round(creative.spend_30d).toLocaleString('en-US')} · ${((creative.ctr_30d ?? 0) * 100).toFixed(1)}% CTR`
+      : 'No spend in last 30 days';
   return (
     <Link
       href={`/creatives/${creative.id}`}
@@ -40,6 +44,7 @@ export function CreativeCard({ creative }: { creative: Creative }) {
           {creative.format}
         </Badge>
         <div className="line-clamp-2 leading-snug text-foreground">{caption}</div>
+        <div className="text-xs text-muted-foreground">{metrics}</div>
       </div>
     </Link>
   );

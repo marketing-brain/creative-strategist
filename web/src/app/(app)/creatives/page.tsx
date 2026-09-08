@@ -19,6 +19,8 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
     const q = new URLSearchParams();
     if (sp.account_id) q.set('account_id', sp.account_id);
     if (sp.format) q.set('format', sp.format);
+    if (sp.dimension) q.set('dimension', sp.dimension);
+    if (sp.value) q.set('value', sp.value);
     q.set('limit', String(PAGE_SIZE));
     q.set('offset', String((p - 1) * PAGE_SIZE));
     return q;
@@ -27,14 +29,17 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
     const q = new URLSearchParams();
     if (sp.account_id) q.set('account_id', sp.account_id);
     if (sp.format) q.set('format', sp.format);
+    if (sp.dimension) q.set('dimension', sp.dimension);
+    if (sp.value) q.set('value', sp.value);
     if (p > 1) q.set('page', String(p));
     const s = q.toString();
     return `/creatives${s ? `?${s}` : ''}`;
   };
 
-  const [{ items: creatives, total }, accounts] = await Promise.all([
+  const [{ items: creatives, total }, accounts, dimensions] = await Promise.all([
     api.creatives(`?${makeQuery(page)}`),
     api.accounts(),
+    api.dimensions(),
   ]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   if (page > totalPages) redirect(makeHref(totalPages));
@@ -46,7 +51,7 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
           <h1 className="text-2xl font-semibold tracking-tight">Creatives</h1>
           <p className="text-sm text-muted-foreground">Every ad creative synced from your connected accounts.</p>
         </div>
-        <CreativeFilters accounts={accounts} />
+        <CreativeFilters accounts={accounts} dimensions={dimensions} />
       </div>
       {creatives.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border py-20 text-center">
