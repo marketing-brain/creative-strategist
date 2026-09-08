@@ -1,0 +1,18 @@
+[Unit]
+Description=creative-strategist web
+After=network.target
+
+[Service]
+Type=simple
+User=cs
+WorkingDirectory=/opt/creative-strategist/web
+# NEXT_PUBLIC_* vars are baked into the client bundle at `npm run build` time
+# (from web/.env.local, written by setup.sh) -- this file only supplies vars
+# the Next.js SERVER reads at runtime, e.g. CLERK_SECRET_KEY.
+EnvironmentFile=/etc/creative-strategist/web.env
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,15 @@
+[Unit]
+Description=creative-strategist scheduler
+After=network.target
+
+[Service]
+Type=simple
+User=cs
+WorkingDirectory=/opt/creative-strategist
+EnvironmentFile=/etc/creative-strategist/backend.env
+ExecStart=/opt/creative-strategist/.venv/bin/python -m cs.scheduler
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
