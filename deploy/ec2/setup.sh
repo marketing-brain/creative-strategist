@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Provisions (or updates) creative-strategist on a single Ubuntu 24.04 EC2 box.
+# Provisions (or updates) creative-strategist on a single Amazon Linux 2023 EC2 box.
 # Idempotent: run it again after a `git pull` to deploy a new version -- it
 # reinstalls deps, rebuilds, re-migrates, and restarts all four services.
 #
@@ -34,24 +34,34 @@ done
 # operator has to pre-create web/.env.local in an empty $APP_DIR, which then
 # makes `git clone` refuse to clone into a now-non-empty directory).
 
-# --- system deps (idempotent: apt/curl steps no-op if already present) ---
+# --- system deps (idempotent: dnf/curl steps no-op if already present) ---
 if ! id -u cs >/dev/null 2>&1; then
   sudo useradd --system --create-home --shell /usr/sbin/nologin cs
 fi
 
-sudo apt-get update -y
-sudo apt-get install -y --no-install-recommends \
-  git curl ca-certificates ffmpeg build-essential
+sudo dnf update -y
+sudo dnf install -y git curl ca-certificates gcc gcc-c++ make tar xz
 
 if ! command -v node >/dev/null 2>&1; then
-  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-  sudo apt-get install -y --no-install-recommends nodejs
+  curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo -E bash -
+  sudo dnf install -y nodejs
 fi
 
 if ! command -v dbmate >/dev/null 2>&1; then
   sudo curl -fsSL -o /usr/local/bin/dbmate \
     https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64
   sudo chmod +x /usr/local/bin/dbmate
+fi
+
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  # Not in AL2023's dnf repos at all (patent-encumbered codecs) -- a static
+  # build sidesteps that entirely, same pattern as the dbmate binary above.
+  tmp_ffmpeg="$(mktemp -d)"
+  curl -fsSL -o "$tmp_ffmpeg/ffmpeg.tar.xz" \
+    https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+  tar -xf "$tmp_ffmpeg/ffmpeg.tar.xz" -C "$tmp_ffmpeg" --strip-components=1
+  sudo install -m 755 "$tmp_ffmpeg/ffmpeg" "$tmp_ffmpeg/ffprobe" /usr/local/bin/
+  rm -rf "$tmp_ffmpeg"
 fi
 
 if ! command -v uv >/dev/null 2>&1; then

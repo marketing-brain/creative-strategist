@@ -1,6 +1,6 @@
 # EC2 deployment
 
-The simplest possible setup: one Ubuntu box, no load balancer, no containers,
+The simplest possible setup: one Amazon Linux 2023 box, no load balancer, no containers,
 no reverse proxy or TLS. `api`/`worker`/`scheduler`/`web` run as plain systemd
 services and are reached directly on their ports. Mirrors the pattern the
 sibling `lp-deploy` project already uses for its own EC2 box.
@@ -13,7 +13,7 @@ the instance itself.
 
 In the EC2 console, **Launch instance**:
 
-- **AMI**: Ubuntu Server 24.04 LTS
+- **AMI**: Amazon Linux 2023 (the console default)
 - **Instance type**: `t3.small` (2 vCPU / 2 GB RAM -- `t3.micro`'s 1 GB is
   tight once `next build`, three Python processes, and ffmpeg are all
   competing for memory)
@@ -30,7 +30,8 @@ instance** -- a plain public IP changes on stop/start, and both
 
 ## 2. First-time setup
 
-SSH in and create the two `/etc` files `setup.sh` refuses to run without
+SSH in as `ec2-user` (Amazon Linux's default login, not `ubuntu`) and create
+the two `/etc` files `setup.sh` refuses to run without
 (copy real values from your local `.env`, but point every URL at the Elastic
 IP from step 1 instead of `localhost`):
 
