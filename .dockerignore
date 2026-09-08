@@ -1,0 +1,15 @@
+.git
+.venv
+__pycache__
+*.pyc
+.env
+.env.*
+var
+node_modules
+.next
+.pytest_cache
+.ruff_cache
+web
+tests
+docs
+.superpowers
