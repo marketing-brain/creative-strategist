@@ -141,14 +141,33 @@ async def list_generated_assets(
     generation_id: UUID | None = None,
     review_state: str | None = None,
     limit: int = 100,
+    offset: int = 0,
 ) -> list[asyncpg.Record]:
     return await db.fetch(
         "SELECT * FROM generated_asset WHERE org_id=$1 AND ($2::uuid IS NULL OR generation_id=$2) "
-        "AND ($3::text IS NULL OR review_state=$3) ORDER BY created_at, variant, aspect LIMIT $4",
+        "AND ($3::text IS NULL OR review_state=$3) ORDER BY created_at, variant, aspect "
+        "LIMIT $4 OFFSET $5",
         org_id,
         generation_id,
         review_state,
         limit,
+        offset,
+    )
+
+
+async def count_generated_assets(
+    db: Database,
+    org_id: UUID,
+    generation_id: UUID | None = None,
+    review_state: str | None = None,
+) -> int:
+    return await db.fetchval(
+        "SELECT count(*) FROM generated_asset WHERE org_id=$1 "
+        "AND ($2::uuid IS NULL OR generation_id=$2) "
+        "AND ($3::text IS NULL OR review_state=$3)",
+        org_id,
+        generation_id,
+        review_state,
     )
 
 

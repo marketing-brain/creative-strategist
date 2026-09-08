@@ -27,19 +27,29 @@ async def insights(
     kind: str | None = None,
     account_id: UUID | None = None,
     limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     auth: AuthContext = Depends(current_auth),
     db: Database = Depends(get_db),
-) -> list[dict]:
-    return [_ser(r) for r in await repo.list_insights(db, auth.org_id, kind, account_id, limit)]
+) -> dict:
+    items = [
+        _ser(r) for r in await repo.list_insights(db, auth.org_id, kind, account_id, limit, offset)
+    ]
+    total = await repo.count_insights(db, auth.org_id, kind, account_id)
+    return {"items": items, "total": total}
 
 
 @router.get("/fatigue")
 async def fatigue(
     limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     auth: AuthContext = Depends(current_auth),
     db: Database = Depends(get_db),
-) -> list[dict]:
-    return [_ser(r) for r in await repo.list_insights(db, auth.org_id, "fatigue", None, limit)]
+) -> dict:
+    items = [
+        _ser(r) for r in await repo.list_insights(db, auth.org_id, "fatigue", None, limit, offset)
+    ]
+    total = await repo.count_insights(db, auth.org_id, "fatigue", None)
+    return {"items": items, "total": total}
 
 
 @router.get("/briefs")

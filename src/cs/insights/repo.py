@@ -48,6 +48,7 @@ async def list_insights(
     kind: str | None = None,
     ad_account_id: UUID | None = None,
     limit: int = 50,
+    offset: int = 0,
 ) -> list[asyncpg.Record]:
     return await db.fetch(
         """
@@ -55,12 +56,31 @@ async def list_insights(
         FROM insight i LEFT JOIN creative c ON c.id = i.creative_id
         WHERE i.org_id = $1 AND ($2::text IS NULL OR i.kind = $2)
               AND ($3::uuid IS NULL OR i.ad_account_id = $3)
-        ORDER BY i.created_at DESC, abs(i.lift) DESC LIMIT $4
+        ORDER BY i.created_at DESC, abs(i.lift) DESC LIMIT $4 OFFSET $5
         """,
         org_id,
         kind,
         ad_account_id,
         limit,
+        offset,
+    )
+
+
+async def count_insights(
+    db: Database,
+    org_id: UUID,
+    kind: str | None = None,
+    ad_account_id: UUID | None = None,
+) -> int:
+    return await db.fetchval(
+        """
+        SELECT count(*) FROM insight i
+        WHERE i.org_id = $1 AND ($2::text IS NULL OR i.kind = $2)
+              AND ($3::uuid IS NULL OR i.ad_account_id = $3)
+        """,
+        org_id,
+        kind,
+        ad_account_id,
     )
 
 

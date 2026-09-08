@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from cs.api.auth import AuthContext, current_auth, require_admin
@@ -90,14 +90,19 @@ async def get_gen(
 @router.get("/review-queue")
 async def review_queue(
     state: str = "draft",
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     auth: AuthContext = Depends(current_auth),
     db: Database = Depends(get_db),
     blobs: BlobStore = Depends(get_blobs),
-) -> list[dict]:
+) -> dict:
     out = []
-    for a in await repo.list_generated_assets(db, auth.org_id, review_state=state):
+    for a in await repo.list_generated_assets(
+        db, auth.org_id, review_state=state, limit=limit, offset=offset
+    ):
         out.append({**_ser(a), "url": await blobs.url_for(a["path"])})
-    return out
+    total = await repo.count_generated_assets(db, auth.org_id, review_state=state)
+    return {"items": out, "total": total}
 
 
 @router.post("/generated-assets/{aid}/approve")

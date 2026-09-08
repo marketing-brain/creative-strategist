@@ -113,7 +113,7 @@ async def test_full_loop(client, db, blobs, settings, monkeypatch):
     # 2. insights
     await queue.enqueue(db, org_id, "insights.compute_patterns", {"ad_account_id": str(acct)})
     await _drain(db, blobs, settings)
-    ins = (await client.get("/insights?kind=pattern", headers=H)).json()
+    ins = (await client.get("/insights?kind=pattern", headers=H)).json()["items"]
     winner = next(i for i in ins if i["value"] == "question" and i["metric"] == "ctr")
     assert winner["lift"] > 0
 
@@ -137,6 +137,6 @@ async def test_full_loop(client, db, blobs, settings, monkeypatch):
     # 4. approve -> asset is ready to download, with its ad copy alongside it
     aid = detail["assets"][0]["id"]
     await client.post(f"/generated-assets/{aid}/approve", headers=H)
-    approved = (await client.get("/review-queue?state=approved", headers=H)).json()
+    approved = (await client.get("/review-queue?state=approved", headers=H)).json()["items"]
     asset = next(a for a in approved if a["id"] == aid)
     assert asset["url"] and asset["headline"] and asset["primary_text"] and asset["cta_type"]

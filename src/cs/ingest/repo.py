@@ -377,6 +377,24 @@ async def list_creatives(
     )
 
 
+async def count_creatives(
+    db: Database,
+    org_id: UUID,
+    ad_account_id: UUID | None = None,
+    format: str | None = None,
+) -> int:
+    return await db.fetchval(
+        """
+        SELECT count(*) FROM creative c
+        WHERE c.org_id = $1 AND ($2::uuid IS NULL OR c.ad_account_id = $2)
+          AND ($3::text IS NULL OR c.format = $3)
+        """,
+        org_id,
+        ad_account_id,
+        format,
+    )
+
+
 async def get_creative(db: Database, org_id: UUID, creative_id: UUID) -> asyncpg.Record | None:
     return await db.fetchrow(
         """

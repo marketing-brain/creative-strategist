@@ -47,7 +47,7 @@ async def list_creatives(
     auth: AuthContext = Depends(current_auth),
     db: Database = Depends(get_db),
     blobs: BlobStore = Depends(get_blobs),
-) -> list[dict]:
+) -> dict:
     rows = await repo.list_creatives(db, auth.org_id, account_id, format, limit, offset)
     out = []
     for r in rows:
@@ -56,7 +56,8 @@ async def list_creatives(
             await blobs.url_for(r["primary_asset_path"]) if r["primary_asset_path"] else None
         )
         out.append(d)
-    return out
+    total = await repo.count_creatives(db, auth.org_id, account_id, format)
+    return {"items": out, "total": total}
 
 
 @router.get("/{creative_id}")

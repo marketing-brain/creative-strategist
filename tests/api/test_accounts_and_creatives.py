@@ -84,9 +84,9 @@ async def test_member_cannot_activate(client, db, settings):
 async def test_creatives_list_detail_metrics(client, db, settings):
     _, _, cid, _ = await _seed(db, settings, client)
     r = await client.get("/creatives", headers=H)
-    assert r.status_code == 200 and r.json()[0]["primary_asset_url"].endswith(
-        "/blobs/o/c1/original.png"
-    )
+    body = r.json()
+    assert r.status_code == 200 and body["total"] == 1
+    assert body["items"][0]["primary_asset_url"].endswith("/blobs/o/c1/original.png")
     r = await client.get(f"/creatives/{cid}", headers=H)
     assert r.json()["headline"] == "H"
     r = await client.get(f"/creatives/{cid}/metrics?since=2026-08-01&until=2026-09-30", headers=H)
@@ -106,6 +106,32 @@ async def test_creatives_limit_is_validated(client, db, settings):
     assert (await client.get("/creatives?limit=201", headers=H)).status_code == 422
     assert (await client.get("/creatives?offset=-1", headers=H)).status_code == 422
     assert (await client.get("/creatives?limit=200", headers=H)).status_code == 200
+
+
+async def test_creatives_pagination(client, db, settings):
+    org_id, acct, _, _ = await _seed(db, settings, client)
+    for i in range(2, 4):
+        await repo.upsert_creative(
+            db,
+            org_id,
+            acct,
+            PlatformCreative(
+                f"c{i}", "image", "H", "P", None, "SHOP_NOW", "https://x", None, None, {}
+            ),
+            "raw",
+        )
+    full = (await client.get("/creatives?limit=200", headers=H)).json()
+    assert full["total"] == 3 and len(full["items"]) == 3
+
+    page1 = (await client.get("/creatives?limit=2&offset=0", headers=H)).json()
+    assert page1["total"] == 3 and len(page1["items"]) == 2
+
+    page2 = (await client.get("/creatives?limit=2&offset=2", headers=H)).json()
+    assert page2["total"] == 3 and len(page2["items"]) == 1
+
+    page1_ids = {i["id"] for i in page1["items"]}
+    page2_ids = {i["id"] for i in page2["items"]}
+    assert not page1_ids & page2_ids
 
 
 async def test_creative_metrics_counts_are_integers(client, db, settings):
