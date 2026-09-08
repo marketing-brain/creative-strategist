@@ -10,9 +10,8 @@ export const metadata = { title: 'Generate' };
 export default async function Generate({ searchParams }: { searchParams: Promise<{ insight?: string; created?: string }> }) {
   await requireAuth();
   const sp = await searchParams;
-  const [{ items: insights }, generations, me] = await Promise.all([api.insights('pattern'), api.generations(), api.me()]);
+  const [{ items: insights }, generations] = await Promise.all([api.insights('pattern'), api.generations()]);
   const options = insights.map((i) => ({ id: i.id, label: `${i.dimension} = ${i.value} (${i.lift >= 0 ? '+' : ''}${Math.round(i.lift * 100)}% ${i.metric.toUpperCase()})` }));
-  const isAdmin = me.role === 'admin';
   return (
     <div className="grid gap-8 lg:grid-cols-2">
       <section className="space-y-4">
@@ -20,11 +19,7 @@ export default async function Generate({ searchParams }: { searchParams: Promise
           <h1 className="text-2xl font-semibold tracking-tight">Generate</h1>
           <p className="text-sm text-muted-foreground">Create on-brand variants from a winning pattern or a fresh concept.</p>
         </div>
-        {isAdmin ? (
-          <GenerateForm insightId={sp.insight ?? null} insights={options} />
-        ) : (
-          <p className="text-sm text-muted-foreground">Only admins can start a generation. Ask an admin on your team to run one.</p>
-        )}
+        <GenerateForm insightId={sp.insight ?? null} insights={options} />
         {sp.created && (
           <p className="flex items-center gap-2 rounded-lg bg-success/10 px-3 py-2 text-sm text-success">
             <CheckCircle2 className="size-4 shrink-0" aria-hidden="true" />
