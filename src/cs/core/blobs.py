@@ -51,11 +51,28 @@ class LocalBlobStore:
 
 
 class S3BlobStore:
-    def __init__(self, bucket: str, endpoint_url: str | None = None):
+    def __init__(
+        self,
+        bucket: str,
+        endpoint_url: str | None = None,
+        *,
+        aws_access_key_id: str = "",
+        aws_secret_access_key: str = "",
+        region_name: str = "us-east-1",
+    ):
         import boto3
         from botocore.config import Config
 
         self.bucket = bucket
+        # Credentials are passed explicitly rather than left for boto3's default
+        # credential chain to find in os.environ: Settings loads .env into its own
+        # object via pydantic-settings, which does NOT export those values back into
+        # the process environment, so boto3's implicit env-var lookup only ever
+        # worked when the shell that launched this process happened to `source .env`
+        # itself first -- not guaranteed, and silently absent under most process
+        # supervisors/deploy platforms, which inject only the env vars you explicitly
+        # configure there. Confirmed live: this is exactly what caused
+        # `NoCredentialsError: Unable to locate credentials` earlier.
         # Path-style addressing + explicit SigV4: S3-compatible gateways that
         # aren't AWS itself (e.g. Supabase Storage) reject presigned URLs
         # generated with boto3's virtual-hosted-style default -- the request
@@ -64,6 +81,9 @@ class S3BlobStore:
         self.client = boto3.client(
             "s3",
             endpoint_url=endpoint_url,
+            aws_access_key_id=aws_access_key_id or None,
+            aws_secret_access_key=aws_secret_access_key or None,
+            region_name=region_name,
             config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
         )
 
@@ -102,5 +122,11 @@ class S3BlobStore:
 
 def blob_store_from_settings(settings: Settings) -> BlobStore:
     if settings.blob_backend == "s3":
-        return S3BlobStore(settings.s3_bucket, settings.s3_endpoint_url)
+        return S3BlobStore(
+            settings.s3_bucket,
+            settings.s3_endpoint_url,
+            aws_access_key_id=settings.aws_access_key_id,
+            aws_secret_access_key=settings.aws_secret_access_key,
+            region_name=settings.aws_default_region,
+        )
     return LocalBlobStore(settings.blob_root, settings.public_base_url)

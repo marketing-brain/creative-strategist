@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     blob_root: str = "./var/blobs"
     s3_bucket: str = "cs-blobs"
     s3_endpoint_url: str | None = None
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    aws_default_region: str = "us-east-1"
 
     auth_mode: Literal["dev", "clerk"] = "clerk"
     clerk_jwks_url: str = ""
