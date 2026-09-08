@@ -49,9 +49,16 @@ def _pid(value: object) -> str | None:
     return None if value is None else str(value)
 
 
-def _format_and_urls(row: asyncpg.Record) -> tuple[str, str | None, list[str] | None]:
+def _format_and_urls(
+    row: asyncpg.Record, videos_by_id: dict[str, str]
+) -> tuple[str, str | None, list[str] | None]:
     if row["video_id"]:
-        return "video", None, None
+        # ad_video_history.source is the actual downloadable MP4 -- confirmed against a
+        # real connector. Some videos land with no source yet (still processing on
+        # Meta's side, or the row hasn't synced): videos_by_id.get returns None then,
+        # same as any other creative whose asset isn't downloadable yet -- the existing
+        # asset_url-gated enqueue below already skips cleanly in that case.
+        return "video", videos_by_id.get(_pid(row["video_id"])), None
     child_urls = _carousel_urls(row["object_story_link_data_child_attachments"])
     if child_urls:
         return "carousel", None, child_urls
@@ -91,6 +98,16 @@ async def _sync_ads_and_creatives(
         ) t WHERE rn = 1
     """)
 
+    video_rows = await db.fetch(f"""
+        SELECT * FROM (
+          SELECT *, row_number() OVER (PARTITION BY id ORDER BY _fivetran_synced DESC) rn
+          FROM {_q(schema, "ad_video_history")}
+        ) t WHERE rn = 1
+    """)
+    videos_by_id: dict[str, str] = {
+        pid: r["source"] for r in video_rows if r["source"] and (pid := _pid(r["id"]))
+    }
+
     new_creatives = 0
     synced_ads = 0
     failed = 0
@@ -102,7 +119,7 @@ async def _sync_ads_and_creatives(
             cr = creatives_by_platform_id.get(_pid(ad_row["creative_id"]))
             if cr is None:
                 continue  # ad references a creative Fivetran hasn't landed yet
-            fmt, asset_url, child_urls = _format_and_urls(cr)
+            fmt, asset_url, child_urls = _format_and_urls(cr, videos_by_id)
             platform_creative = PlatformCreative(
                 platform_creative_id=_pid(cr["id"]),
                 format=fmt,
@@ -150,11 +167,6 @@ async def _sync_ads_and_creatives(
                     {"creative_id": str(creative_id), "asset_url": asset_url, "kind": kind},
                     dedup_key=str(creative_id),
                 )
-            elif fmt == "video" and cr.get("video_id") is not None:
-                # video_id alone doesn't give us a downloadable URL from these tables --
-                # ad_video_history carries the source URL. Left for the insights/video
-                # follow-up task rather than blocking entity sync on it.
-                pass
         except Exception:
             # One malformed row (bad JSON, unexpected null, etc.) must not abort the
             # whole org's sync -- log it and keep going, same fault isolation the old

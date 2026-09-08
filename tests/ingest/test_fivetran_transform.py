@@ -1,5 +1,9 @@
 from cs.ingest import fivetran_transform, repo
-from cs.ingest.fivetran_fixtures import create_fixture_schema, insert_campaign_ad_creative
+from cs.ingest.fivetran_fixtures import (
+    create_fixture_schema,
+    insert_campaign_ad_creative,
+    insert_video,
+)
 from cs.jobs.registry import JobContext
 
 SCHEMA = "testorg__meta_ads"
@@ -246,6 +250,10 @@ async def test_bigint_platform_ids_are_stringified(db, blobs, settings, org_id):
         f"_fivetran_synced TIMESTAMPTZ)"
     )
     await db.execute(
+        f'CREATE TABLE "{schema}".ad_video_history (id TEXT, source TEXT, '
+        f"_fivetran_synced TIMESTAMPTZ)"
+    )
+    await db.execute(
         f'INSERT INTO "{schema}".campaign_history '
         "VALUES (5001, 266634581427459, 'Campaign', now())"
     )
@@ -278,6 +286,79 @@ async def test_bigint_platform_ids_are_stringified(db, blobs, settings, org_id):
     assert ad["platform_ad_id"] == "9001"
     creative = await db.fetchrow("SELECT * FROM creative WHERE org_id=$1", org_id)
     assert creative["platform_creative_id"] == "3001"
+
+
+async def test_video_creative_downloads_from_ad_video_history_source(db, blobs, settings, org_id):
+    """Regression test: video creatives used to get a creative row with format='video'
+    and nothing else -- no asset ever downloaded, since creative_history alone has no
+    playable URL. ad_video_history.source (confirmed against a real connector) is the
+    actual downloadable MP4; this must get enqueued as a normal meta.download_creative
+    job the same way an image asset_url would."""
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="ad1",
+        creative_id="cr1",
+        name="name",
+        headline="Headline",
+        image_url="https://img/orig.jpg",
+        video_id="vid1",
+    )
+    await insert_video(db, SCHEMA, video_id="vid1", source="https://cdn.example/video.mp4")
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    acct = (await repo.list_ad_accounts(db, org_id))[0]
+    await repo.set_ad_account_status(db, org_id, acct["id"], "active")
+    summary = await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+
+    assert summary["failed"] == 0
+    creative = await db.fetchrow("SELECT * FROM creative WHERE org_id=$1", org_id)
+    assert creative["format"] == "video"
+    job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.download_creative'")
+    assert job is not None
+    assert job["payload"]["asset_url"] == "https://cdn.example/video.mp4"
+    assert job["payload"]["kind"] == "original_video"
+
+
+async def test_video_with_no_landed_source_yet_is_skipped_not_failed(db, blobs, settings, org_id):
+    """A video whose ad_video_history row hasn't synced yet (or has no source -- still
+    processing on Meta's side) must not fail the sync or enqueue a broken download --
+    same graceful skip an image creative with no image_url gets."""
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="ad1",
+        creative_id="cr1",
+        name="name",
+        headline="Headline",
+        image_url="https://img/orig.jpg",
+        video_id="vid_missing",
+    )
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    acct = (await repo.list_ad_accounts(db, org_id))[0]
+    await repo.set_ad_account_status(db, org_id, acct["id"], "active")
+    summary = await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+
+    assert summary["failed"] == 0
+    creative = await db.fetchrow("SELECT * FROM creative WHERE org_id=$1", org_id)
+    assert creative["format"] == "video"
+    n = await db.fetchval("SELECT count(*) FROM job WHERE job_type='meta.download_creative'")
+    assert n == 0
 
 
 def test_carousel_urls_returns_none_for_malformed_shapes():

@@ -36,6 +36,11 @@ async def create_fixture_schema(db: Database, schema: str) -> None:
           object_story_link_data_child_attachments TEXT, _fivetran_synced TIMESTAMPTZ
         )
     """)
+    await db.execute(f"""
+        CREATE TABLE "{schema}".ad_video_history (
+          id TEXT, source TEXT, picture TEXT, _fivetran_synced TIMESTAMPTZ
+        )
+    """)
     await db.execute(
         f'CREATE TABLE "{schema}".ad_insights (ad_id TEXT, date DATE, '
         f"publisher_platform TEXT, platform_position TEXT, spend NUMERIC, "
@@ -67,6 +72,7 @@ async def insert_campaign_ad_creative(
     name: str,
     headline: str,
     image_url: str,
+    video_id: str | None = None,
 ) -> None:
     await db.execute(
         f'INSERT INTO "{schema}".campaign_history VALUES ($1, $2, $3, now())',
@@ -86,7 +92,7 @@ async def insert_campaign_ad_creative(
     )
     await db.execute(
         f'INSERT INTO "{schema}".creative_history VALUES '
-        f"($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, NULL, now())",
+        f"($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, now())",
         creative_id,
         account_id,
         name,
@@ -96,6 +102,15 @@ async def insert_campaign_ad_creative(
         image_url,
         None,
         "https://example.com",
+        video_id,
+    )
+
+
+async def insert_video(db: Database, schema: str, *, video_id: str, source: str | None) -> None:
+    await db.execute(
+        f'INSERT INTO "{schema}".ad_video_history VALUES ($1, $2, NULL, now())',
+        video_id,
+        source,
     )
 
 

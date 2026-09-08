@@ -47,11 +47,10 @@ the brief all work offline.
   app serves assets through its own `/blobs/...` route, which re-issues the
   request server-side with auth attached; never point an `<img src>` straight at
   the API's blob URL. In S3 mode the API returns presigned URLs instead.
-- Video ad creatives are currently ingested as metadata only: a `creative` row is created,
-  but no asset (thumbnail/video) is downloaded and the creative is not tagged, so it won't
-  appear correctly in the creative library. The current landed-table set doesn't include
-  `ad_video_history` (the table that would carry a downloadable source URL), and its real
-  column shape hasn't been verified against a live Fivetran connector.
+- Video ad creatives download their actual video file from `ad_video_history.source`
+  (verified against a live connector) and get tagged normally. A video whose row hasn't
+  landed yet, or whose `source` is empty (Meta still processing it), is skipped gracefully
+  and picked up on a later sync -- it never fails the whole sync.
 - Orgs that connected Meta before this Fivetran migration must reconnect: the migration
   adds `ad_account.meta_connection_id` without a backfill, so every pre-existing
   `ad_account` row starts with `meta_connection_id = NULL`. The old connection is not
