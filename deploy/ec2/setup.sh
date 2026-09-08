@@ -40,7 +40,11 @@ if ! id -u cs >/dev/null 2>&1; then
 fi
 
 sudo dnf update -y
-sudo dnf install -y git curl ca-certificates gcc gcc-c++ make tar xz
+# curl deliberately omitted: AL2023 ships curl-minimal preinstalled, which
+# conflicts with the full curl package (both provide the same files) and
+# makes dnf refuse the whole install. curl-minimal already covers everything
+# this script uses (curl -fsSL / -o against plain HTTPS URLs).
+sudo dnf install -y git ca-certificates gcc gcc-c++ make tar xz
 
 if ! command -v node >/dev/null 2>&1; then
   curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo -E bash -
