@@ -16,6 +16,7 @@ export function CreativeFilters({ accounts }: { accounts: { id: string; name: st
     const q = new URLSearchParams(params.toString());
     if (value) q.set(key, value);
     else q.delete(key);
+    q.delete('page');
     const s = q.toString();
     router.push(`/creatives${s ? `?${s}` : ''}`);
   };

@@ -10,7 +10,7 @@ export const metadata = { title: 'Generate' };
 export default async function Generate({ searchParams }: { searchParams: Promise<{ insight?: string; created?: string }> }) {
   await requireAuth();
   const sp = await searchParams;
-  const [insights, generations, me] = await Promise.all([api.insights('pattern'), api.generations(), api.me()]);
+  const [{ items: insights }, generations, me] = await Promise.all([api.insights('pattern'), api.generations(), api.me()]);
   const options = insights.map((i) => ({ id: i.id, label: `${i.dimension} = ${i.value} (${i.lift >= 0 ? '+' : ''}${Math.round(i.lift * 100)}% ${i.metric.toUpperCase()})` }));
   const isAdmin = me.role === 'admin';
   return (

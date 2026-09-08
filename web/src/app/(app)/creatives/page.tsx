@@ -1,18 +1,44 @@
+import { redirect } from 'next/navigation';
 import { ImageOff } from 'lucide-react';
 import { CreativeCard } from '@/components/creative-card';
 import { CreativeFilters } from '@/components/creative-filters';
+import { Pagination } from '@/components/pagination';
 import { api } from '@/lib/api';
 import { requireAuth } from '@/lib/require-auth.server';
 
 export const metadata = { title: 'Creatives' };
 
+const PAGE_SIZE = 50;
+
 export default async function Creatives({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   await requireAuth();
   const sp = await searchParams;
-  const q = new URLSearchParams();
-  if (sp.account_id) q.set('account_id', sp.account_id);
-  if (sp.format) q.set('format', sp.format);
-  const [creatives, accounts] = await Promise.all([api.creatives(q.toString() ? `?${q}` : ''), api.accounts()]);
+  const page = Math.max(1, Number(sp.page) || 1);
+
+  const makeQuery = (p: number) => {
+    const q = new URLSearchParams();
+    if (sp.account_id) q.set('account_id', sp.account_id);
+    if (sp.format) q.set('format', sp.format);
+    q.set('limit', String(PAGE_SIZE));
+    q.set('offset', String((p - 1) * PAGE_SIZE));
+    return q;
+  };
+  const makeHref = (p: number) => {
+    const q = new URLSearchParams();
+    if (sp.account_id) q.set('account_id', sp.account_id);
+    if (sp.format) q.set('format', sp.format);
+    if (p > 1) q.set('page', String(p));
+    const s = q.toString();
+    return `/creatives${s ? `?${s}` : ''}`;
+  };
+
+  const [{ items: creatives, total }, accounts] = await Promise.all([
+    api.creatives(`?${makeQuery(page)}`),
+    api.accounts(),
+  ]);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (page > totalPages) redirect(makeHref(totalPages));
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -30,11 +56,14 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-          {creatives.map((c) => (
-            <CreativeCard key={c.id} creative={c} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            {creatives.map((c) => (
+              <CreativeCard key={c.id} creative={c} />
+            ))}
+          </div>
+          <Pagination page={page} totalPages={totalPages} makeHref={makeHref} />
+        </>
       )}
     </div>
   );

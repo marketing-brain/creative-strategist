@@ -1,4 +1,6 @@
+import { redirect } from 'next/navigation';
 import { ClipboardCheck } from 'lucide-react';
+import { Pagination } from '@/components/pagination';
 import { ReviewCard } from '@/components/review-card';
 import { cn } from 'cn';
 import { api } from '@/lib/api';
@@ -7,11 +9,18 @@ import { requireAuth } from '@/lib/require-auth.server';
 export const metadata = { title: 'Review' };
 
 const states = ['draft', 'approved', 'rejected'] as const;
+const PAGE_SIZE = 50;
 
-export default async function Review({ searchParams }: { searchParams: Promise<{ state?: string }> }) {
+export default async function Review({ searchParams }: { searchParams: Promise<{ state?: string; page?: string }> }) {
   await requireAuth();
-  const { state = 'draft' } = await searchParams;
-  const assets = await api.reviewQueue(state);
+  const { state = 'draft', page: pageParam } = await searchParams;
+  const page = Math.max(1, Number(pageParam) || 1);
+  const makeHref = (p: number) => `/review?state=${state}${p > 1 ? `&page=${p}` : ''}`;
+
+  const { items: assets, total } = await api.reviewQueue(state, (page - 1) * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (page > totalPages) redirect(makeHref(totalPages));
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -41,11 +50,14 @@ export default async function Review({ searchParams }: { searchParams: Promise<{
           <p className="max-w-sm text-sm text-muted-foreground">Nothing in the {state} queue right now.</p>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
-          {assets.map((a) => (
-            <ReviewCard key={a.id} asset={a} />
-          ))}
-        </div>
+        <>
+          <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
+            {assets.map((a) => (
+              <ReviewCard key={a.id} asset={a} />
+            ))}
+          </div>
+          <Pagination page={page} totalPages={totalPages} makeHref={makeHref} />
+        </>
       )}
     </div>
   );

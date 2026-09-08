@@ -29,14 +29,17 @@ export const api = {
   brandKit: () => apiFetch<import('./types').BrandKit>('/brand-kit'),
   saveBrandKit: (b: Omit<import('./types').BrandKit, 'id' | 'version' | 'logo_url'>) =>
     apiFetch<import('./types').BrandKit>('/brand-kit', { method: 'POST', body: JSON.stringify(b) }),
-  creatives: (q: string) => apiFetch<import('./types').Creative[]>(`/creatives${q}`),
+  creatives: (q: string) =>
+    apiFetch<import('./types').Paginated<import('./types').Creative>>(`/creatives${q}`),
   creative: (id: string) => apiFetch<import('./types').Creative>(`/creatives/${id}`),
   creativeMetrics: (id: string, since: string, until: string) =>
     apiFetch<import('./types').MetricDay[]>(`/creatives/${id}/metrics?since=${since}&until=${until}`),
   creativeTags: (id: string) => apiFetch<import('./types').Tag[]>(`/creatives/${id}/tags`),
   dimensions: () => apiFetch<import('./types').Dimension[]>('/tags/dimensions'),
-  insights: (kind: string) => apiFetch<import('./types').Insight[]>(`/insights?kind=${kind}`),
-  fatigue: () => apiFetch<import('./types').Insight[]>('/fatigue'),
+  insights: (kind: string, offset = 0) =>
+    apiFetch<import('./types').Paginated<import('./types').Insight>>(`/insights?kind=${kind}&offset=${offset}`),
+  fatigue: (offset = 0) =>
+    apiFetch<import('./types').Paginated<import('./types').Insight>>(`/fatigue?offset=${offset}`),
   briefs: () => apiFetch<import('./types').Brief[]>('/briefs'),
   conversations: () => apiFetch<import('./types').Conversation[]>('/copilot/conversations'),
   newConversation: (title: string) => apiFetch<{ id: string }>('/copilot/conversations', { method: 'POST', body: JSON.stringify({ title }) }),
@@ -45,7 +48,8 @@ export const api = {
   generations: () => apiFetch<import('./types').Generation[]>('/generations'),
   generation: (id: string) => apiFetch<import('./types').Generation>(`/generations/${id}`),
   createGeneration: (b: object) => apiFetch<{ id: string }>('/generations', { method: 'POST', body: JSON.stringify(b) }),
-  reviewQueue: (state: string) => apiFetch<import('./types').GeneratedAsset[]>(`/review-queue?state=${state}`),
+  reviewQueue: (state: string, offset = 0) =>
+    apiFetch<import('./types').Paginated<import('./types').GeneratedAsset>>(`/review-queue?state=${state}&offset=${offset}`),
   approve: (id: string) => apiFetch<{ ok: boolean }>(`/generated-assets/${id}/approve`, { method: 'POST' }),
   reject: (id: string) => apiFetch<{ ok: boolean }>(`/generated-assets/${id}/reject`, { method: 'POST' }),
 };

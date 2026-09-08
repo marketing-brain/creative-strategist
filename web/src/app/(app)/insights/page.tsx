@@ -1,13 +1,24 @@
+import { redirect } from 'next/navigation';
 import { Sparkles } from 'lucide-react';
 import { InsightCard } from '@/components/insight-card';
+import { Pagination } from '@/components/pagination';
 import { api } from '@/lib/api';
 import { requireAuth } from '@/lib/require-auth.server';
 
 export const metadata = { title: 'Insights' };
 
-export default async function Insights() {
+const PAGE_SIZE = 50;
+
+export default async function Insights({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   await requireAuth();
-  const insights = await api.insights('pattern');
+  const sp = await searchParams;
+  const page = Math.max(1, Number(sp.page) || 1);
+  const makeHref = (p: number) => (p > 1 ? `/insights?page=${p}` : '/insights');
+
+  const { items: insights, total } = await api.insights('pattern', (page - 1) * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (page > totalPages) redirect(makeHref(totalPages));
+
   return (
     <div className="space-y-6">
       <div>
@@ -22,11 +33,14 @@ export default async function Insights() {
           </p>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          {insights.map((i) => (
-            <InsightCard key={i.id} insight={i} />
-          ))}
-        </div>
+        <>
+          <div className="grid gap-4 md:grid-cols-2">
+            {insights.map((i) => (
+              <InsightCard key={i.id} insight={i} />
+            ))}
+          </div>
+          <Pagination page={page} totalPages={totalPages} makeHref={makeHref} />
+        </>
       )}
     </div>
   );
