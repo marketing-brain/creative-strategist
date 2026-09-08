@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -42,21 +43,37 @@ def _derived(r) -> dict:
 async def list_creatives(
     account_id: UUID | None = None,
     format: str | None = None,
+    dimension: str | None = None,
+    value: str | None = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     auth: AuthContext = Depends(current_auth),
     db: Database = Depends(get_db),
     blobs: BlobStore = Depends(get_blobs),
 ) -> dict:
-    rows = await repo.list_creatives(db, auth.org_id, account_id, format, limit, offset)
+    if bool(dimension) != bool(value):
+        raise HTTPException(422, "dimension and value must be provided together")
+    rows = await repo.list_creatives(
+        db, auth.org_id, account_id, format, limit, offset, dimension, value
+    )
     out = []
     for r in rows:
         d = {**dict(r), "id": str(r["id"]), "ad_account_id": str(r["ad_account_id"])}
         d["primary_asset_url"] = (
             await blobs.url_for(r["primary_asset_path"]) if r["primary_asset_path"] else None
         )
+        d["ctr_30d"] = derived_metrics(
+            r["spend_30d"],
+            int(r["impressions_30d"] or 0),
+            int(r["clicks_30d"] or 0),
+            r["conversions_30d"] or Decimal(0),
+            r["conversion_value_30d"] or Decimal(0),
+        )["ctr"]
+        d["spend_30d"] = float(r["spend_30d"])
+        for k in ("impressions_30d", "clicks_30d", "conversions_30d", "conversion_value_30d"):
+            d.pop(k, None)
         out.append(d)
-    total = await repo.count_creatives(db, auth.org_id, account_id, format)
+    total = await repo.count_creatives(db, auth.org_id, account_id, format, dimension, value)
     return {"items": out, "total": total}
 
 

@@ -1,9 +1,11 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from uuid import UUID
 
 from cs.connectors.base import MetricRow, PlatformAd, PlatformCreative
 from cs.ingest import repo
+from cs.tagging import repo as tagging_repo
+from cs.tagging.taxonomy import load_taxonomy
 from tests.conftest import dev_headers
 
 H = dev_headers(org="org_api")
@@ -132,6 +134,128 @@ async def test_creatives_pagination(client, db, settings):
     page1_ids = {i["id"] for i in page1["items"]}
     page2_ids = {i["id"] for i in page2["items"]}
     assert not page1_ids & page2_ids
+
+
+async def test_creatives_filter_by_tag(client, db, settings):
+    org_id, acct, cid, _ = await _seed(db, settings, client)
+    other_cid, _ = await repo.upsert_creative(
+        db,
+        org_id,
+        acct,
+        PlatformCreative("c2", "image", "H2", "P2", None, "SHOP_NOW", "https://x", None, None, {}),
+        "raw",
+    )
+    tv = await tagging_repo.ensure_taxonomy_version(db, load_taxonomy())
+    rid = await tagging_repo.start_tag_run(db, org_id, cid, tv, "fake")
+    await tagging_repo.finish_tag_run(
+        db,
+        org_id,
+        rid,
+        [{"dimension": "hook_type", "value": "question", "confidence": 0.9, "evidence": "e"}],
+        "s",
+        1,
+        1,
+    )
+    other_rid = await tagging_repo.start_tag_run(db, org_id, other_cid, tv, "fake")
+    await tagging_repo.finish_tag_run(
+        db,
+        org_id,
+        other_rid,
+        [{"dimension": "hook_type", "value": "statistic", "confidence": 0.9, "evidence": "e"}],
+        "s",
+        1,
+        1,
+    )
+
+    r = await client.get("/creatives?dimension=hook_type&value=question", headers=H)
+    body = r.json()
+    assert r.status_code == 200 and body["total"] == 1
+    assert body["items"][0]["id"] == str(cid)
+
+
+async def test_creatives_tag_filter_requires_both_params(client, db, settings):
+    await _seed(db, settings, client)
+    assert (await client.get("/creatives?dimension=hook_type", headers=H)).status_code == 422
+    assert (await client.get("/creatives?value=question", headers=H)).status_code == 422
+
+
+async def test_creatives_spend_30d_excludes_older_metrics(client, db, settings):
+    org_id, acct, _, _ = await _seed(db, settings, client)
+    recent_cid, _ = await repo.upsert_creative(
+        db,
+        org_id,
+        acct,
+        PlatformCreative(
+            "c_recent", "image", "H", "P", None, "SHOP_NOW", "https://x", None, None, {}
+        ),
+        "raw",
+    )
+    await repo.upsert_ad(
+        db, org_id, acct, PlatformAd("ad_recent", "A", "ACTIVE", None, None, "c_recent"), recent_cid
+    )
+    today = date.today()
+    await repo.upsert_metrics(
+        db,
+        org_id,
+        acct,
+        [
+            MetricRow(
+                "ad_recent",
+                today - timedelta(days=5),
+                "facebook:feed",
+                Decimal("50"),
+                500,
+                10,
+                10,
+                Decimal("0"),
+                Decimal("0"),
+                0,
+                0,
+                0,
+                0,
+                {},
+            ),
+            MetricRow(
+                "ad_recent",
+                today - timedelta(days=40),
+                "facebook:feed",
+                Decimal("999"),
+                999,
+                999,
+                999,
+                Decimal("0"),
+                Decimal("0"),
+                0,
+                0,
+                0,
+                0,
+                {},
+            ),
+        ],
+    )
+
+    body = (await client.get("/creatives?limit=200", headers=H)).json()
+    recent = next(i for i in body["items"] if i["id"] == str(recent_cid))
+    assert recent["spend_30d"] == 50.0
+    assert recent["ctr_30d"] == 0.02
+
+
+async def test_creatives_spend_30d_defaults_to_zero_with_no_metrics(client, db, settings):
+    org_id, acct, _, _ = await _seed(db, settings, client)
+    zero_cid, _ = await repo.upsert_creative(
+        db,
+        org_id,
+        acct,
+        PlatformCreative(
+            "c_zero", "image", "H", "P", None, "SHOP_NOW", "https://x", None, None, {}
+        ),
+        "raw",
+    )
+
+    body = (await client.get("/creatives?limit=200", headers=H)).json()
+    zero = next(i for i in body["items"] if i["id"] == str(zero_cid))
+    assert zero["spend_30d"] == 0.0
+    assert zero["ctr_30d"] is None
 
 
 async def test_creative_metrics_counts_are_integers(client, db, settings):
