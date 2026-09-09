@@ -36,11 +36,8 @@ class Settings(BaseSettings):
     ai_gateway_base_url: str = "https://ai-gateway.vercel.sh"
     tagging_model: str = "google/gemini-2.5-flash-lite"
     insights_model: str = "google/gemini-2.5-flash-lite"
-    copilot_model: str = "google/gemini-2.5-flash"
-    # google/gemini-3-flash is the better fit for this (highest-stakes text output in
-    # the app) but 403s on Vercel AI Gateway's free tier ("no_providers_available" /
-    # RestrictedModelsError) -- switch to it once the account has paid AI Gateway credits.
-    copy_model: str = "google/gemini-2.5-flash-lite"
+    copilot_model: str = "google/gemini-3-flash"
+    copy_model: str = "google/gemini-3-flash"
     image_model: str = "bfl/flux-2-pro"
     video_model: str = "klingai/kling-v3.0-i2v"
     transcription_model: str = "openai/whisper-1"
