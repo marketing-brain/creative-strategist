@@ -147,10 +147,13 @@ extractions). Every file below needs its import lines updated; no other line cha
 `tests/e2e/test_loop.py`, `scripts/seed_dev_fivetran.py`
 
 `fivetran_transform.py` -> `fivetran/transform.py`:
-`src/cs/connectors/fivetran/connect.py`, `src/cs/ingest/jobs.py`,
-`tests/ingest/test_fivetran_transform.py`, `tests/e2e/test_loop.py`, `scripts/seed_dev_fivetran.py`
-(note: `fivetran_fixtures.py`'s docstring *mentions* `fivetran_transform.py`/`fivetran_insights.py`
-by name but does not import either -- verified against its actual import lines, not just grep noise)
+`src/cs/ingest/jobs.py`, `tests/ingest/test_fivetran_transform.py`, `tests/e2e/test_loop.py`,
+`scripts/seed_dev_fivetran.py`
+(note: `src/cs/connectors/fivetran/connect.py`'s docstring *mentions* `fivetran_transform.py` by
+name -- "the transform (fivetran_transform.py) imports this rather than re-deriving it" -- but
+does not import it; `fivetran_fixtures.py`'s docstring similarly mentions `fivetran_transform.py`/
+`fivetran_insights.py` without importing either. Both are optional docstring-accuracy touch-ups,
+not required import fixes -- verified against actual import lines, not grep noise)
 
 `fivetran_insights.py` -> `fivetran/insights.py`:
 `src/cs/ingest/jobs.py`,
