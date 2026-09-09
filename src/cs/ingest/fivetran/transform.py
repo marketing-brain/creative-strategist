@@ -8,8 +8,7 @@ from uuid import UUID
 import asyncpg
 
 from cs.connectors.base import PlatformAd, PlatformCreative
-from cs.core import queue
-from cs.core import repo
+from cs.core import queue, repo
 from cs.ingest.fivetran.schema import (
     AD_HISTORY,
     AD_VIDEO_HISTORY,

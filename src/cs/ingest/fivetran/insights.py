@@ -108,7 +108,9 @@ async def sync_insights(
                 impressions=int(r["impressions"] or 0),
                 clicks=int(r["clicks"] or 0),
                 link_clicks=int(r["inline_link_clicks"] or 0),
-                conversions=_first_matching(breakdowns["actions"].get(key), CONVERSION_ACTION_TYPES),
+                conversions=_first_matching(
+                    breakdowns["actions"].get(key), CONVERSION_ACTION_TYPES
+                ),
                 conversion_value=_first_matching(
                     breakdowns["action_values"].get(key), CONVERSION_ACTION_TYPES
                 ),

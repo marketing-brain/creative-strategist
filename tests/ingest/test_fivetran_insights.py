@@ -1,7 +1,7 @@
 from cs.connectors.base import PlatformAd, PlatformCreative
 from cs.core import repo
-from cs.ingest import fivetran_insights
-from cs.ingest.fivetran_fixtures import create_fixture_schema, insert_daily_insight
+from cs.ingest.fivetran import insights as fivetran_insights
+from cs.ingest.fivetran.fixtures import create_fixture_schema, insert_daily_insight
 from cs.jobs.registry import JobContext
 
 SCHEMA = "testorg__meta_ads"

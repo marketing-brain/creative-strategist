@@ -1,6 +1,6 @@
 from cs.core import repo
-from cs.ingest import fivetran_transform
-from cs.ingest.fivetran_fixtures import (
+from cs.ingest.fivetran import transform as fivetran_transform
+from cs.ingest.fivetran.fixtures import (
     create_fixture_schema,
     insert_campaign_ad_creative,
     insert_video,

@@ -16,8 +16,9 @@ from cs.core import queue
 from cs.core import repo as ingest_repo
 from cs.generation import jobs as gen_jobs
 from cs.generation.fakes import FakeCopyWriter, FakeImageGenerator, FakeVideoGenerator, solid_png
-from cs.ingest import fivetran_insights, fivetran_transform
-from cs.ingest.fivetran_fixtures import (
+from cs.ingest.fivetran import insights as fivetran_insights
+from cs.ingest.fivetran import transform as fivetran_transform
+from cs.ingest.fivetran.fixtures import (
     create_fixture_schema,
     insert_campaign_ad_creative,
     insert_daily_insight,

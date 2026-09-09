@@ -10,7 +10,8 @@ from cs.connectors.fivetran import client as fivetran_client
 from cs.core import queue, repo
 from cs.core.config import Settings
 from cs.core.db import Database
-from cs.ingest import assets, fivetran_insights, fivetran_transform
+from cs.ingest import assets
+from cs.ingest.fivetran import insights, transform
 from cs.jobs.registry import JobContext, handler
 from cs.jobs.scheduler import register_schedule
 
@@ -67,7 +68,7 @@ async def sync_from_fivetran(ctx: JobContext) -> None:
     if conn is None or conn["id"] != conn_id:
         return
     try:
-        entities = await fivetran_transform.discover_and_sync_entities(ctx, ctx.job.org_id, conn)
+        entities = await transform.discover_and_sync_entities(ctx, ctx.job.org_id, conn)
     except Exception as exc:
         await repo.set_meta_connection_status(ctx.db, conn_id, "error", last_error=str(exc)[:500])
         raise
@@ -76,7 +77,7 @@ async def sync_from_fivetran(ctx: JobContext) -> None:
     # configured in Fivetran yet, which retrying does nothing to fix. Ads/creatives are
     # still fully usable without metrics, so the connection stays "ready" either way.
     try:
-        metrics = await fivetran_insights.sync_insights(ctx, ctx.job.org_id, conn)
+        metrics = await insights.sync_insights(ctx, ctx.job.org_id, conn)
     except Exception as exc:
         metrics = {}
         log.warning(
