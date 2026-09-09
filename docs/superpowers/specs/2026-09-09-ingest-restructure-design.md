@@ -71,9 +71,11 @@ src/cs/ingest/
     schema.py           # was fivetran_schema.py, unchanged content
     transform.py         # was fivetran_transform.py, + _latest_rows() helper
     insights.py           # was fivetran_insights.py, + breakdown-table loop
-    fixtures.py           # was fivetran_fixtures.py, unchanged content (updates its own
-                          # import of schema.py to the new path; does not import
-                          # transform.py/insights.py despite its docstring naming both)
+    fixtures.py           # was fivetran_fixtures.py -- its own table-name string literals
+                          # are swapped for schema.py's constants (matching Task 4's brief),
+                          # so "unchanged content" above means unchanged DDL/behavior, not a
+                          # byte-identical file; does not import transform.py/insights.py
+                          # despite its docstring naming both
 ```
 
 Note `partitions.py`'s move means `tests/ingest/test_partitions.py` moves too, to

@@ -20,7 +20,7 @@ class ConnectError(RuntimeError):
 def schema_for(org_id: UUID) -> str:
     """org_{org_slug}__meta_ads -- the Postgres schema Fivetran lands this org's data into.
 
-    Exactly one implementation in the whole app: the transform (fivetran_transform.py)
+    Exactly one implementation in the whole app: the transform (fivetran/transform.py)
     imports this rather than re-deriving it, since drift here silently reads the wrong
     (or no) schema. The "org_" prefix is required, not cosmetic: Fivetran rejects a
     connector schema that begins with a digit, and org_id is a UUID -- roughly 5/8 of
