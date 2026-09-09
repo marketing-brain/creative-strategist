@@ -9,12 +9,6 @@ import asyncpg
 
 from cs.connectors.base import PlatformAd, PlatformCreative
 from cs.core import queue, repo
-from cs.ingest.fivetran_schema import (
-    AD_HISTORY,
-    AD_VIDEO_HISTORY,
-    CAMPAIGN_HISTORY,
-    CREATIVE_HISTORY,
-)
 from cs.jobs.registry import JobContext
 
 log = logging.getLogger("cs.ingest")
@@ -74,7 +68,7 @@ async def _discover_accounts(db, org_id: UUID, connection_id: UUID, schema: str)
     """Every distinct account_id seen in campaign_history becomes (or already is) an
     ad_account row, starting 'paused' until a human activates it -- same default the old
     OAuth callback used."""
-    rows = await db.fetch(f"SELECT DISTINCT account_id FROM {_q(schema, CAMPAIGN_HISTORY)}")
+    rows = await db.fetch(f"SELECT DISTINCT account_id FROM {_q(schema, 'campaign_history')}")
     by_platform_id: dict[str, UUID] = {}
     for r in rows:
         pid = _pid(r["account_id"])
@@ -91,7 +85,7 @@ async def _sync_ads_and_creatives(
     creative_rows = await db.fetch(f"""
         SELECT * FROM (
           SELECT *, row_number() OVER (PARTITION BY id ORDER BY _fivetran_synced DESC) rn
-          FROM {_q(schema, CREATIVE_HISTORY)}
+          FROM {_q(schema, "creative_history")}
         ) t WHERE rn = 1
     """)
     creatives_by_platform_id: dict[str, asyncpg.Record] = {_pid(r["id"]): r for r in creative_rows}
@@ -99,14 +93,14 @@ async def _sync_ads_and_creatives(
     ad_rows = await db.fetch(f"""
         SELECT * FROM (
           SELECT *, row_number() OVER (PARTITION BY id ORDER BY _fivetran_synced DESC) rn
-          FROM {_q(schema, AD_HISTORY)}
+          FROM {_q(schema, "ad_history")}
         ) t WHERE rn = 1
     """)
 
     video_rows = await db.fetch(f"""
         SELECT * FROM (
           SELECT *, row_number() OVER (PARTITION BY id ORDER BY _fivetran_synced DESC) rn
-          FROM {_q(schema, AD_VIDEO_HISTORY)}
+          FROM {_q(schema, "ad_video_history")}
         ) t WHERE rn = 1
     """)
     videos_by_id: dict[str, str] = {
