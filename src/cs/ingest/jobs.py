@@ -10,7 +10,7 @@ from cs.connectors.fivetran import client as fivetran_client
 from cs.core import queue, repo
 from cs.core.config import Settings
 from cs.core.db import Database
-from cs.ingest import fivetran_insights, fivetran_transform, service
+from cs.ingest import assets, fivetran_insights, fivetran_transform
 from cs.jobs.registry import JobContext, handler
 from cs.jobs.scheduler import register_schedule
 
@@ -95,7 +95,7 @@ async def download_creative(ctx: JobContext) -> None:
     p = ctx.job.payload
     creative_id = UUID(p["creative_id"])
     async with httpx.AsyncClient(timeout=120) as http:
-        await service.download_creative(ctx, http, creative_id, p["asset_url"], p["kind"])
+        await assets.download_creative(ctx, http, creative_id, p["asset_url"], p["kind"])
     log.info("creative downloaded", extra={"creative_id": str(creative_id)})
 
 
@@ -104,7 +104,7 @@ async def download_carousel(ctx: JobContext) -> None:
     p = ctx.job.payload
     creative_id = UUID(p["creative_id"])
     async with httpx.AsyncClient(timeout=120) as http:
-        await service.download_carousel(ctx, http, creative_id, p["asset_urls"])
+        await assets.download_carousel(ctx, http, creative_id, p["asset_urls"])
     log.info(
         "carousel downloaded",
         extra={"creative_id": str(creative_id), "cards": len(p["asset_urls"])},

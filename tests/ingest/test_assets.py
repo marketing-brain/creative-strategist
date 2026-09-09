@@ -3,7 +3,7 @@ import respx
 
 from cs.connectors.base import PlatformCreative
 from cs.core import repo
-from cs.ingest import service
+from cs.ingest import assets
 from cs.jobs.registry import JobContext
 
 
@@ -27,7 +27,7 @@ async def test_download_creative_stores_asset_and_queues_tagging(db, blobs, sett
     cid = await _creative(db, org_id)
     ctx = JobContext(db=db, blobs=blobs, settings=settings, job=type("J", (), {"org_id": org_id})())
     async with httpx.AsyncClient() as http:
-        await service.download_creative(
+        await assets.download_creative(
             ctx, http, cid, "https://cdn.example/img.jpg", "original_image"
         )
     assert await repo.creative_has_primary_asset(db, org_id, cid)
@@ -45,7 +45,7 @@ async def test_download_carousel_stores_each_card_in_order(db, blobs, settings, 
     cid = await _creative(db, org_id)
     ctx = JobContext(db=db, blobs=blobs, settings=settings, job=type("J", (), {"org_id": org_id})())
     async with httpx.AsyncClient() as http:
-        await service.download_carousel(
+        await assets.download_carousel(
             ctx, http, cid, ["https://cdn.example/0.jpg", "https://cdn.example/1.jpg"]
         )
     cards = await repo.list_assets_by_kind(db, org_id, cid, "original_image")
