@@ -5,8 +5,8 @@ from PIL import Image
 
 from cs.connectors.base import PlatformCreative
 from cs.core import queue
+from cs.core import repo as ingest_repo
 from cs.core.ids import new_id
-from cs.ingest import repo as ingest_repo
 from cs.tagging.reconcile import reenqueue_untagged
 
 

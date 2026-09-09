@@ -2,7 +2,8 @@ import httpx
 import respx
 
 from cs.connectors.base import PlatformCreative
-from cs.ingest import repo, service
+from cs.core import repo
+from cs.ingest import service
 from cs.jobs.registry import JobContext
 
 

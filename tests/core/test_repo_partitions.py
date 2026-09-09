@@ -3,7 +3,7 @@ from datetime import date
 import asyncpg
 import pytest
 
-from cs.ingest.partitions import ensure_metric_partition
+from cs.core.repo.partitions import ensure_metric_partition
 
 
 async def test_ensure_partition_is_idempotent(db):

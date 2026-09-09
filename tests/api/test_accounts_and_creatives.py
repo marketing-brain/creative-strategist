@@ -3,7 +3,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from cs.connectors.base import MetricRow, PlatformAd, PlatformCreative
-from cs.ingest import repo
+from cs.core import repo
 from cs.tagging import repo as tagging_repo
 from cs.tagging.taxonomy import load_taxonomy
 from tests.conftest import dev_headers
@@ -63,7 +63,7 @@ async def _seed(db, settings, client):
 
 async def test_accounts_activate_enqueues_sync(client, db, settings):
     org_id, acct, _, _ = await _seed(db, settings, client)
-    from cs.ingest import repo as ingest_repo
+    from cs.core import repo as ingest_repo
 
     conn_id = await ingest_repo.upsert_meta_connection(db, org_id, "conn_1", "s")
     await db.execute("UPDATE ad_account SET meta_connection_id=$2 WHERE id=$1", acct, conn_id)

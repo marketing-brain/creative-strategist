@@ -7,10 +7,10 @@ from uuid import UUID
 
 import openai
 
+from cs.core import repo as ingest_repo
 from cs.core.config import Settings
 from cs.core.db import Database
 from cs.core.ids import new_id
-from cs.ingest import repo as ingest_repo
 from cs.insights import repo as insight_repo
 from cs.insights.patterns import metrics_from_sums
 from cs.tagging import repo as tag_repo

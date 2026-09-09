@@ -8,7 +8,16 @@ from uuid import UUID
 import asyncpg
 
 from cs.connectors.base import MetricRow
-from cs.ingest import repo
+from cs.core import repo
+from cs.ingest.fivetran_schema import (
+    AD_INSIGHTS,
+    AD_INSIGHTS_ACTION_VALUES,
+    AD_INSIGHTS_ACTIONS,
+    AD_INSIGHTS_VIDEO_P50_WATCHED_ACTIONS,
+    AD_INSIGHTS_VIDEO_P100_WATCHED_ACTIONS,
+    AD_INSIGHTS_VIDEO_PLAY_ACTIONS,
+    AD_INSIGHTS_VIDEO_THRUPLAY_WATCHED_ACTIONS,
+)
 from cs.jobs.registry import JobContext
 
 # Ported from the deleted cs.connectors.meta.parse.CONVERSION_ACTION_TYPES -- the business
@@ -69,14 +78,14 @@ async def sync_insights(
     schema = connection["schema_name"]
     db = ctx.db
 
-    actions = await _action_totals(db, schema, "ad_insights_actions")
-    action_values = await _action_totals(db, schema, "ad_insights_action_values")
-    video_3s = await _action_totals(db, schema, "ad_insights_video_play_actions")
-    video_thruplay = await _action_totals(db, schema, "ad_insights_video_thruplay_watched_actions")
-    video_p50 = await _action_totals(db, schema, "ad_insights_video_p50_watched_actions")
-    video_p100 = await _action_totals(db, schema, "ad_insights_video_p100_watched_actions")
+    actions = await _action_totals(db, schema, AD_INSIGHTS_ACTIONS)
+    action_values = await _action_totals(db, schema, AD_INSIGHTS_ACTION_VALUES)
+    video_3s = await _action_totals(db, schema, AD_INSIGHTS_VIDEO_PLAY_ACTIONS)
+    video_thruplay = await _action_totals(db, schema, AD_INSIGHTS_VIDEO_THRUPLAY_WATCHED_ACTIONS)
+    video_p50 = await _action_totals(db, schema, AD_INSIGHTS_VIDEO_P50_WATCHED_ACTIONS)
+    video_p100 = await _action_totals(db, schema, AD_INSIGHTS_VIDEO_P100_WATCHED_ACTIONS)
 
-    base_rows = await db.fetch(f"SELECT * FROM {_q(schema, 'ad_insights')}")
+    base_rows = await db.fetch(f"SELECT * FROM {_q(schema, AD_INSIGHTS)}")
     metric_rows: list[MetricRow] = []
     for r in base_rows:
         key = (_pid(r["ad_id"]), r["date"])

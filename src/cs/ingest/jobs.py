@@ -7,10 +7,10 @@ from uuid import UUID
 import httpx
 
 from cs.connectors.fivetran import client as fivetran_client
-from cs.core import queue
+from cs.core import queue, repo
 from cs.core.config import Settings
 from cs.core.db import Database
-from cs.ingest import fivetran_insights, fivetran_transform, repo, service
+from cs.ingest import fivetran_insights, fivetran_transform, service
 from cs.jobs.registry import JobContext, handler
 from cs.jobs.scheduler import register_schedule
 

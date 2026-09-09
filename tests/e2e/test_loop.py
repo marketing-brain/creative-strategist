@@ -13,10 +13,10 @@ import respx
 
 from cs.connectors.fivetran.connect import schema_for
 from cs.core import queue
+from cs.core import repo as ingest_repo
 from cs.generation import jobs as gen_jobs
 from cs.generation.fakes import FakeCopyWriter, FakeImageGenerator, FakeVideoGenerator, solid_png
 from cs.ingest import fivetran_insights, fivetran_transform
-from cs.ingest import repo as ingest_repo
 from cs.ingest.fivetran_fixtures import (
     create_fixture_schema,
     insert_campaign_ad_creative,

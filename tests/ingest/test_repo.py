@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 
 from cs.connectors.base import MetricRow, PlatformAd, PlatformCreative
-from cs.ingest import repo
+from cs.core import repo
 
 
 @pytest.fixture
@@ -112,7 +112,7 @@ async def test_upsert_metrics_chunks_large_batches(db, org_id, account_id, monke
     await repo.upsert_ad(
         db, org_id, account_id, PlatformAd("ad1", "A", "ACTIVE", "as", "cp", "c1"), cid
     )
-    monkeypatch.setattr(repo, "METRIC_CHUNK_SIZE", 10)
+    monkeypatch.setattr(repo.metrics, "METRIC_CHUNK_SIZE", 10)
     rows = [
         MetricRow(
             "ad1",

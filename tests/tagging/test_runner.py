@@ -8,8 +8,8 @@ from PIL import Image
 
 from cs.connectors.base import PlatformCreative
 from cs.core import queue
+from cs.core import repo as ingest_repo
 from cs.core.queue import Job
-from cs.ingest import repo as ingest_repo
 from cs.jobs.registry import JobContext
 from cs.tagging import jobs as tagging_jobs
 from cs.tagging import repo, runner

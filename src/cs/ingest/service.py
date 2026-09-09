@@ -4,9 +4,8 @@ from uuid import UUID
 
 import httpx
 
-from cs.core import queue
+from cs.core import queue, repo
 from cs.core.blobs import sha256_hex
-from cs.ingest import repo
 from cs.jobs.registry import JobContext
 
 _EXT_BY_MIME = {"image/png": "png", "image/jpeg": "jpg", "video/mp4": "mp4"}

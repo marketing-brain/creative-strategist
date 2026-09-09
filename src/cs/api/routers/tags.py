@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field
 from cs.api.auth import AuthContext, current_auth, require_admin
 from cs.api.deps import get_db
 from cs.core import queue
+from cs.core import repo as ingest_repo
 from cs.core.db import Database
-from cs.ingest import repo as ingest_repo
 from cs.tagging import repo
 from cs.tagging.taxonomy import load_taxonomy
 

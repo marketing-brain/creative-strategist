@@ -35,7 +35,7 @@ async def tag_creative(ctx: JobContext) -> None:
         )
 
 
-from cs.ingest import repo as ingest_repo  # noqa: E402
+from cs.core import repo as ingest_repo  # noqa: E402
 from cs.tagging import repo as tag_repo  # noqa: E402
 from cs.tagging.embed import Embedder, GatewayEmbedder, tag_text  # noqa: E402
 

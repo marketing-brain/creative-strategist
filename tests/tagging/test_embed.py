@@ -4,7 +4,7 @@ import respx
 
 from cs.connectors.base import PlatformCreative
 from cs.core import queue
-from cs.ingest import repo as ingest_repo
+from cs.core import repo as ingest_repo
 from cs.tagging import jobs as tagging_jobs
 from cs.tagging import repo
 from cs.tagging.embed import GatewayEmbedder, tag_text

@@ -3,7 +3,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from cs.connectors.base import MetricRow, PlatformAd, PlatformCreative
-from cs.ingest import repo as ingest_repo
+from cs.core import repo as ingest_repo
 from cs.tagging import repo as tag_repo
 from cs.tagging.taxonomy import load_taxonomy
 

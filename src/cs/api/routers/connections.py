@@ -5,10 +5,10 @@ from pydantic import BaseModel
 from cs.api.auth import AuthContext, require_admin
 from cs.api.deps import get_db, get_settings_dep
 from cs.connectors.fivetran import connect as fivetran_connect
+from cs.core import repo
 from cs.core.config import Settings
 from cs.core.db import Database
 from cs.core.queue import enqueue
-from cs.ingest import repo
 
 router = APIRouter(prefix="/connections/meta")
 

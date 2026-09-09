@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 from uuid import UUID
 
+from cs.core import repo as ingest_repo
 from cs.core.blobs import sha256_hex
-from cs.ingest import repo as ingest_repo
 from cs.jobs.registry import JobContext
 from cs.tagging import repo
 from cs.tagging.images import prepare_image

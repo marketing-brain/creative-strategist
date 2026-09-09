@@ -9,13 +9,13 @@ from cs.connectors.fivetran.connect import schema_for
 from cs.core.blobs import blob_store_from_settings
 from cs.core.config import get_settings
 from cs.core.db import Database
+from cs.core.repo import upsert_meta_connection
 from cs.ingest.fivetran_fixtures import (
     create_fixture_schema,
     insert_campaign_ad_creative,
     insert_daily_insight,
 )
 from cs.ingest.fivetran_transform import discover_and_sync_entities
-from cs.ingest.repo import upsert_meta_connection
 from cs.jobs.registry import JobContext
 from cs.orgs.repo import get_or_create_org
 

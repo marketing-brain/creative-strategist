@@ -8,9 +8,9 @@ from PIL import Image
 
 from cs.connectors.base import PlatformCreative
 from cs.core import queue
+from cs.core import repo as ingest_repo
 from cs.core.ids import new_id
 from cs.core.queue import Job
-from cs.ingest import repo as ingest_repo
 from cs.jobs.registry import JobContext
 from cs.jobs.worker import run_once
 from cs.tagging import jobs as tagging_jobs

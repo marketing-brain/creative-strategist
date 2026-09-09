@@ -1,4 +1,5 @@
-from cs.ingest import fivetran_transform, repo
+from cs.core import repo
+from cs.ingest import fivetran_transform
 from cs.ingest.fivetran_fixtures import (
     create_fixture_schema,
     insert_campaign_ad_creative,

@@ -6,10 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from cs.api.auth import AuthContext, current_auth
 from cs.api.deps import get_blobs, get_db
+from cs.core import repo
 from cs.core.blobs import BlobStore
 from cs.core.db import Database
 from cs.core.metrics import derived_metrics
-from cs.ingest import repo
 
 router = APIRouter(prefix="/creatives")
 

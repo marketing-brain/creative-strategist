@@ -1,9 +1,8 @@
 import httpx
 import respx
 
-from cs.core import queue
+from cs.core import queue, repo
 from cs.ingest import jobs as ingest_jobs
-from cs.ingest import repo
 from cs.ingest.fivetran_fixtures import create_fixture_schema, insert_campaign_ad_creative
 from cs.jobs.worker import run_once
 

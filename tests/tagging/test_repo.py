@@ -1,5 +1,5 @@
 from cs.connectors.base import PlatformCreative
-from cs.ingest import repo as ingest_repo
+from cs.core import repo as ingest_repo
 from cs.tagging import repo
 from cs.tagging.taxonomy import load_taxonomy
 
