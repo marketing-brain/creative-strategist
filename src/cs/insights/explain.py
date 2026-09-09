@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 from typing import Protocol
 
-import anthropic
+import openai
 
-from cs.core.claude_calls import fallback_kwargs
 from cs.core.config import Settings
 from cs.insights.types import InsightDraft
 
@@ -65,23 +64,29 @@ class Explainer(Protocol):
     async def explain(self, draft: InsightDraft, context: dict) -> tuple[str, str]: ...
 
 
-class ClaudeExplainer:
-    def __init__(self, settings: Settings, client: anthropic.AsyncAnthropic | None = None):
-        self.client = client or anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key or None)
-        self.model = settings.claude_model_insights
+class GeminiGatewayExplainer:
+    def __init__(self, settings: Settings, client: openai.AsyncOpenAI | None = None):
+        self.client = client or openai.AsyncOpenAI(
+            api_key=settings.ai_gateway_api_key, base_url=f"{settings.ai_gateway_base_url}/v1"
+        )
+        self.model = settings.insights_model
 
     async def explain(self, draft: InsightDraft, context: dict) -> tuple[str, str]:
-        resp = await self.client.beta.messages.create(
+        resp = await self.client.chat.completions.create(
             model=self.model,
-            max_tokens=2000,
-            system=SYSTEM,
-            messages=[{"role": "user", "content": _user(draft, context)}],
-            output_config={"format": {"type": "json_schema", "schema": SCHEMA}, "effort": "low"},
-            **fallback_kwargs(self.model),
+            messages=[
+                {"role": "system", "content": SYSTEM},
+                {"role": "user", "content": _user(draft, context)},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {"name": "explanation", "schema": SCHEMA, "strict": True},
+            },
         )
-        if resp.stop_reason == "refusal":
+        choice = resp.choices[0]
+        if choice.finish_reason == "content_filter" or getattr(choice.message, "refusal", None):
             return _template(draft)
-        text = next((b.text for b in resp.content if getattr(b, "type", "") == "text"), "")
+        text = choice.message.content or ""
         data = json.loads(text) if text else {}
         return data.get("explanation") or _template(draft)[0], data.get(
             "suggested_test"

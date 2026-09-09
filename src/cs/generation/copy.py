@@ -4,9 +4,8 @@ import json
 from dataclasses import dataclass
 from typing import Protocol
 
-import anthropic
+import openai
 
-from cs.core.claude_calls import fallback_kwargs
 from cs.core.config import Settings
 from cs.generation.brand import BrandKit
 
@@ -66,23 +65,29 @@ class CopyWriter(Protocol):
     async def write(self, brief: str, kit: BrandKit, n: int) -> list[CopySet]: ...
 
 
-class ClaudeCopyWriter:
-    def __init__(self, settings: Settings, client: anthropic.AsyncAnthropic | None = None):
-        self.client = client or anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key or None)
-        self.model = settings.claude_model_copy
+class GeminiGatewayCopyWriter:
+    def __init__(self, settings: Settings, client: openai.AsyncOpenAI | None = None):
+        self.client = client or openai.AsyncOpenAI(
+            api_key=settings.ai_gateway_api_key, base_url=f"{settings.ai_gateway_base_url}/v1"
+        )
+        self.model = settings.copy_model
 
     async def _call(self, system: str, user: str, schema: dict) -> dict:
-        resp = await self.client.beta.messages.create(
+        resp = await self.client.chat.completions.create(
             model=self.model,
-            max_tokens=4000,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-            output_config={"format": {"type": "json_schema", "schema": schema}},
-            **fallback_kwargs(self.model),
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {"name": "copy", "schema": schema, "strict": True},
+            },
         )
-        if resp.stop_reason == "refusal":
+        choice = resp.choices[0]
+        if choice.finish_reason == "content_filter" or getattr(choice.message, "refusal", None):
             return {}
-        text = next((b.text for b in resp.content if getattr(b, "type", "") == "text"), "")
+        text = choice.message.content or ""
         return json.loads(text) if text else {}
 
     async def write(self, brief: str, kit: BrandKit, n: int) -> list[CopySet]:

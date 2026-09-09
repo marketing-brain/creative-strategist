@@ -8,7 +8,7 @@ from cs.core.config import Settings
 from cs.core.db import Database
 from cs.insights import repo
 from cs.insights.brief import render_brief
-from cs.insights.explain import ClaudeExplainer, Explainer
+from cs.insights.explain import Explainer, GeminiGatewayExplainer
 from cs.insights.fatigue import compute_fatigue
 from cs.insights.patterns import compute_pattern_insights
 from cs.insights.types import InsightDraft
@@ -20,7 +20,7 @@ WINDOW_DAYS = 30
 
 
 def default_explainer_factory(settings: Settings) -> Explainer:
-    return ClaudeExplainer(settings)
+    return GeminiGatewayExplainer(settings)
 
 
 EXPLAINER_FACTORY = default_explainer_factory

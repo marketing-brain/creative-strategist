@@ -4,14 +4,14 @@ from uuid import UUID
 
 from cs.core.config import Settings
 from cs.generation import repo, service
-from cs.generation.copy import ClaudeCopyWriter, CopyWriter
+from cs.generation.copy import CopyWriter, GeminiGatewayCopyWriter
 from cs.generation.images import GatewayImageGenerator, ImageGenerator
 from cs.generation.video import NodeVideoGenerator, VideoGenerator
 from cs.jobs.registry import JobContext, handler
 
 
 def default_copywriter(settings: Settings) -> CopyWriter:
-    return ClaudeCopyWriter(settings)
+    return GeminiGatewayCopyWriter(settings)
 
 
 def default_image_gen(settings: Settings) -> ImageGenerator:
