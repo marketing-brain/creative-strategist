@@ -1,6 +1,6 @@
 """Tag hand-labeled creatives with the real model and report agreement per dimension.
 
-Usage: ANTHROPIC_API_KEY=... uv run python scripts/eval_tagging.py --min-agreement 0.7
+Usage: AI_GATEWAY_API_KEY=... uv run python scripts/eval_tagging.py --min-agreement 0.7
 Requires DATABASE_URL to point at a database containing the labeled creatives and their blobs.
 """
 
@@ -20,7 +20,7 @@ from cs.core.db import Database
 from cs.core.queue import Job
 from cs.jobs.registry import JobContext
 from cs.tagging import repo, runner
-from cs.tagging.tagger import ClaudeTagger
+from cs.tagging.tagger import GeminiGatewayTagger
 from cs.tagging.video import GatewayTranscriber
 
 LABELS = Path("tests/evals/labeled.jsonl")
@@ -36,7 +36,7 @@ async def main(min_agreement: float) -> int:
         return 0
     hits, totals = defaultdict(int), defaultdict(int)
     async with httpx.AsyncClient() as http:
-        tagger, tr = ClaudeTagger(settings), GatewayTranscriber(settings, http)
+        tagger, tr = GeminiGatewayTagger(settings), GatewayTranscriber(settings, http)
         for r in rows:
             cid = UUID(r["creative_id"])
             org_id = await db.fetchval("SELECT org_id FROM creative WHERE id=$1", cid)

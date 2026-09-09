@@ -1,6 +1,7 @@
 import asyncio
 import io
 from types import SimpleNamespace
+from uuid import UUID
 
 import pytest
 from PIL import Image
@@ -14,7 +15,7 @@ from cs.jobs.registry import JobContext
 from cs.jobs.worker import run_once
 from cs.tagging import jobs as tagging_jobs
 from cs.tagging import repo as tag_repo
-from cs.tagging.batch import ClaudeBatchTagger
+from cs.tagging.batch import GeminiGatewayBatchTagger
 from cs.tagging.fakes import FakeBatchTagger, FakeEmbedder
 from cs.tagging.taxonomy import load_taxonomy
 
@@ -57,7 +58,7 @@ async def test_batch_submit_and_poll_completes_runs(
     db, blobs, settings, org_id, three_images, monkeypatch
 ):
     fake = FakeBatchTagger()
-    monkeypatch.setattr(tagging_jobs, "BATCH_FACTORY", lambda s: fake)
+    monkeypatch.setattr(tagging_jobs, "BATCH_FACTORY", lambda s, db, org_id: fake)
     monkeypatch.setattr(tagging_jobs, "EMBEDDER_FACTORY", lambda s, http: FakeEmbedder())
     await queue.enqueue(db, org_id, "tagging.batch_submit", {"limit": 100})
     await run_once(db, blobs, settings, "w")
@@ -96,7 +97,7 @@ class FailingBatchTagger:
 async def test_batch_submit_fails_runs_when_submit_raises(
     db, blobs, settings, org_id, three_images, monkeypatch
 ):
-    monkeypatch.setattr(tagging_jobs, "BATCH_FACTORY", lambda s: FailingBatchTagger())
+    monkeypatch.setattr(tagging_jobs, "BATCH_FACTORY", lambda s, db, org_id: FailingBatchTagger())
     await queue.enqueue(db, org_id, "tagging.batch_submit", {"limit": 100})
     await run_once(db, blobs, settings, "w")  # handler raises; run_once fails the job
 
@@ -116,7 +117,7 @@ async def test_batch_submit_fails_runs_when_submit_raises(
     # next batch_submit attempt.
     taxonomy = load_taxonomy()
     tv = await tag_repo.ensure_taxonomy_version(db, taxonomy)
-    ids = await tag_repo.untagged_creative_ids(db, org_id, tv, settings.claude_model_tagging, 100)
+    ids = await tag_repo.untagged_creative_ids(db, org_id, tv, settings.tagging_model, 100)
     assert set(ids) == set(three_images)
 
 
@@ -150,7 +151,7 @@ async def test_batch_submit_isolates_one_bad_creative(
     creative's tag_run is failed; the other creatives are submitted normally
     and the batch proceeds."""
     fake = FakeBatchTagger()
-    monkeypatch.setattr(tagging_jobs, "BATCH_FACTORY", lambda s: fake)
+    monkeypatch.setattr(tagging_jobs, "BATCH_FACTORY", lambda s, db, org_id: fake)
     failing_blobs = BlobStoreFailingOnCall(blobs, fail_at_call=2)
     await queue.enqueue(db, org_id, "tagging.batch_submit", {"limit": 100})
     await run_once(db, failing_blobs, settings, "w")  # handler succeeds; job completes
@@ -177,7 +178,7 @@ async def test_batch_submit_isolates_one_bad_creative(
     # The failed creative is retryable on a future batch_submit.
     taxonomy = load_taxonomy()
     tv = await tag_repo.ensure_taxonomy_version(db, taxonomy)
-    ids = await tag_repo.untagged_creative_ids(db, org_id, tv, settings.claude_model_tagging, 100)
+    ids = await tag_repo.untagged_creative_ids(db, org_id, tv, settings.tagging_model, 100)
     assert len(ids) == 1
 
 
@@ -191,7 +192,7 @@ async def test_batch_poll_noop_when_already_ended(db, blobs, settings, org_id):
         org_id,
         "batch_already_done",
         tv,
-        settings.claude_model_tagging,
+        settings.tagging_model,
     )
     await queue.enqueue(db, org_id, "tagging.batch_poll", {"tag_batch_id": str(batch_id)})
     await run_once(db, blobs, settings, "w")
@@ -205,7 +206,7 @@ async def test_batch_poll_race_does_not_double_process(
     db, blobs, settings, org_id, three_images, monkeypatch
 ):
     fake = FakeBatchTagger()
-    monkeypatch.setattr(tagging_jobs, "BATCH_FACTORY", lambda s: fake)
+    monkeypatch.setattr(tagging_jobs, "BATCH_FACTORY", lambda s, db, org_id: fake)
     monkeypatch.setattr(tagging_jobs, "EMBEDDER_FACTORY", lambda s, http: FakeEmbedder())
     await queue.enqueue(db, org_id, "tagging.batch_submit", {"limit": 100})
     await run_once(db, blobs, settings, "w")
@@ -236,51 +237,70 @@ async def test_batch_poll_race_does_not_double_process(
     )
 
 
-async def test_claude_batch_tagger_shapes_requests(settings):
-    created = {}
+class _FakeCompletions:
+    def __init__(self, response):
+        self.response = response
+        self.calls = []
 
-    class Batches:
-        async def create(self, requests):
-            created["requests"] = requests
-            return SimpleNamespace(id="msgbatch_1")
+    async def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.response
 
-        async def retrieve(self, bid):
-            return SimpleNamespace(processing_status="ended")
 
-        async def results(self, bid):
-            async def gen():
-                yield SimpleNamespace(
-                    custom_id="c1",
-                    result=SimpleNamespace(
-                        type="succeeded",
-                        message=SimpleNamespace(
-                            stop_reason="end_turn",
-                            content=[SimpleNamespace(type="text", text='{"tags": []}')],
-                            usage=SimpleNamespace(input_tokens=1, output_tokens=1),
-                        ),
-                    ),
-                )
-
-            return gen()
-
-    client = SimpleNamespace(messages=SimpleNamespace(batches=Batches()))
-    bt = ClaudeBatchTagger(settings, client=client)
-    bid = await bt.submit(
-        [
-            {
-                "custom_id": "c1",
-                "images": [(b"\xff\xd8\xff", "image/jpeg")],
-                "user_text": "t",
-                "schema": {"type": "object"},
-            }
-        ]
+def _gemini_client(text, finish_reason="stop"):
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                finish_reason=finish_reason, message=SimpleNamespace(content=text, refusal=None)
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        model="google/gemini-2.5-flash-lite",
     )
-    assert bid == "msgbatch_1"
-    params = created["requests"][0]["params"]
-    assert (
-        "fallbacks" not in params
-        and "betas" not in params
-        and params["model"] == settings.claude_model_tagging
+    return SimpleNamespace(chat=SimpleNamespace(completions=_FakeCompletions(response)))
+
+
+async def test_gemini_batch_tagger_submits_concurrently_and_persists_results(db, org_id, settings):
+    client = _gemini_client(
+        '{"tags": [{"dimension": "hook_type", "value": "question", '
+        '"confidence": 0.9, "evidence": "e"}]}'
     )
+    bt = GeminiGatewayBatchTagger(settings, db, org_id, client=client)
+    requests = [
+        {
+            "custom_id": f"c{i}",
+            "images": [(b"\xff\xd8\xff", "image/jpeg")],
+            "user_text": "t",
+            "schema": {"type": "object"},
+        }
+        for i in range(3)
+    ]
+    bid = await bt.submit(requests)
+    assert len(client.chat.completions.calls) == 3
+
+    row = await db.fetchrow(
+        "SELECT org_id, results FROM tag_batch_provider_result WHERE id=$1", UUID(bid)
+    )
+    assert row["org_id"] == org_id and len(row["results"]) == 3
+
     ended, results = await bt.poll(bid)
-    assert ended and results[0]["ok"] and results[0]["custom_id"] == "c1"
+    assert ended and len(results) == 3
+    by_id = {r["custom_id"]: r for r in results}
+    assert all(by_id[f"c{i}"]["ok"] for i in range(3))
+    assert by_id["c0"]["tags"][0]["dimension"] == "hook_type"
+
+
+async def test_gemini_batch_tagger_marks_refusal_not_ok(db, org_id, settings):
+    client = _gemini_client(None, finish_reason="content_filter")
+    bt = GeminiGatewayBatchTagger(settings, db, org_id, client=client)
+    bid = await bt.submit(
+        [{"custom_id": "c1", "images": [], "user_text": "t", "schema": {"type": "object"}}]
+    )
+    _, results = await bt.poll(bid)
+    assert results[0]["ok"] is False and results[0]["error"] == "refusal"
+
+
+async def test_gemini_batch_tagger_poll_unknown_id_is_not_ended(db, org_id, settings):
+    bt = GeminiGatewayBatchTagger(settings, db, org_id)
+    ended, results = await bt.poll(str(new_id()))
+    assert ended is False and results == []

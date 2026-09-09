@@ -1,15 +1,16 @@
 """Shared helpers for building Anthropic Messages API calls consistently across
-the tagging, insights, and generation modules -- all three construct a client
-from a configurable `claude_model_*` setting and call `beta.messages.create`."""
+the insights and generation modules -- both construct a client from a
+configurable `claude_model_*` setting and call `beta.messages.create`. Tagging
+moved off Claude entirely (see cs.tagging.tagger.GeminiGatewayTagger)."""
 
 from __future__ import annotations
 
 # The server-side `fallbacks` beta param is only accepted by these models --
 # every other current model (Sonnet, Haiku, older Opus/Sonnet) rejects it
 # outright with a 400 ("does not support the `fallbacks` parameter"). Confirmed
-# empirically: claude-haiku-4-5 rejects it for both tagging and generation copy.
-# Since claude_model_tagging/insights/copilot/copy are all independently
-# configurable, any of the four call sites can be pointed at a non-Opus/Fable
+# empirically: claude-haiku-4-5 rejects it for generation copy.
+# Since claude_model_insights/copilot/copy are all independently configurable,
+# any of the three remaining call sites can be pointed at a non-Opus/Fable
 # model at any time -- fallback kwargs must be conditional, never hardcoded.
 _FALLBACK_CAPABLE_MODELS = frozenset(
     {"claude-opus-5", "claude-opus-4-8", "claude-fable-5", "claude-fable-5-1"}

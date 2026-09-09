@@ -78,7 +78,7 @@ async def tag_creative(
         raise RuntimeError(f"creative {creative_id} has no primary asset yet")
     taxonomy = load_taxonomy()
     tv_id = await repo.ensure_taxonomy_version(ctx.db, taxonomy)
-    model = ctx.settings.claude_model_tagging
+    model = ctx.settings.tagging_model
     run_id = await repo.start_tag_run(ctx.db, org_id, creative_id, tv_id, model)
     if run_id is None:
         return None

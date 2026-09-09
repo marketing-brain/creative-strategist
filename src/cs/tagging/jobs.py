@@ -8,14 +8,14 @@ import httpx
 from cs.core.config import Settings
 from cs.jobs.registry import JobContext, handler
 from cs.tagging import runner
-from cs.tagging.tagger import ClaudeTagger, Tagger
+from cs.tagging.tagger import GeminiGatewayTagger, Tagger
 from cs.tagging.video import GatewayTranscriber, Transcriber
 
 log = logging.getLogger("cs.tagging")
 
 
 def default_tagger_factory(settings: Settings) -> Tagger:
-    return ClaudeTagger(settings)
+    return GeminiGatewayTagger(settings)
 
 
 def default_transcriber_factory(settings: Settings, http: httpx.AsyncClient) -> Transcriber:
@@ -71,15 +71,16 @@ async def embed_creative(ctx: JobContext) -> None:
 from datetime import UTC, datetime, timedelta  # noqa: E402
 
 from cs.core import queue  # noqa: E402
+from cs.core.db import Database  # noqa: E402
 from cs.core.ids import new_id  # noqa: E402
-from cs.tagging.batch import BatchTagger, ClaudeBatchTagger  # noqa: E402
+from cs.tagging.batch import BatchTagger, GeminiGatewayBatchTagger  # noqa: E402
 from cs.tagging.images import prepare_image  # noqa: E402
 from cs.tagging.prompts import SYSTEM, prompt_sha, user_text  # noqa: E402
 from cs.tagging.taxonomy import load_taxonomy  # noqa: E402
 
 
-def default_batch_factory(settings: Settings) -> BatchTagger:
-    return ClaudeBatchTagger(settings)
+def default_batch_factory(settings: Settings, db: Database, org_id: UUID) -> BatchTagger:
+    return GeminiGatewayBatchTagger(settings, db, org_id)
 
 
 BATCH_FACTORY = default_batch_factory
@@ -90,7 +91,7 @@ async def batch_submit(ctx: JobContext) -> None:
     org_id = ctx.job.org_id
     taxonomy = load_taxonomy()
     tv = await tag_repo.ensure_taxonomy_version(ctx.db, taxonomy)
-    model = ctx.settings.claude_model_tagging
+    model = ctx.settings.tagging_model
     ids = await tag_repo.untagged_creative_ids(
         ctx.db, org_id, tv, model, int(ctx.job.payload.get("limit", 500))
     )
@@ -134,7 +135,7 @@ async def batch_submit(ctx: JobContext) -> None:
     if not requests:
         return
     try:
-        provider_id = await BATCH_FACTORY(ctx.settings).submit(requests)
+        provider_id = await BATCH_FACTORY(ctx.settings, ctx.db, org_id).submit(requests)
     except Exception as exc:
         # A submit()-level failure legitimately means the whole batch failed:
         # every run started above must not be left stuck, so fail them all.
@@ -179,7 +180,9 @@ async def batch_poll(ctx: JobContext) -> None:
     )
     if batch["status"] == "ended":
         return  # already finished by an earlier poll; nothing left to do
-    ended, results = await BATCH_FACTORY(ctx.settings).poll(batch["provider_batch_id"])
+    ended, results = await BATCH_FACTORY(ctx.settings, ctx.db, org_id).poll(
+        batch["provider_batch_id"]
+    )
     if not ended:
         # No dedup_key here: the job currently executing this handler is still
         # 'running' under dedup_key f"poll:{batch_id}" (set by batch_submit, or

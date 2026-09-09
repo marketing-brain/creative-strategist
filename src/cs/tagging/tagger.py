@@ -5,9 +5,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Protocol
 
-import anthropic
+import openai
 
-from cs.core.claude_calls import fallback_kwargs
 from cs.core.config import Settings
 
 
@@ -27,52 +26,52 @@ class Tagger(Protocol):
 
 
 def build_content(images: list[tuple[bytes, str]], user_text: str) -> list[dict]:
+    """OpenAI-compatible chat-completions content blocks (images first, text last) --
+    the shape AI Gateway expects regardless of which provider/model is behind it."""
     content: list[dict] = []
     for data, mime in images:
-        content.append(
-            {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": mime,
-                    "data": base64.standard_b64encode(data).decode(),
-                },
-            }
-        )
+        b64 = base64.standard_b64encode(data).decode()
+        content.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
     content.append({"type": "text", "text": user_text})
     return content
 
 
-class ClaudeTagger:
+class GeminiGatewayTagger:
     def __init__(
         self,
         settings: Settings,
-        client: anthropic.AsyncAnthropic | None = None,
+        client: openai.AsyncOpenAI | None = None,
         model: str | None = None,
     ):
-        self.client = client or anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key or None)
-        self.model = model or settings.claude_model_tagging
+        self.client = client or openai.AsyncOpenAI(
+            api_key=settings.ai_gateway_api_key, base_url=f"{settings.ai_gateway_base_url}/v1"
+        )
+        self.model = model or settings.tagging_model
 
     async def tag(self, images: list[tuple[bytes, str]], user_text: str, schema: dict) -> TagResult:
         from cs.tagging.prompts import SYSTEM
 
-        resp = await self.client.beta.messages.create(
+        resp = await self.client.chat.completions.create(
             model=self.model,
-            max_tokens=16000,
-            system=SYSTEM,
-            messages=[{"role": "user", "content": build_content(images, user_text)}],
-            output_config={"format": {"type": "json_schema", "schema": schema}},
-            **fallback_kwargs(self.model),
+            messages=[
+                {"role": "system", "content": SYSTEM},
+                {"role": "user", "content": build_content(images, user_text)},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {"name": "tags", "schema": schema, "strict": True},
+            },
         )
+        choice = resp.choices[0]
         usage = getattr(resp, "usage", None)
         result = TagResult(
-            input_tokens=getattr(usage, "input_tokens", 0) or 0,
-            output_tokens=getattr(usage, "output_tokens", 0) or 0,
+            input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+            output_tokens=getattr(usage, "completion_tokens", 0) or 0,
             model=resp.model,
         )
-        if resp.stop_reason == "refusal":
+        if choice.finish_reason == "content_filter" or getattr(choice.message, "refusal", None):
             result.refused = True
             return result
-        text = next((b.text for b in resp.content if getattr(b, "type", "") == "text"), "")
+        text = choice.message.content or ""
         result.tags = json.loads(text).get("tags", []) if text else []
         return result

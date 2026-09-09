@@ -66,7 +66,7 @@ async def test_tag_image_creative_persists_tags(db, blobs, settings, org_id, ima
     assert (
         run["status"] == "done"
         and run["input_tokens"] == 100
-        and run["model"] == settings.claude_model_tagging
+        and run["model"] == settings.tagging_model
     )
     # Similarity is disabled: tagging no longer chains an embed job.
     assert (

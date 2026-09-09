@@ -15,7 +15,7 @@ def test_settings_reads_env():
     s = Settings()
     assert s.database_url == "postgres://x"
     assert s.blob_backend == "local"
-    assert s.claude_model_tagging == "claude-opus-5"
+    assert s.tagging_model == "google/gemini-2.5-flash-lite"
 
 
 def test_clerk_jwks_url_is_required(monkeypatch):
