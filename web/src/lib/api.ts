@@ -26,6 +26,7 @@ export const api = {
   syncAccount: (id: string) => apiFetch<{ job_id: string | null }>(`/accounts/${id}/sync`, { method: 'POST' }),
   fivetranConnectStart: () => apiFetch<{ connect_card_url: string; connector_id: string }>('/connections/meta/start', { method: 'POST' }),
   fivetranConnectFinalize: (connectorId: string) => apiFetch<{ ok: boolean }>('/connections/meta/finalize', { method: 'POST', body: JSON.stringify({ connector_id: connectorId }) }),
+  fivetranDisconnect: () => apiFetch<{ ok: boolean }>('/connections/meta/disconnect', { method: 'POST' }),
   brandKit: () => apiFetch<import('./types').BrandKit>('/brand-kit'),
   saveBrandKit: (b: Omit<import('./types').BrandKit, 'id' | 'version' | 'logo_url'>) =>
     apiFetch<import('./types').BrandKit>('/brand-kit', { method: 'POST', body: JSON.stringify(b) }),

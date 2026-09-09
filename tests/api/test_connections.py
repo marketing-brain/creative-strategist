@@ -64,3 +64,61 @@ async def test_finalize_rejects_connector_from_another_schema(client):
 async def test_finalize_requires_connector_id(client):
     r = await client.post("/connections/meta/finalize", headers=H, json={})
     assert r.status_code == 400
+
+
+@respx.mock
+async def test_start_rejects_when_existing_connector_found(client, settings):
+    from uuid import UUID
+
+    from cs.connectors.fivetran.connect import schema_for
+
+    settings.fivetran_group_id = "grp_1"
+    org_id = (await client.get("/me", headers=H)).json()["org_id"]
+    respx.get(f"{F}/groups/grp_1/connectors").mock(
+        return_value=httpx.Response(
+            200,
+            json={"data": {"items": [{"id": "old_conn", "schema": schema_for(UUID(org_id))}]}},
+        )
+    )
+    r = await client.post("/connections/meta/start", headers=H)
+    assert r.status_code == 409
+
+
+async def test_disconnect_requires_admin(client):
+    r = await client.post(
+        "/connections/meta/disconnect",
+        headers=dev_headers(org="org_conn", user="u2", role="member"),
+    )
+    assert r.status_code == 403
+
+
+@respx.mock
+async def test_disconnect_deletes_connector_and_never_via_start(client, settings):
+    from uuid import UUID
+
+    from cs.connectors.fivetran.connect import schema_for
+
+    settings.fivetran_group_id = "grp_1"
+    org_id = (await client.get("/me", headers=H)).json()["org_id"]
+    respx.get(f"{F}/groups/grp_1/connectors").mock(
+        return_value=httpx.Response(
+            200,
+            json={"data": {"items": [{"id": "old_conn", "schema": schema_for(UUID(org_id))}]}},
+        )
+    )
+    delete_route = respx.delete(f"{F}/connectors/old_conn").mock(
+        return_value=httpx.Response(200, json={"data": {}})
+    )
+    r = await client.post("/connections/meta/disconnect", headers=H)
+    assert r.status_code == 200 and r.json() == {"ok": True}
+    assert delete_route.called
+
+
+@respx.mock
+async def test_disconnect_returns_404_when_no_connection_exists(client, settings):
+    settings.fivetran_group_id = "grp_1"
+    respx.get(f"{F}/groups/grp_1/connectors").mock(
+        return_value=httpx.Response(200, json={"data": {"items": []}})
+    )
+    r = await client.post("/connections/meta/disconnect", headers=H)
+    assert r.status_code == 404

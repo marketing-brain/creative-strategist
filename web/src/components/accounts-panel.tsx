@@ -19,6 +19,7 @@ const msgClass: Record<MsgKind, string> = {
 export function AccountsPanel({ accounts }: { accounts: Account[] }) {
   const [msg, setMsg] = useState<{ text: string; kind: MsgKind } | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [needsDisconnect, setNeedsDisconnect] = useState(false);
   const messageListenerRef = useRef<((e: MessageEvent) => void) | null>(null);
   const closeWatcherRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -41,6 +42,7 @@ export function AccountsPanel({ accounts }: { accounts: Account[] }) {
     stopWatchingPopup();
     setConnecting(true);
     setMsg(null);
+    setNeedsDisconnect(false);
     try {
       const { connect_card_url, connector_id } = await api.fivetranConnectStart();
       const width = 520;
@@ -98,9 +100,28 @@ export function AccountsPanel({ accounts }: { accounts: Account[] }) {
       setConnecting(false);
       if (e instanceof ApiError && e.status === 403) {
         setMsg({ text: "You don't have permission to do this — ask an admin.", kind: 'error' });
+      } else if (e instanceof ApiError && e.status === 409) {
+        setMsg({
+          text: 'A Meta connection already exists for this workspace. Disconnecting it will stop syncing until you reconnect — this cannot be undone from here.',
+          kind: 'error',
+        });
+        setNeedsDisconnect(true);
       } else {
         setMsg({ text: `Failed to connect: ${e instanceof Error ? e.message : 'Something went wrong.'}`, kind: 'error' });
       }
+    }
+  };
+  const disconnect = async () => {
+    if (!window.confirm('Disconnect the existing Meta connection? This stops syncing until you reconnect.')) return;
+    setConnecting(true);
+    try {
+      await api.fivetranDisconnect();
+      setNeedsDisconnect(false);
+      setMsg({ text: 'Disconnected — click Connect Meta to set up a new connection.', kind: 'info' });
+    } catch (e) {
+      setMsg({ text: `Failed to disconnect: ${e instanceof Error ? e.message : 'Something went wrong.'}`, kind: 'error' });
+    } finally {
+      setConnecting(false);
     }
   };
   const activate = async (id: string) => {
@@ -178,6 +199,11 @@ export function AccountsPanel({ accounts }: { accounts: Account[] }) {
           <p role="status" className={`text-sm ${msgClass[msg.kind]}`}>
             {msg.text}
           </p>
+        )}
+        {needsDisconnect && (
+          <Button size="sm" variant="destructive" onClick={disconnect} disabled={connecting}>
+            Disconnect existing connection
+          </Button>
         )}
       </CardContent>
     </Card>

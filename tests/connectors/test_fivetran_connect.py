@@ -12,7 +12,7 @@ def test_schema_for_is_stable_and_sanitized():
     assert schema == connect.schema_for(org)  # deterministic
 
 
-async def test_start_connection_deletes_existing_before_recreating(settings, monkeypatch):
+async def test_start_connection_rejects_when_existing_connector_found(settings, monkeypatch):
     settings.fivetran_group_id = "grp_1"
     calls = []
     monkeypatch.setattr(
@@ -25,17 +25,38 @@ async def test_start_connection_deletes_existing_before_recreating(settings, mon
         "delete_connector",
         lambda s, h, cid: _record(calls, "delete", None),
     )
+    org = UUID(int=1)
+    with pytest.raises(connect.ConnectError) as exc:
+        await connect.start_connection(settings, None, org)
+    assert exc.value.status == 409
+    assert [c[0] for c in calls] == ["find"]  # never deletes
+
+
+async def test_disconnect_connection_deletes_existing(settings, monkeypatch):
+    settings.fivetran_group_id = "grp_1"
+    calls = []
     monkeypatch.setattr(
         connect.fivetran_client,
-        "create_connector",
-        lambda s, h, **kw: _record(
-            calls, "create", {"id": "new_conn", "connect_card": {"uri": "https://card"}}
-        ),
+        "find_connector_by_schema",
+        lambda s, h, g, sc: _record(calls, "find", "old_conn"),
     )
-    org = UUID(int=1)
-    result = await connect.start_connection(settings, None, org)
-    assert result == {"connect_card_url": "https://card", "connector_id": "new_conn"}
-    assert [c[0] for c in calls] == ["find", "delete", "create"]
+    monkeypatch.setattr(
+        connect.fivetran_client,
+        "delete_connector",
+        lambda s, h, cid: _record(calls, "delete", None),
+    )
+    await connect.disconnect_connection(settings, None, UUID(int=1))
+    assert [c[0] for c in calls] == ["find", "delete"]
+
+
+async def test_disconnect_connection_raises_404_when_none_exists(settings, monkeypatch):
+    settings.fivetran_group_id = "grp_1"
+    monkeypatch.setattr(
+        connect.fivetran_client, "find_connector_by_schema", lambda s, h, g, sc: _async_result(None)
+    )
+    with pytest.raises(connect.ConnectError) as exc:
+        await connect.disconnect_connection(settings, None, UUID(int=1))
+    assert exc.value.status == 404
 
 
 async def test_start_connection_requires_group_id(settings):

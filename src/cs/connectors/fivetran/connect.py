@@ -40,13 +40,15 @@ async def start_connection(settings: Settings, http: httpx.AsyncClient, org_id: 
     if not settings.fivetran_group_id:
         raise ConnectError(500, "FIVETRAN_GROUP_ID not configured")
     schema = schema_for(org_id)
-    # Fivetran rejects a duplicate schema, so drop any existing connector for this org
-    # (an abandoned attempt or a reconnect) before re-creating.
+    # Fivetran rejects a duplicate schema. Deleting the old connector to make room is a
+    # destructive, irreversible action against a connection that may be healthy and
+    # actively syncing -- it must never happen as a side effect of starting a new one.
+    # Callers hit this 409 and must explicitly call disconnect_connection first.
     existing = await fivetran_client.find_connector_by_schema(
         settings, http, settings.fivetran_group_id, schema
     )
     if existing:
-        await fivetran_client.delete_connector(settings, http, existing)
+        raise ConnectError(409, "A Meta connection already exists -- disconnect it first.")
     connector = await fivetran_client.create_connector(
         settings,
         http,
@@ -68,3 +70,15 @@ async def finalize_connection(
     if connector.get("schema") != schema_for(org_id):
         raise ConnectError(403, "connection does not belong to you")
     return connector
+
+
+async def disconnect_connection(settings: Settings, http: httpx.AsyncClient, org_id: UUID) -> None:
+    if not settings.fivetran_group_id:
+        raise ConnectError(500, "FIVETRAN_GROUP_ID not configured")
+    schema = schema_for(org_id)
+    existing = await fivetran_client.find_connector_by_schema(
+        settings, http, settings.fivetran_group_id, schema
+    )
+    if not existing:
+        raise ConnectError(404, "No Meta connection exists for this organization.")
+    await fivetran_client.delete_connector(settings, http, existing)

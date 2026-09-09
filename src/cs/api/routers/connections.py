@@ -58,3 +58,22 @@ async def finalize(
         max_attempts=300,  # ~24h ceiling: exponential backoff caps at 5 minutes after ~9 attempts
     )
     return {"ok": True}
+
+
+@router.post("/disconnect")
+async def disconnect(
+    auth: AuthContext = Depends(require_admin),
+    db: Database = Depends(get_db),
+    settings: Settings = Depends(get_settings_dep),
+) -> dict:
+    async with httpx.AsyncClient(timeout=30) as http:
+        try:
+            await fivetran_connect.disconnect_connection(settings, http, auth.org_id)
+        except fivetran_connect.ConnectError as exc:
+            raise HTTPException(exc.status, str(exc)) from None
+    conn = await repo.get_meta_connection(db, auth.org_id)
+    if conn:
+        await repo.set_meta_connection_status(
+            db, conn["id"], "error", last_error="Disconnected -- reconnect to resume syncing."
+        )
+    return {"ok": True}
