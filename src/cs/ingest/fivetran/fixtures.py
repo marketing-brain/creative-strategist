@@ -9,8 +9,8 @@ from datetime import date
 from cs.core.db import Database
 from cs.ingest.fivetran.schema import (
     AD_HISTORY,
-    AD_INSIGHTS,
     AD_VIDEO_HISTORY,
+    BASIC_AD,
     CAMPAIGN_HISTORY,
     CREATIVE_HISTORY,
     INSIGHTS_ACTION_TABLES,
@@ -50,9 +50,8 @@ async def create_fixture_schema(db: Database, schema: str) -> None:
         )
     """)
     await db.execute(
-        f'CREATE TABLE "{schema}".{AD_INSIGHTS} (ad_id TEXT, date DATE, '
-        f"publisher_platform TEXT, platform_position TEXT, spend NUMERIC, "
-        f"impressions INT, clicks INT, inline_link_clicks INT)"
+        f'CREATE TABLE "{schema}".{BASIC_AD} (ad_id TEXT, date DATE, '
+        f"spend NUMERIC, impressions INT, inline_link_clicks INT)"
     )
     for t in INSIGHTS_ACTION_TABLES:
         await db.execute(
@@ -123,18 +122,13 @@ async def insert_daily_insight(
     day: str,
     spend: float,
     impressions: int,
-    clicks: int,
     link_clicks: int,
-    placement: tuple[str, str] = ("facebook", "feed"),
 ) -> None:
     await db.execute(
-        f'INSERT INTO "{schema}".ad_insights VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+        f'INSERT INTO "{schema}".basic_ad VALUES ($1, $2, $3, $4, $5)',
         ad_id,
         date.fromisoformat(day),
-        placement[0],
-        placement[1],
         spend,
         impressions,
-        clicks,
         link_clicks,
     )

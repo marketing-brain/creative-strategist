@@ -28,25 +28,29 @@ async def await_first_sync(ctx: JobContext) -> None:
         detail = await fivetran_client.get_connector(
             ctx.settings, http, conn["fivetran_connector_id"]
         )
-    status = detail.get("status") or {}
-    if status.get("setup_state") == "broken":
-        await repo.set_meta_connection_status(
-            ctx.db,
-            conn_id,
-            "error",
-            last_error="Fivetran setup is broken -- reconnect from Settings.",
-        )
-        return
-    if detail.get("succeeded_at"):
-        await repo.set_meta_connection_status(ctx.db, conn_id, "ready")
-        await queue.enqueue(
-            ctx.db,
-            ctx.job.org_id,
-            "meta.sync_from_fivetran",
-            {"meta_connection_id": str(conn_id)},
-            dedup_key=str(conn_id),
-        )
-        return
+        status = detail.get("status") or {}
+        if status.get("setup_state") == "broken":
+            await repo.set_meta_connection_status(
+                ctx.db,
+                conn_id,
+                "error",
+                last_error="Fivetran setup is broken -- reconnect from Settings.",
+            )
+            return
+        if status.get("setup_state") == "connected" and detail.get("paused"):
+            await fivetran_client.lock_down_and_activate(
+                ctx.settings, http, conn["fivetran_connector_id"], conn["schema_name"]
+            )
+        elif detail.get("succeeded_at"):
+            await repo.set_meta_connection_status(ctx.db, conn_id, "ready")
+            await queue.enqueue(
+                ctx.db,
+                ctx.job.org_id,
+                "meta.sync_from_fivetran",
+                {"meta_connection_id": str(conn_id)},
+                dedup_key=str(conn_id),
+            )
+            return
     if ctx.job.attempts >= ctx.job.max_attempts:
         await repo.set_meta_connection_status(
             ctx.db,

@@ -16,20 +16,15 @@ async def _seed(db, org_id):
         day="2026-09-01",
         spend=10.0,
         impressions=1000,
-        clicks=20,
         link_clicks=20,
     )
     await db.execute(f"""
-        INSERT INTO "{SCHEMA}".ad_insights_actions
+        INSERT INTO "{SCHEMA}".basic_ad_actions
         VALUES ('ad1', '2026-09-01', 'omni_purchase', 0, 2)
     """)
     await db.execute(f"""
-        INSERT INTO "{SCHEMA}".ad_insights_action_values VALUES
+        INSERT INTO "{SCHEMA}".basic_ad_action_values VALUES
         ('ad1', '2026-09-01', 'omni_purchase', 0, 100)
-    """)
-    await db.execute(f"""
-        INSERT INTO "{SCHEMA}".ad_insights_video_thruplay_watched_actions VALUES
-        ('ad1', '2026-09-01', 'video_view', 0, 5)
     """)
 
     acct = await repo.upsert_ad_account(db, org_id, "999", "Main", "USD")
@@ -57,42 +52,32 @@ async def test_sync_insights_folds_action_breakdowns_into_metric_daily(db, blobs
     assert len(rows) == 1
     row = rows[0]
     assert row["ad_account_id"] == acct
-    assert row["placement"] == "facebook:feed"
+    assert row["placement"] == "all"
     assert row["spend"] == 10 and row["impressions"] == 1000 and row["clicks"] == 20
     assert row["conversions"] == 2 and row["conversion_value"] == 100
-    assert row["video_thruplay"] == 5 and row["video_3s_views"] == 0
+    assert row["video_thruplay"] == 0 and row["video_3s_views"] == 0
 
 
 async def test_bigint_ad_id_still_joins_against_our_text_ad_table(db, blobs, settings, org_id):
     """Regression test: Meta's ad_id lands as bigint everywhere else Fivetran syncs it
-    (confirmed against a real connector for the entity tables) -- ad_insights almost
-    certainly follows the same convention once its custom report is configured. Without
-    str() coercion this doesn't crash: it silently fails to match ad.platform_ad_id
-    (text) in a dict lookup, so every metric row gets counted as skipped with no error
-    at all -- a much easier bug to miss than the entity-sync crash."""
+    (confirmed against a real connector for the entity tables) -- basic_ad follows the
+    same convention. Without str() coercion this doesn't crash: it silently fails to
+    match ad.platform_ad_id (text) in a dict lookup, so every metric row gets counted as
+    skipped with no error at all -- a much easier bug to miss than the entity-sync crash."""
     schema = "bigint_insights_org__meta_ads"
     await db.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
     await db.execute(f'CREATE SCHEMA "{schema}"')
     await db.execute(
-        f'CREATE TABLE "{schema}".ad_insights (ad_id BIGINT, date DATE, '
-        f"publisher_platform TEXT, platform_position TEXT, spend NUMERIC, "
-        f"impressions INT, clicks INT, inline_link_clicks INT)"
+        f'CREATE TABLE "{schema}".basic_ad (ad_id BIGINT, date DATE, '
+        f"spend NUMERIC, impressions INT, inline_link_clicks INT)"
     )
-    for t in (
-        "ad_insights_actions",
-        "ad_insights_action_values",
-        "ad_insights_video_play_actions",
-        "ad_insights_video_thruplay_watched_actions",
-        "ad_insights_video_p50_watched_actions",
-        "ad_insights_video_p100_watched_actions",
-    ):
+    for t in ("basic_ad_actions", "basic_ad_action_values"):
         await db.execute(
-            f'CREATE TABLE "{schema}".{t} '
-            f"(ad_id BIGINT, date DATE, action_type TEXT, index INT, value NUMERIC)"
+            f'CREATE TABLE "{schema}".{t} (ad_id BIGINT, date DATE, action_type TEXT, '
+            f"index INT, value NUMERIC)"
         )
     await db.execute(
-        f"INSERT INTO \"{schema}\".ad_insights VALUES (9001, '2026-09-01', 'facebook', "
-        f"'feed', 10.0, 1000, 20, 20)"
+        f"INSERT INTO \"{schema}\".basic_ad VALUES (9001, '2026-09-01', 10.0, 1000, 20)"
     )
 
     acct = await repo.upsert_ad_account(db, org_id, "999", "Main", "USD")

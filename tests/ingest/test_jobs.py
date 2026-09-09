@@ -1,6 +1,9 @@
+import json
+
 import httpx
 import respx
 
+from cs.connectors.fivetran import client as fivetran_client
 from cs.core import queue, repo
 from cs.ingest import jobs as ingest_jobs
 from cs.ingest.fivetran.fixtures import create_fixture_schema, insert_campaign_ad_creative
@@ -50,6 +53,50 @@ async def test_await_first_sync_enqueues_sync_once_fivetran_succeeds(db, blobs, 
 
 
 @respx.mock
+async def test_await_first_sync_locks_down_schema_when_connected_and_still_paused(
+    db, blobs, settings, org_id
+):
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", "s")
+    respx.get(f"{F}/connectors/conn_1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": {
+                    "id": "conn_1",
+                    "paused": True,
+                    "status": {"setup_state": "connected"},
+                }
+            },
+        )
+    )
+    reload_route = respx.post(f"{F}/connectors/conn_1/schemas/reload").mock(
+        return_value=httpx.Response(200, json={"data": {}})
+    )
+    for table in fivetran_client.REQUIRED_TABLES:
+        respx.get(f"{F}/connectors/conn_1/schemas/s/tables/{table}/columns").mock(
+            return_value=httpx.Response(200, json={"data": {"columns": {"id": {"enabled": True}}}})
+        )
+    schema_route = respx.patch(f"{F}/connectors/conn_1/schemas").mock(
+        return_value=httpx.Response(200, json={"data": {}})
+    )
+    unpause_route = respx.patch(f"{F}/connectors/conn_1").mock(
+        return_value=httpx.Response(200, json={"data": {}})
+    )
+    await queue.enqueue(
+        db, org_id, "meta.await_first_sync", {"meta_connection_id": str(conn_id)}, max_attempts=3
+    )
+    assert await run_once(db, blobs, settings, "w1") is True
+    assert reload_route.called
+    schema_sent = json.loads(schema_route.calls.last.request.content)
+    assert schema_sent["schema_change_handling"] == "BLOCK_ALL"
+    assert set(schema_sent["schemas"]["s"]["tables"]) == set(fivetran_client.REQUIRED_TABLES)
+    assert json.loads(unpause_route.calls.last.request.content) == {"paused": False}
+    row = await repo.get_meta_connection_by_id(db, conn_id)
+    assert row["sync_status"] == "pending"
+    assert await db.fetchval("SELECT status FROM job") == "pending"  # still waiting on the sync
+
+
+@respx.mock
 async def test_await_first_sync_marks_broken_connector_as_error(db, blobs, settings, org_id):
     conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", "s")
     respx.get(f"{F}/connectors/conn_1").mock(
@@ -66,15 +113,14 @@ async def test_await_first_sync_marks_broken_connector_as_error(db, blobs, setti
 async def test_sync_from_fivetran_stays_ready_when_insights_table_is_missing(
     db, blobs, settings, org_id
 ):
-    """Regression test: the ad_insights custom report is a separate, manual Fivetran
-    dashboard step that may not be configured yet -- confirmed live against a real
-    connector, this crashes sync_insights with UndefinedTableError. That must not undo
-    a successful entity sync or leave the connection stuck in 'error': ads/creatives are
-    fully usable without metrics, and retrying does nothing to fix a table that doesn't
-    exist until someone configures the report."""
+    """Regression test: basic_ad may not have landed for this org yet -- confirmed live
+    against a real connector, this crashes sync_insights with UndefinedTableError. That
+    must not undo a successful entity sync or leave the connection stuck in 'error':
+    ads/creatives are fully usable without metrics, and retrying does nothing to fix a
+    table that doesn't exist until Fivetran lands it."""
     schema = "no_insights_org__meta_ads"
     await create_fixture_schema(db, schema)
-    await db.execute(f'DROP TABLE "{schema}".ad_insights CASCADE')
+    await db.execute(f'DROP TABLE "{schema}".basic_ad CASCADE')
     await insert_campaign_ad_creative(
         db,
         schema,

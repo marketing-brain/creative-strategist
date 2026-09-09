@@ -95,7 +95,6 @@ async def test_full_loop(client, db, blobs, settings, monkeypatch):
                 day=d.isoformat(),
                 spend=30,
                 impressions=1000,
-                clicks=ctr_clicks,
                 link_clicks=ctr_clicks,
             )
 

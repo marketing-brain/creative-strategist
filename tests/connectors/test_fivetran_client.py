@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 import respx
@@ -108,3 +110,50 @@ async def test_error_response_raises_fivetran_error(settings):
     async with httpx.AsyncClient() as http:
         with pytest.raises(client.FivetranError, match="connector not found"):
             await client.get_connector(settings, http, "bad")
+
+
+@respx.mock
+async def test_set_paused(settings):
+    _settings(settings)
+    route = respx.patch(f"{F}/connectors/conn_1").mock(
+        return_value=httpx.Response(200, json={"data": {}})
+    )
+    async with httpx.AsyncClient() as http:
+        await client.set_paused(settings, http, "conn_1", False)
+    assert json.loads(route.calls.last.request.content) == {"paused": False}
+
+
+@respx.mock
+async def test_lock_down_and_activate_excludes_then_allows_only_required_tables(settings):
+    _settings(settings)
+    reload_route = respx.post(f"{F}/connectors/conn_1/schemas/reload").mock(
+        return_value=httpx.Response(200, json={"data": {}})
+    )
+    for table in client.REQUIRED_TABLES:
+        respx.get(f"{F}/connectors/conn_1/schemas/org1__meta_ads/tables/{table}/columns").mock(
+            return_value=httpx.Response(
+                200,
+                json={"data": {"columns": {"id": {"enabled": True}, "spend": {"enabled": False}}}},
+            )
+        )
+    schema_route = respx.patch(f"{F}/connectors/conn_1/schemas").mock(
+        return_value=httpx.Response(200, json={"data": {}})
+    )
+    unpause_route = respx.patch(f"{F}/connectors/conn_1").mock(
+        return_value=httpx.Response(200, json={"data": {}})
+    )
+    async with httpx.AsyncClient() as http:
+        await client.lock_down_and_activate(settings, http, "conn_1", "org1__meta_ads")
+
+    reload_sent = json.loads(reload_route.calls.last.request.content)
+    assert reload_sent == {"exclude_mode": "EXCLUDE"}
+
+    schema_sent = json.loads(schema_route.calls.last.request.content)
+    assert schema_sent["schema_change_handling"] == "BLOCK_ALL"
+    tables = schema_sent["schemas"]["org1__meta_ads"]["tables"]
+    assert set(tables) == set(client.REQUIRED_TABLES)
+    assert all(t["enabled"] for t in tables.values())
+    assert all(set(t["columns"]) == {"id", "spend"} for t in tables.values())
+    assert all(c["enabled"] for t in tables.values() for c in t["columns"].values())
+
+    assert json.loads(unpause_route.calls.last.request.content) == {"paused": False}

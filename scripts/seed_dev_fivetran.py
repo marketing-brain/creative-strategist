@@ -47,7 +47,6 @@ async def main() -> None:
             day="2026-09-01",
             spend=10,
             impressions=1000,
-            clicks=20,
             link_clicks=20,
         )
 

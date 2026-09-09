@@ -8,6 +8,16 @@ from cs.core.config import Settings
 
 API_BASE = "https://api.fivetran.com/v1"
 
+REQUIRED_TABLES = (
+    "campaign_history",
+    "ad_history",
+    "creative_history",
+    "ad_video_history",
+    "basic_ad",
+    "basic_ad_actions",
+    "basic_ad_action_values",
+)
+
 
 class FivetranError(RuntimeError):
     pass
@@ -86,6 +96,54 @@ async def create_connector(
 
 async def get_connector(settings: Settings, http: httpx.AsyncClient, connector_id: str) -> dict:
     return await _call(settings, http, "GET", f"/connectors/{connector_id}")
+
+
+async def set_paused(
+    settings: Settings, http: httpx.AsyncClient, connector_id: str, paused: bool
+) -> None:
+    await _call(settings, http, "PATCH", f"/connectors/{connector_id}", {"paused": paused})
+
+
+async def get_table_columns(
+    settings: Settings, http: httpx.AsyncClient, connector_id: str, schema: str, table: str
+) -> dict:
+    data = await _call(
+        settings,
+        http,
+        "GET",
+        f"/connectors/{connector_id}/schemas/{schema}/tables/{table}/columns",
+    )
+    return data.get("columns", {})
+
+
+async def lock_down_and_activate(
+    settings: Settings, http: httpx.AsyncClient, connector_id: str, schema: str
+) -> None:
+    await _call(
+        settings,
+        http,
+        "POST",
+        f"/connectors/{connector_id}/schemas/reload",
+        {"exclude_mode": "EXCLUDE"},
+    )
+    tables = {}
+    for table in REQUIRED_TABLES:
+        columns = await get_table_columns(settings, http, connector_id, schema, table)
+        tables[table] = {
+            "enabled": True,
+            "columns": {name: {"enabled": True} for name in columns},
+        }
+    await _call(
+        settings,
+        http,
+        "PATCH",
+        f"/connectors/{connector_id}/schemas",
+        {
+            "schemas": {schema: {"enabled": True, "tables": tables}},
+            "schema_change_handling": "BLOCK_ALL",
+        },
+    )
+    await set_paused(settings, http, connector_id, False)
 
 
 async def delete_connector(settings: Settings, http: httpx.AsyncClient, connector_id: str) -> None:
