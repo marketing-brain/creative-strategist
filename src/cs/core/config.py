@@ -32,13 +32,11 @@ class Settings(BaseSettings):
     fivetran_group_id: str = ""
     web_base_url: str = "http://localhost:3000"
 
-    anthropic_api_key: str = ""
-    claude_model_copilot: str = "claude-opus-5"
-
     ai_gateway_api_key: str = ""
     ai_gateway_base_url: str = "https://ai-gateway.vercel.sh"
     tagging_model: str = "google/gemini-2.5-flash-lite"
     insights_model: str = "google/gemini-2.5-flash-lite"
+    copilot_model: str = "google/gemini-2.5-flash"
     # google/gemini-3-flash is the better fit for this (highest-stakes text output in
     # the app) but 403s on Vercel AI Gateway's free tier ("no_providers_available" /
     # RestrictedModelsError) -- switch to it once the account has paid AI Gateway credits.

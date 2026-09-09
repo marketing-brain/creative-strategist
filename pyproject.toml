@@ -16,7 +16,6 @@ dependencies = [
   "python-multipart>=0.0.9",
   "pyyaml>=6",
   "pillow>=10",
-  "anthropic>=1.0",
   "openai>=1.50",
 ]
 

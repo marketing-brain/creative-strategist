@@ -5,7 +5,7 @@ AI creative strategist for paid social. See `docs/superpowers/specs/` for the de
 ## Local setup
 
     brew install uv dbmate ffmpeg          # macOS
-    cp .env.example .env                    # fill ANTHROPIC_API_KEY for real tagging/insights/copilot
+    cp .env.example .env                    # fill AI_GATEWAY_API_KEY for real tagging/insights/copy/copilot
     make up                                 # postgres + minio
     make install migrate
     make test
@@ -27,12 +27,13 @@ The Next.js front end lives in `web/` and talks to the API above.
     make web-e2e                          # seeds a fixture Fivetran schema, runs Playwright
 
 There is no dev-mode auth bypass and no fake-connector demo mode: every environment,
-local development included, authenticates through Clerk and calls real Anthropic/AI
-Gateway APIs. `scripts/seed_dev_fivetran.py` still seeds a fixture
-`<schema>__meta_ads` schema (shaped like a real Fivetran-landed Meta Ads sync) so you
-don't need a live Fivetran connector to exercise sync/activate locally, but tagging,
-insights, briefs, and generation all need real `ANTHROPIC_API_KEY` /
-`AI_GATEWAY_API_KEY` credentials to do anything.
+local development included, authenticates through Clerk and calls real AI Gateway
+APIs (tagging, insight explanations, copywriting, and Copilot chat are all
+Gemini-via-AI-Gateway -- there is no Claude/Anthropic dependency in this app).
+`scripts/seed_dev_fivetran.py` still seeds a fixture `<schema>__meta_ads` schema
+(shaped like a real Fivetran-landed Meta Ads sync) so you don't need a live Fivetran
+connector to exercise sync/activate locally, but tagging, insights, briefs, and
+generation all need a real `AI_GATEWAY_API_KEY` credential to do anything.
 
 ### Known limitations
 

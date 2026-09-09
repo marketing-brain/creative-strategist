@@ -5,8 +5,7 @@ from datetime import date
 from typing import Protocol
 from uuid import UUID
 
-import anthropic
-from anthropic import beta_async_tool
+import openai
 
 from cs.core.config import Settings
 from cs.core.db import Database
@@ -129,94 +128,148 @@ class Copilot(Protocol):
     async def answer(self, history: list[dict], tools: CopilotTools) -> str: ...
 
 
-class ClaudeCopilot:
-    def __init__(self, settings: Settings, client: anthropic.AsyncAnthropic | None = None):
-        self.client = client or anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key or None)
-        self.model = settings.claude_model_copilot
+TOOL_SPECS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "metrics_by_creative",
+            "description": (
+                "Daily spend, impressions, clicks, conversions, ctr, cpa, roas for one creative."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "creative_id": {"type": "string", "description": "The creative UUID."},
+                    "since": {"type": "string", "description": "ISO date, inclusive."},
+                    "until": {"type": "string", "description": "ISO date, inclusive."},
+                },
+                "required": ["creative_id", "since", "until"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "tags_for_creative",
+            "description": (
+                "Latest structured tags (dimension, value, confidence, evidence) for one creative."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "creative_id": {"type": "string", "description": "The creative UUID."}
+                },
+                "required": ["creative_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "top_creatives_by_dimension",
+            "description": "Creatives carrying a tag value, ranked by a metric over a date window.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dimension": {
+                        "type": "string",
+                        "description": "Tag dimension name, e.g. hook_type.",
+                    },
+                    "value": {"type": "string", "description": "Tag value, e.g. question."},
+                    "metric": {"type": "string", "description": "One of ctr, cpa, roas."},
+                    "since": {"type": "string", "description": "ISO date, inclusive."},
+                    "until": {"type": "string", "description": "ISO date, inclusive."},
+                    "limit": {"type": "integer", "description": "Max rows."},
+                },
+                "required": ["dimension", "value", "metric", "since", "until"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "insights",
+            "description": "Stored insights with explanations.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "description": "pattern or fatigue."},
+                    "limit": {"type": "integer", "description": "Max rows."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fatigue_alerts",
+            "description": "Creatives whose CTR or CPA decayed versus their first 14 days.",
+            "parameters": {
+                "type": "object",
+                "properties": {"limit": {"type": "integer", "description": "Max rows."}},
+                "required": [],
+            },
+        },
+    },
+]
 
-    def _tools(self, t: CopilotTools) -> list:
-        @beta_async_tool
-        async def metrics_by_creative(creative_id: str, since: str, until: str) -> str:
-            """Daily spend, impressions, clicks, conversions, ctr, cpa, roas for one creative.
+MAX_TOOL_ITERATIONS = 10
 
-            Args:
-                creative_id: The creative UUID.
-                since: ISO date, inclusive.
-                until: ISO date, inclusive.
-            """
-            return json.dumps(await t.metrics_by_creative(creative_id, since, until))
 
-        @beta_async_tool
-        async def tags_for_creative(creative_id: str) -> str:
-            """Latest structured tags (dimension, value, confidence, evidence) for one creative.
-
-            Args:
-                creative_id: The creative UUID.
-            """
-            return json.dumps(await t.tags_for_creative(creative_id))
-
-        @beta_async_tool
-        async def top_creatives_by_dimension(
-            dimension: str, value: str, metric: str, since: str, until: str, limit: int = 10
-        ) -> str:
-            """Creatives carrying a tag value, ranked by a metric over a date window.
-
-            Args:
-                dimension: Tag dimension name, e.g. hook_type.
-                value: Tag value, e.g. question.
-                metric: One of ctr, cpa, roas.
-                since: ISO date, inclusive.
-                until: ISO date, inclusive.
-                limit: Max rows.
-            """
-            return json.dumps(
-                await t.top_creatives_by_dimension(dimension, value, metric, since, until, limit)
-            )
-
-        @beta_async_tool
-        async def insights(kind: str = "pattern", limit: int = 10) -> str:
-            """Stored insights with explanations.
-
-            Args:
-                kind: pattern or fatigue.
-                limit: Max rows.
-            """
-            return json.dumps(await t.insights(kind, limit))
-
-        @beta_async_tool
-        async def fatigue_alerts(limit: int = 10) -> str:
-            """Creatives whose CTR or CPA decayed versus their first 14 days.
-
-            Args:
-                limit: Max rows.
-            """
-            return json.dumps(await t.fatigue_alerts(limit))
-
-        return [
-            metrics_by_creative,
-            tags_for_creative,
-            top_creatives_by_dimension,
-            insights,
-            fatigue_alerts,
-        ]
+class GeminiGatewayCopilot:
+    def __init__(self, settings: Settings, client: openai.AsyncOpenAI | None = None):
+        self.client = client or openai.AsyncOpenAI(
+            api_key=settings.ai_gateway_api_key, base_url=f"{settings.ai_gateway_base_url}/v1"
+        )
+        self.model = settings.copilot_model
 
     async def answer(self, history: list[dict], tools: CopilotTools) -> str:
-        runner = self.client.beta.messages.tool_runner(
-            model=self.model,
-            max_tokens=8000,
-            max_iterations=10,
-            system=SYSTEM,
-            tools=self._tools(tools),
-            messages=[{"role": m["role"], "content": m["content"]} for m in history],
-        )
-        last = None
-        async for message in runner:
-            last = message
-        if last is None:
-            return "I could not produce an answer."
-        if last.stop_reason == "refusal":
-            return "I can't help with that request."
-        return "".join(b.text for b in last.content if getattr(b, "type", "") == "text").strip()
+        system = f"{SYSTEM} Today's date is {date.today().isoformat()}."
+        messages: list[dict] = [{"role": "system", "content": system}]
+        messages += [{"role": m["role"], "content": m["content"]} for m in history]
+
+        for i in range(MAX_TOOL_ITERATIONS):
+            last_iteration = i == MAX_TOOL_ITERATIONS - 1
+            resp = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=None if last_iteration else TOOL_SPECS,
+            )
+            choice = resp.choices[0]
+            if choice.finish_reason == "content_filter" or getattr(choice.message, "refusal", None):
+                return "I can't help with that request."
+            if not choice.message.tool_calls:
+                return (choice.message.content or "").strip() or "I could not produce an answer."
+
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": choice.message.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in choice.message.tool_calls
+                    ],
+                }
+            )
+            for tc in choice.message.tool_calls:
+                args = json.loads(tc.function.arguments or "{}")
+                method = getattr(tools, tc.function.name, None)
+                try:
+                    result = await method(**args) if method else {"error": "unknown tool"}
+                except Exception as exc:
+                    result = {"error": str(exc)}
+                messages.append(
+                    {"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)}
+                )
+        return "I could not produce an answer."
 
 
 async def create_conversation(db: Database, org_id: UUID, user_id: str, title: str) -> UUID:

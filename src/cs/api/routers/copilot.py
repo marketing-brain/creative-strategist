@@ -13,7 +13,7 @@ router = APIRouter(prefix="/copilot")
 
 
 def default_copilot_factory(settings: Settings) -> copilot.Copilot:
-    return copilot.ClaudeCopilot(settings)
+    return copilot.GeminiGatewayCopilot(settings)
 
 
 COPILOT_FACTORY = default_copilot_factory
