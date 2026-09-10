@@ -53,7 +53,7 @@ async def test_compute_patterns_job_persists_with_explanations(
 async def test_schedules_enqueue_per_active_account(db, settings, org_id):
     await seed_account(db, org_id, settings)
     await insight_jobs.nightly_patterns(db, settings)
-    await insight_jobs.hourly_fatigue(db, settings)
+    await insight_jobs.periodic_fatigue(db, settings)
     types = sorted(r["job_type"] for r in await db.fetch("SELECT job_type FROM job"))
     assert types == ["insights.compute_fatigue", "insights.compute_patterns"]
 

@@ -98,8 +98,8 @@ async def nightly_patterns(db: Database, settings: Settings) -> None:
     await _enqueue_for_active(db, "insights.compute_patterns", "patterns")
 
 
-@register_schedule("insights.hourly_fatigue", every_seconds=3600)
-async def hourly_fatigue(db: Database, settings: Settings) -> None:
+@register_schedule("insights.periodic_fatigue", every_seconds=21600)
+async def periodic_fatigue(db: Database, settings: Settings) -> None:
     await _enqueue_for_active(db, "insights.compute_fatigue", "fatigue")
 
 
