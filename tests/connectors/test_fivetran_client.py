@@ -149,7 +149,7 @@ async def test_lock_down_and_activate_excludes_then_allows_only_required_tables(
     assert reload_sent == {"exclude_mode": "EXCLUDE"}
 
     schema_sent = json.loads(schema_route.calls.last.request.content)
-    assert schema_sent["schema_change_handling"] == "BLOCK_ALL"
+    assert schema_sent["schema_change_handling"] == "ALLOW_COLUMNS"
     tables = schema_sent["schemas"]["org1__meta_ads"]["tables"]
     assert set(tables) == set(client.REQUIRED_TABLES)
     assert all(t["enabled"] for t in tables.values())

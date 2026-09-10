@@ -88,7 +88,7 @@ async def test_await_first_sync_locks_down_schema_when_connected_and_still_pause
     assert await run_once(db, blobs, settings, "w1") is True
     assert reload_route.called
     schema_sent = json.loads(schema_route.calls.last.request.content)
-    assert schema_sent["schema_change_handling"] == "BLOCK_ALL"
+    assert schema_sent["schema_change_handling"] == "ALLOW_COLUMNS"
     assert set(schema_sent["schemas"]["s"]["tables"]) == set(fivetran_client.REQUIRED_TABLES)
     assert json.loads(unpause_route.calls.last.request.content) == {"paused": False}
     row = await repo.get_meta_connection_by_id(db, conn_id)

@@ -126,6 +126,9 @@ async def lock_down_and_activate(
         f"/connectors/{connector_id}/schemas/reload",
         {"exclude_mode": "EXCLUDE"},
     )
+    # Right after EXCLUDE, Fivetran has barely discovered each table's real column set --
+    # BLOCK_ALL would permanently lock out every column it finds later during the actual
+    # sync. ALLOW_COLUMNS still blocks new tables (all we need) but lets columns self-heal.
     tables = {}
     for table in REQUIRED_TABLES:
         columns = await get_table_columns(settings, http, connector_id, schema, table)
@@ -140,7 +143,7 @@ async def lock_down_and_activate(
         f"/connectors/{connector_id}/schemas",
         {
             "schemas": {schema: {"enabled": True, "tables": tables}},
-            "schema_change_handling": "BLOCK_ALL",
+            "schema_change_handling": "ALLOW_COLUMNS",
         },
     )
     await set_paused(settings, http, connector_id, False)
