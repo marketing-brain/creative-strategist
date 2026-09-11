@@ -328,6 +328,44 @@ async def test_video_creative_downloads_from_ad_video_history_source(db, blobs, 
     assert job["payload"]["kind"] == "original_video"
 
 
+async def test_video_resolves_via_video_video_id_when_video_id_does_not_match(
+    db, blobs, settings, org_id
+):
+    """Regression: video_id and video_video_id reference different Meta objects --
+    video_id rarely matches ad_video_history at all (confirmed against a real connector,
+    the actual join key is video_video_id). A creative with a video_id that doesn't
+    resolve must still download its video if video_video_id does."""
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="ad1",
+        creative_id="cr1",
+        name="name",
+        headline="Headline",
+        image_url="https://img/orig.jpg",
+        video_id="asset_feed_spec_vid",
+        video_video_id="vid1",
+    )
+    await insert_video(db, SCHEMA, video_id="vid1", source="https://cdn.example/video.mp4")
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    acct = (await repo.list_ad_accounts(db, org_id))[0]
+    await repo.set_ad_account_status(db, org_id, acct["id"], "active")
+    summary = await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+
+    assert summary["failed"] == 0
+    job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.download_creative'")
+    assert job is not None
+    assert job["payload"]["asset_url"] == "https://cdn.example/video.mp4"
+
+
 async def test_video_with_no_landed_source_yet_is_skipped_not_failed(db, blobs, settings, org_id):
     """A video whose ad_video_history row hasn't synced yet (or has no source -- still
     processing on Meta's side) must not fail the sync or enqueue a broken download --

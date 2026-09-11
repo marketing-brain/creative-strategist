@@ -40,7 +40,7 @@ async def create_fixture_schema(db: Database, schema: str) -> None:
         CREATE TABLE "{schema}".{CREATIVE_HISTORY} (
           id TEXT, account_id TEXT, name TEXT, title TEXT, body TEXT,
           call_to_action_type TEXT, image_url TEXT, thumbnail_url TEXT,
-          object_story_link_data_link TEXT, video_id TEXT,
+          object_story_link_data_link TEXT, video_id TEXT, video_video_id TEXT,
           object_story_link_data_child_attachments TEXT, _fivetran_synced TIMESTAMPTZ
         )
     """)
@@ -73,6 +73,7 @@ async def insert_campaign_ad_creative(
     headline: str,
     image_url: str,
     video_id: str | None = None,
+    video_video_id: str | None = None,
 ) -> None:
     await db.execute(
         f'INSERT INTO "{schema}".campaign_history VALUES ($1, $2, $3, now())',
@@ -92,7 +93,7 @@ async def insert_campaign_ad_creative(
     )
     await db.execute(
         f'INSERT INTO "{schema}".creative_history VALUES '
-        f"($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, now())",
+        f"($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, now())",
         creative_id,
         account_id,
         name,
@@ -103,6 +104,7 @@ async def insert_campaign_ad_creative(
         None,
         "https://example.com",
         video_id,
+        video_video_id,
     )
 
 

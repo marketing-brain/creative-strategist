@@ -70,12 +70,9 @@ def _format_and_urls(
     row: asyncpg.Record, videos_by_id: dict[str, str]
 ) -> tuple[str, str | None, list[str] | None]:
     if row["video_id"]:
-        # ad_video_history.source is the actual downloadable MP4 -- confirmed against a
-        # real connector. Some videos land with no source yet (still processing on
-        # Meta's side, or the row hasn't synced): videos_by_id.get returns None then,
-        # same as any other creative whose asset isn't downloadable yet -- the existing
-        # asset_url-gated enqueue below already skips cleanly in that case.
-        return "video", videos_by_id.get(_pid(row["video_id"])), None
+        # video_video_id is the field that actually matches ad_video_history.id -- video_id
+        # points at a different object (asset_feed_spec) and almost never resolves there.
+        return "video", videos_by_id.get(_pid(row["video_video_id"] or row["video_id"])), None
     child_urls = _carousel_urls(row["object_story_link_data_child_attachments"])
     if child_urls:
         return "carousel", None, child_urls
