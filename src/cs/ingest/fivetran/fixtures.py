@@ -41,7 +41,8 @@ async def create_fixture_schema(db: Database, schema: str) -> None:
           id TEXT, account_id TEXT, name TEXT, title TEXT, body TEXT,
           call_to_action_type TEXT, image_url TEXT, thumbnail_url TEXT,
           object_story_link_data_link TEXT, video_id TEXT, video_video_id TEXT,
-          object_story_link_data_child_attachments TEXT, _fivetran_synced TIMESTAMPTZ
+          object_story_link_data_child_attachments TEXT, instagram_permalink_url TEXT,
+          _fivetran_synced TIMESTAMPTZ
         )
     """)
     await db.execute(f"""
@@ -74,6 +75,7 @@ async def insert_campaign_ad_creative(
     image_url: str,
     video_id: str | None = None,
     video_video_id: str | None = None,
+    instagram_permalink_url: str | None = None,
 ) -> None:
     await db.execute(
         f'INSERT INTO "{schema}".campaign_history VALUES ($1, $2, $3, now())',
@@ -93,7 +95,7 @@ async def insert_campaign_ad_creative(
     )
     await db.execute(
         f'INSERT INTO "{schema}".creative_history VALUES '
-        f"($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, now())",
+        f"($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, $12, now())",
         creative_id,
         account_id,
         name,
@@ -105,6 +107,7 @@ async def insert_campaign_ad_creative(
         "https://example.com",
         video_id,
         video_video_id,
+        instagram_permalink_url,
     )
 
 

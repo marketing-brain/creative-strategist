@@ -400,6 +400,119 @@ async def test_video_with_no_landed_source_yet_is_skipped_not_failed(db, blobs, 
     assert n == 0
 
 
+async def test_unresolved_video_with_instagram_permalink_enqueues_resolve_job(
+    db, blobs, settings, org_id
+):
+    """A video whose video_video_id doesn't resolve against ad_video_history at all, but
+    that carries an instagram_permalink_url, is a Partnership Ad -- the video lives in
+    the creator's own Instagram account, not this ad account's video library. That case
+    should fall through to meta.resolve_instagram_video instead of being silently
+    skipped like a genuinely-not-synced-yet video."""
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="ad1",
+        creative_id="cr1",
+        name="name",
+        headline="Headline",
+        image_url="https://img/orig.jpg",
+        video_id="vid_not_in_video_history",
+        instagram_permalink_url="https://www.instagram.com/p/abc123/",
+    )
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    acct = (await repo.list_ad_accounts(db, org_id))[0]
+    await repo.set_ad_account_status(db, org_id, acct["id"], "active")
+    summary = await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+
+    assert summary["failed"] == 0
+    job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.resolve_instagram_video'")
+    assert job is not None
+    assert job["payload"]["permalink_url"] == "https://www.instagram.com/p/abc123/"
+    assert job["max_attempts"] == 3
+    assert (
+        await db.fetchval("SELECT count(*) FROM job WHERE job_type='meta.download_creative'") == 0
+    )
+
+
+async def test_unresolved_video_without_instagram_permalink_is_skipped_not_enqueued(
+    db, blobs, settings, org_id
+):
+    """No video source AND no Instagram permalink -- there's nowhere left to look, so
+    this must stay a silent skip (same as before this feature existed), not an attempt
+    to call Apify with no URL."""
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="ad1",
+        creative_id="cr1",
+        name="name",
+        headline="Headline",
+        image_url="https://img/orig.jpg",
+        video_id="vid_not_in_video_history",
+    )
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    acct = (await repo.list_ad_accounts(db, org_id))[0]
+    await repo.set_ad_account_status(db, org_id, acct["id"], "active")
+    summary = await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+
+    assert summary["failed"] == 0
+    assert await db.fetchval("SELECT count(*) FROM job") == 0
+
+
+async def test_dead_resolve_job_is_not_re_enqueued_on_next_sync(db, blobs, settings, org_id):
+    """Once meta.resolve_instagram_video has exhausted its retries for a creative (post
+    permanently gone/private), the next nightly sync must not re-enqueue it -- otherwise
+    a permanently-unresolvable video costs Apify credits forever."""
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="ad1",
+        creative_id="cr1",
+        name="name",
+        headline="Headline",
+        image_url="https://img/orig.jpg",
+        video_id="vid_not_in_video_history",
+        instagram_permalink_url="https://www.instagram.com/p/abc123/",
+    )
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    acct = (await repo.list_ad_accounts(db, org_id))[0]
+    await repo.set_ad_account_status(db, org_id, acct["id"], "active")
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    await db.execute("UPDATE job SET status='dead' WHERE job_type='meta.resolve_instagram_video'")
+
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+
+    n = await db.fetchval(
+        "SELECT count(*) FROM job WHERE job_type='meta.resolve_instagram_video'"
+        " AND status != 'dead'"
+    )
+    assert n == 0
+
+
 def test_carousel_urls_returns_none_for_malformed_shapes():
     """Regression test: a valid-but-non-list JSON value (e.g. a bare number) must return
     None gracefully instead of raising a TypeError out of the list comprehension."""

@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     transcription_model: str = "openai/whisper-1"
     embedding_model: str = "openai/text-embedding-3-small"
 
+    # Fallback for videos Fivetran's Meta connector can never expose: Partnership Ads,
+    # where the video lives in the creator's own Instagram account rather than the
+    # advertiser's ad-account video library. Empty means the feature is simply off --
+    # meta.resolve_instagram_video gives up immediately rather than erroring.
+    apify_api_key: str = ""
+
     worker_poll_seconds: float = 1.0
     job_lease_seconds: int = 600
 

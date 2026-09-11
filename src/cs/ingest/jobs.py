@@ -10,7 +10,7 @@ from cs.connectors.fivetran import client as fivetran_client
 from cs.core import queue, repo
 from cs.core.config import Settings
 from cs.core.db import Database
-from cs.ingest import assets
+from cs.ingest import assets, instagram_scrape
 from cs.ingest.fivetran import insights, transform
 from cs.jobs.registry import JobContext, handler
 from cs.jobs.scheduler import register_schedule
@@ -102,6 +102,27 @@ async def download_creative(ctx: JobContext) -> None:
     async with httpx.AsyncClient(timeout=120) as http:
         await assets.download_creative(ctx, http, creative_id, p["asset_url"], p["kind"])
     log.info("creative downloaded", extra={"creative_id": str(creative_id)})
+
+
+@handler("meta.resolve_instagram_video")
+async def resolve_instagram_video(ctx: JobContext) -> None:
+    p = ctx.job.payload
+    creative_id = UUID(p["creative_id"])
+    async with httpx.AsyncClient(timeout=120) as http:
+        try:
+            video_url = await instagram_scrape.resolve_video_url(
+                http, ctx.settings, p["permalink_url"]
+            )
+        except instagram_scrape.InstagramScrapeError as exc:
+            if exc.retryable:
+                raise
+            log.warning(
+                "instagram video could not be resolved -- giving up",
+                extra={"creative_id": str(creative_id), "error": str(exc)},
+            )
+            return
+        await assets.download_creative(ctx, http, creative_id, video_url, p["kind"])
+    log.info("resolved instagram-sourced video via Apify", extra={"creative_id": str(creative_id)})
 
 
 @handler("meta.download_carousel")

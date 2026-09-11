@@ -3,6 +3,7 @@ import json
 import httpx
 import respx
 
+from cs.connectors.base import PlatformCreative
 from cs.connectors.fivetran import client as fivetran_client
 from cs.core import queue, repo
 from cs.ingest import jobs as ingest_jobs
@@ -10,6 +11,7 @@ from cs.ingest.fivetran.fixtures import create_fixture_schema, insert_campaign_a
 from cs.jobs.worker import run_once
 
 F = "https://api.fivetran.com/v1"
+APIFY_URL = "https://api.apify.com/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items"
 
 
 @respx.mock
@@ -169,6 +171,102 @@ async def test_nightly_sync_skips_connections_without_an_active_account(db, sett
     await ingest_jobs.nightly_sync(db, settings)
 
     assert await db.fetchval("SELECT count(*) FROM job WHERE org_id=$1", org_id) == 0
+
+
+async def _creative(db, org_id):
+    acct = await repo.upsert_ad_account(db, org_id, "1", "Main", "USD")
+    cid, _ = await repo.upsert_creative(
+        db,
+        org_id,
+        acct,
+        PlatformCreative("cr1", "video", "H", "P", None, "SHOP_NOW", "https://x", None, None, {}),
+        "",
+    )
+    return cid
+
+
+@respx.mock
+async def test_resolve_instagram_video_downloads_and_tags_on_success(db, blobs, settings, org_id):
+    settings.apify_api_key = "test-token"
+    respx.post(APIFY_URL).mock(
+        return_value=httpx.Response(200, json=[{"videoUrl": "https://cdn.instagram/vid.mp4"}])
+    )
+    respx.get("https://cdn.instagram/vid.mp4").mock(
+        return_value=httpx.Response(200, content=b"vid", headers={"content-type": "video/mp4"})
+    )
+    cid = await _creative(db, org_id)
+    await queue.enqueue(
+        db,
+        org_id,
+        "meta.resolve_instagram_video",
+        {
+            "creative_id": str(cid),
+            "permalink_url": "https://www.instagram.com/p/abc/",
+            "kind": "original_video",
+        },
+        dedup_key=str(cid),
+        max_attempts=3,
+    )
+    assert await run_once(db, blobs, settings, "w1") is True
+    assert await repo.creative_has_primary_asset(db, org_id, cid)
+    assert (
+        await db.fetchval("SELECT status FROM job WHERE job_type='meta.resolve_instagram_video'")
+        == "done"
+    )
+    assert (
+        await db.fetchval("SELECT job_type FROM job WHERE job_type='tagging.tag_creative'")
+        == "tagging.tag_creative"
+    )
+
+
+@respx.mock
+async def test_resolve_instagram_video_gives_up_without_retry_when_post_is_gone(
+    db, blobs, settings, org_id
+):
+    """Apify returning no items (deleted/private post) is a definitive answer -- the job
+    must mark done, not retry, so a nightly sync doesn't keep paying Apify to re-learn
+    the same thing forever."""
+    settings.apify_api_key = "test-token"
+    respx.post(APIFY_URL).mock(return_value=httpx.Response(200, json=[]))
+    cid = await _creative(db, org_id)
+    await queue.enqueue(
+        db,
+        org_id,
+        "meta.resolve_instagram_video",
+        {
+            "creative_id": str(cid),
+            "permalink_url": "https://www.instagram.com/p/gone/",
+            "kind": "original_video",
+        },
+        dedup_key=str(cid),
+        max_attempts=3,
+    )
+    assert await run_once(db, blobs, settings, "w1") is True
+    assert await db.fetchval("SELECT status FROM job") == "done"
+    assert await repo.creative_has_primary_asset(db, org_id, cid) is False
+
+
+@respx.mock
+async def test_resolve_instagram_video_retries_on_transient_apify_failure(
+    db, blobs, settings, org_id
+):
+    settings.apify_api_key = "test-token"
+    respx.post(APIFY_URL).mock(return_value=httpx.Response(503, text="rate limited"))
+    cid = await _creative(db, org_id)
+    await queue.enqueue(
+        db,
+        org_id,
+        "meta.resolve_instagram_video",
+        {
+            "creative_id": str(cid),
+            "permalink_url": "https://www.instagram.com/p/x/",
+            "kind": "original_video",
+        },
+        dedup_key=str(cid),
+        max_attempts=3,
+    )
+    assert await run_once(db, blobs, settings, "w1") is True
+    assert await db.fetchval("SELECT status FROM job") == "pending"  # retried, not dead yet
 
 
 async def test_nightly_sync_skips_non_ready_connections(db, settings, org_id):
