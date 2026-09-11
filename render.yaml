@@ -69,12 +69,14 @@ services:
     dockerContext: .
     plan: starter
     region: oregon
-    startCommand: python -m cs.api
+    # docker runtime overrides the image's command via dockerCommand, not
+    # startCommand -- the latter is buildpack-only and Render rejects it here.
+    dockerCommand: python -m cs.api
     healthCheckPath: /health
     # Runs once per deploy, before the new instance takes traffic -- replaces the
     # `dbmate ... up` line setup.sh ran by hand on every re-run. (Pre-deploy commands
-    # need a paid Render plan; on Starter, fold this into startCommand instead:
-    # `dbmate --no-dump-schema --migrations-dir db/migrations up && python -m cs.api`.)
+    # need a paid Render plan; on Starter, fold this into dockerCommand instead:
+    # `sh -c "dbmate --no-dump-schema --migrations-dir db/migrations up && python -m cs.api"`.)
     preDeployCommand: dbmate --no-dump-schema --migrations-dir db/migrations up
     envVars:
       # Groups attach via envVars/fromGroup, not a top-level envVarGroups key on the
@@ -106,7 +108,7 @@ services:
     dockerContext: .
     plan: starter
     region: oregon
-    startCommand: python -m cs.worker
+    dockerCommand: python -m cs.worker
     envVars:
       - fromGroup: cs-backend-env
 
@@ -117,7 +119,7 @@ services:
     dockerContext: .
     plan: starter
     region: oregon
-    startCommand: python -m cs.scheduler
+    dockerCommand: python -m cs.scheduler
     envVars:
       - fromGroup: cs-backend-env
 
