@@ -76,9 +76,10 @@ services:
     # need a paid Render plan; on Starter, fold this into startCommand instead:
     # `dbmate --no-dump-schema --migrations-dir db/migrations up && python -m cs.api`.)
     preDeployCommand: dbmate --no-dump-schema --migrations-dir db/migrations up
-    envVarGroups:
-      - cs-backend-env
     envVars:
+      # Groups attach via envVars/fromGroup, not a top-level envVarGroups key on the
+      # service -- that key only exists at the file root, for *defining* a group.
+      - fromGroup: cs-backend-env
       # Read by anything that builds an absolute callback/redirect URL (e.g. the
       # Fivetran connect flow) -- wired to this service's own Render URL so it's never
       # stale after a redeploy, unlike the EC2 box's public IP.
@@ -106,8 +107,8 @@ services:
     plan: starter
     region: oregon
     startCommand: python -m cs.worker
-    envVarGroups:
-      - cs-backend-env
+    envVars:
+      - fromGroup: cs-backend-env
 
   - type: worker
     name: cs-scheduler
@@ -117,8 +118,8 @@ services:
     plan: starter
     region: oregon
     startCommand: python -m cs.scheduler
-    envVarGroups:
-      - cs-backend-env
+    envVars:
+      - fromGroup: cs-backend-env
 
   - type: web
     name: cs-web
