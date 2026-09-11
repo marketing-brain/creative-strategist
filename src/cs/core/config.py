@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     # together, verified against a real AI Gateway call), and flash-lite's video support
     # isn't documented separately from full flash -- safer to keep lite for images only.
     video_tagging_model: str = "google/gemini-2.5-flash"
+    # Kill switch for video tagging cost specifically -- image/carousel tagging (cheap,
+    # flash-lite) is unaffected. False stops new video downloads from enqueueing a
+    # tagging.tag_creative job at all; it does not touch jobs already in the queue.
+    video_tagging_enabled: bool = True
     insights_model: str = "google/gemini-2.5-flash-lite"
     copilot_model: str = "google/gemini-3-flash"
     copy_model: str = "google/gemini-3-flash"

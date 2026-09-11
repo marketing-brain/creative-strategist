@@ -35,6 +35,53 @@ async def test_download_creative_stores_asset_and_queues_tagging(db, blobs, sett
 
 
 @respx.mock
+async def test_download_creative_skips_tagging_when_video_tagging_disabled(
+    db, blobs, settings, org_id
+):
+    settings.video_tagging_enabled = False
+    try:
+        respx.get("https://cdn.example/v.mp4").mock(
+            return_value=httpx.Response(200, content=b"vid", headers={"content-type": "video/mp4"})
+        )
+        cid = await _creative(db, org_id)
+        ctx = JobContext(
+            db=db, blobs=blobs, settings=settings, job=type("J", (), {"org_id": org_id})()
+        )
+        async with httpx.AsyncClient() as http:
+            await assets.download_creative(
+                ctx, http, cid, "https://cdn.example/v.mp4", "original_video"
+            )
+        assert await repo.creative_has_primary_asset(db, org_id, cid)
+        assert await db.fetchval("SELECT count(*) FROM job") == 0
+    finally:
+        settings.video_tagging_enabled = True
+
+
+@respx.mock
+async def test_download_creative_still_tags_images_when_video_tagging_disabled(
+    db, blobs, settings, org_id
+):
+    settings.video_tagging_enabled = False
+    try:
+        respx.get("https://cdn.example/img2.jpg").mock(
+            return_value=httpx.Response(
+                200, content=b"\x89PNG", headers={"content-type": "image/png"}
+            )
+        )
+        cid = await _creative(db, org_id)
+        ctx = JobContext(
+            db=db, blobs=blobs, settings=settings, job=type("J", (), {"org_id": org_id})()
+        )
+        async with httpx.AsyncClient() as http:
+            await assets.download_creative(
+                ctx, http, cid, "https://cdn.example/img2.jpg", "original_image"
+            )
+        assert await db.fetchval("SELECT job_type FROM job") == "tagging.tag_creative"
+    finally:
+        settings.video_tagging_enabled = True
+
+
+@respx.mock
 async def test_download_carousel_stores_each_card_in_order(db, blobs, settings, org_id):
     respx.get("https://cdn.example/0.jpg").mock(
         return_value=httpx.Response(200, content=b"a", headers={"content-type": "image/jpeg"})

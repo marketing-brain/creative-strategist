@@ -29,13 +29,14 @@ async def download_creative(
         ctx.db, org_id, creative_id, kind, key, sha256_hex(data), mime
     )
     await repo.set_primary_asset(ctx.db, org_id, creative_id, asset_id)
-    await queue.enqueue(
-        ctx.db,
-        org_id,
-        "tagging.tag_creative",
-        {"creative_id": str(creative_id)},
-        dedup_key=f"tag:{creative_id}",
-    )
+    if kind != "original_video" or ctx.settings.video_tagging_enabled:
+        await queue.enqueue(
+            ctx.db,
+            org_id,
+            "tagging.tag_creative",
+            {"creative_id": str(creative_id)},
+            dedup_key=f"tag:{creative_id}",
+        )
 
 
 async def download_carousel(
