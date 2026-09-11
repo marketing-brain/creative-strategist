@@ -67,6 +67,17 @@ async def test_await_first_sync_locks_down_schema_when_connected_and_still_pause
                     "id": "conn_1",
                     "paused": True,
                     "status": {"setup_state": "connected"},
+                    "config": {"sync_mode": "AllAccounts"},
+                }
+            },
+        )
+    )
+    respx.get(f"{F}/connectors/conn_1/schemas").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": {
+                    "schemas": {"s": {"tables": {t: {} for t in fivetran_client.REQUIRED_TABLES}}}
                 }
             },
         )

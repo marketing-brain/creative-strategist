@@ -18,6 +18,30 @@ REQUIRED_TABLES = (
     "basic_ad_action_values",
 )
 
+# Ad-level video retention has no prebuilt Fivetran report -- the prebuilt breakdown
+# tables (action_video_view_type, action_video_sound) are account-level only, confirmed
+# against a live connector. This custom report is the only way to get the watch-through
+# curve per ad. Defined here (not just run once by hand) so every org's connector gets it
+# automatically at connect-time via lock_down_and_activate, with no manual per-org step --
+# required to scale past a handful of hand-configured accounts.
+CUSTOM_REPORTS: tuple[dict, ...] = (
+    {
+        "table_name": "video_retention_ad",
+        "config_type": "Custom",
+        "level": "ad",
+        "aggregation": "Day",
+        "action_report_time": "mixed",
+        "fields": [
+            "video_p25_watched_actions",
+            "video_p50_watched_actions",
+            "video_p75_watched_actions",
+            "video_p100_watched_actions",
+            "video_thruplay_watched_actions",
+            "video_play_actions",
+        ],
+    },
+)
+
 
 class FivetranError(RuntimeError):
     pass
@@ -116,9 +140,44 @@ async def get_table_columns(
     return data.get("columns", {})
 
 
+async def _configure_custom_reports(
+    settings: Settings, http: httpx.AsyncClient, connector_id: str
+) -> None:
+    current = await get_connector(settings, http, connector_id)
+    new_config = dict(current["config"])
+    by_name = {t["table_name"]: t for t in new_config.get("custom_tables", [])}
+    for report in CUSTOM_REPORTS:
+        by_name[report["table_name"]] = report
+    new_config["custom_tables"] = list(by_name.values())
+    await _call(settings, http, "PATCH", f"/connectors/{connector_id}", {"config": new_config})
+
+
+async def _custom_report_table_names(
+    settings: Settings, http: httpx.AsyncClient, connector_id: str, schema: str
+) -> list[str]:
+    """A custom report's list<AdsActionStats> fields each unpivot into their own child
+    table, named after the report with the field appended -- same pattern basic_ad's
+    prebuilt basic_ad_actions/basic_ad_action_values already use. Exact child names
+    aren't hardcoded here since they're only confirmed by what Fivetran actually creates;
+    this discovers every table Fivetran generated for the report instead of guessing."""
+    data = await _call(settings, http, "GET", f"/connectors/{connector_id}/schemas")
+    tables = data.get("schemas", {}).get(schema, {}).get("tables", {})
+    names = []
+    for report in CUSTOM_REPORTS:
+        prefix = report["table_name"]
+        names += [t for t in tables if t == prefix or t.startswith(prefix + "_")]
+    return names
+
+
 async def lock_down_and_activate(
     settings: Settings, http: httpx.AsyncClient, connector_id: str, schema: str
 ) -> None:
+    # Defining custom reports before the EXCLUDE reload so Fivetran has already
+    # discovered their resulting table(s) by the time we build the enable list below --
+    # unverified against a live connector as of this writing; if Fivetran only registers
+    # a custom report's tables after a subsequent sync, this ordering will need revisiting.
+    if CUSTOM_REPORTS:
+        await _configure_custom_reports(settings, http, connector_id)
     await _call(
         settings,
         http,
@@ -126,11 +185,12 @@ async def lock_down_and_activate(
         f"/connectors/{connector_id}/schemas/reload",
         {"exclude_mode": "EXCLUDE"},
     )
+    custom_tables = await _custom_report_table_names(settings, http, connector_id, schema)
     # Right after EXCLUDE, Fivetran has barely discovered each table's real column set --
     # BLOCK_ALL would permanently lock out every column it finds later during the actual
     # sync. ALLOW_COLUMNS still blocks new tables (all we need) but lets columns self-heal.
     tables = {}
-    for table in REQUIRED_TABLES:
+    for table in (*REQUIRED_TABLES, *custom_tables):
         columns = await get_table_columns(settings, http, connector_id, schema, table)
         tables[table] = {
             "enabled": True,
