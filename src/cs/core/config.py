@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     ai_gateway_api_key: str = ""
     ai_gateway_base_url: str = "https://ai-gateway.vercel.sh"
     tagging_model: str = "google/gemini-2.5-flash-lite"
+    # Separate from tagging_model: video needs native video-file input (frames + audio
+    # together, verified against a real AI Gateway call), and flash-lite's video support
+    # isn't documented separately from full flash -- safer to keep lite for images only.
+    video_tagging_model: str = "google/gemini-2.5-flash"
     insights_model: str = "google/gemini-2.5-flash-lite"
     copilot_model: str = "google/gemini-3-flash"
     copy_model: str = "google/gemini-3-flash"

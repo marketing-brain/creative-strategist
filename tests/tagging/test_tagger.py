@@ -54,6 +54,23 @@ async def test_gemini_tagger_sends_images_and_parses_json(settings):
     assert content[-1]["type"] == "text"
 
 
+async def test_gemini_tagger_sends_video_as_file_block_on_a_different_model(settings):
+    """video_tagging_model, not tagging_model, is used whenever a video is present --
+    flash-lite's video support isn't documented the same way full flash's is (verified
+    against AI Gateway's model docs), so video stays on a separate, explicit setting."""
+    payload = {"tags": []}
+    client = _client(_response(json.dumps(payload)))
+    tagger = GeminiGatewayTagger(settings, client=client)
+    schema = load_taxonomy().json_schema("video")
+    await tagger.tag([], "describe", schema, video=(b"\x00\x00\x00mp4", "video/mp4"))
+    call = client.chat.completions.calls[0]
+    assert call["model"] == settings.video_tagging_model
+    content = call["messages"][-1]["content"]
+    assert content[0]["type"] == "file"
+    assert content[0]["file"]["media_type"] == "video/mp4"
+    assert content[-1]["type"] == "text"
+
+
 async def test_gemini_tagger_handles_refusal(settings):
     client = _client(_response(None, finish_reason="content_filter", refusal="blocked"))
     res = await GeminiGatewayTagger(settings, client=client).tag([], "x", {"type": "object"})
@@ -62,6 +79,6 @@ async def test_gemini_tagger_handles_refusal(settings):
 
 def test_prompt_builders():
     t = load_taxonomy()
-    text = user_text(t, "video", {"headline": "H", "primary_text": "P"}, "hello world", [0.0, 1.0])
-    assert "pacing" in text and "hello world" in text and "t=1.0s" in text
+    text = user_text(t, "video", {"headline": "H", "primary_text": "P"})
+    assert "pacing" in text and "H" in text and "P" in text
     assert len(prompt_sha(SYSTEM, text, {"a": 1})) == 64

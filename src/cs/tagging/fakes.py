@@ -31,8 +31,15 @@ class FakeTagger:
         self.refuse = refuse
         self.calls: list[dict] = []
 
-    async def tag(self, images, user_text, schema) -> TagResult:
-        self.calls.append({"n_images": len(images), "user_text": user_text, "schema": schema})
+    async def tag(self, images, user_text, schema, video=None) -> TagResult:
+        self.calls.append(
+            {
+                "n_images": len(images),
+                "user_text": user_text,
+                "schema": schema,
+                "has_video": video is not None,
+            }
+        )
         if self.refuse:
             return TagResult(model="fake", refused=True)
         tags = self.tags_by_call.pop(0) if self.tags_by_call else DEFAULT_TAGS

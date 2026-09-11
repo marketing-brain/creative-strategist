@@ -13,7 +13,7 @@ from cs.core.queue import Job
 from cs.jobs.registry import JobContext
 from cs.tagging import jobs as tagging_jobs
 from cs.tagging import repo, runner
-from cs.tagging.fakes import FakeTagger, FakeTranscriber
+from cs.tagging.fakes import FakeTagger
 
 
 def _png():
@@ -55,11 +55,11 @@ def _ctx(db, blobs, settings, org_id, payload):
 
 
 async def test_tag_image_creative_persists_tags(db, blobs, settings, org_id, image_creative):
-    tagger, tr = FakeTagger(), FakeTranscriber()
+    tagger = FakeTagger()
     run_id = await runner.tag_creative(
-        _ctx(db, blobs, settings, org_id, {}), image_creative, tagger, tr
+        _ctx(db, blobs, settings, org_id, {}), image_creative, tagger
     )
-    assert run_id is not None and tagger.calls[0]["n_images"] == 1 and tr.calls == 0
+    assert run_id is not None and tagger.calls[0]["n_images"] == 1
     tags = await repo.latest_tags(db, org_id, image_creative)
     assert {t["dimension"] for t in tags} >= {"hook_type", "message_angle", "hook_summary"}
     run = await db.fetchrow("SELECT status, input_tokens, model FROM tag_run WHERE id=$1", run_id)
@@ -78,8 +78,8 @@ async def test_tag_is_idempotent_per_taxonomy_and_model(
     db, blobs, settings, org_id, image_creative
 ):
     ctx = _ctx(db, blobs, settings, org_id, {})
-    first = await runner.tag_creative(ctx, image_creative, FakeTagger(), FakeTranscriber())
-    second = await runner.tag_creative(ctx, image_creative, FakeTagger(), FakeTranscriber())
+    first = await runner.tag_creative(ctx, image_creative, FakeTagger())
+    second = await runner.tag_creative(ctx, image_creative, FakeTagger())
     assert first is not None and second is None
 
 
@@ -89,7 +89,6 @@ async def test_refusal_marks_run_failed(db, blobs, settings, org_id, image_creat
             _ctx(db, blobs, settings, org_id, {}),
             image_creative,
             FakeTagger(refuse=True),
-            FakeTranscriber(),
         )
     assert await db.fetchval("SELECT status FROM tag_run") == "failed"
 
@@ -143,51 +142,47 @@ async def _make_video_creative(db, blobs, settings, org_id, tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
-async def test_tag_video_creative_uses_keyframes_and_transcript(
-    db, blobs, settings, org_id, tmp_path
-):
+async def test_tag_video_creative_passes_raw_video_to_tagger(db, blobs, settings, org_id, tmp_path):
+    """Video is handed to the tagger as-is (frames + audio processed natively by the
+    model in one call) -- no keyframe extraction, no separate transcription."""
     cid = await _make_video_creative(db, blobs, settings, org_id, tmp_path)
 
-    tagger, tr = FakeTagger(), FakeTranscriber("buy now")
-    await runner.tag_creative(_ctx(db, blobs, settings, org_id, {}), cid, tagger, tr)
-    assert (
-        tagger.calls[0]["n_images"] >= 3
-        and "buy now" in tagger.calls[0]["user_text"]
-        and tr.calls == 1
-    )
-    kinds = await db.fetch(
-        "SELECT kind, count(*) AS n FROM asset WHERE creative_id=$1 GROUP BY kind", cid
-    )
-    by = {r["kind"]: r["n"] for r in kinds}
-    assert by["keyframe"] >= 3 and by["transcript"] == 1
+    tagger = FakeTagger()
+    run_id = await runner.tag_creative(_ctx(db, blobs, settings, org_id, {}), cid, tagger)
+    assert run_id is not None
+    assert tagger.calls[0]["n_images"] == 0
+    assert tagger.calls[0]["has_video"] is True
+    run = await db.fetchrow("SELECT model FROM tag_run WHERE id=$1", run_id)
+    assert run["model"] == settings.video_tagging_model
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
-async def test_video_retry_does_not_duplicate_keyframe_assets(
+async def test_video_tagging_cleans_up_assets_from_before_the_video_model_switch(
     db, blobs, settings, org_id, tmp_path
 ):
+    """A creative tagged before the switch to native video input may still carry
+    keyframe/transcript asset rows from the old extraction-based approach -- those are
+    stale now (nothing produces or reads them any more) and must be cleaned up on the
+    next tag run rather than left as orphaned rows referencing S3 keys."""
     cid = await _make_video_creative(db, blobs, settings, org_id, tmp_path)
-    ctx = _ctx(db, blobs, settings, org_id, {})
+    await ingest_repo.insert_asset(
+        db, org_id, cid, "keyframe", "stale/keyframe/key.jpg", "sha", "image/jpeg", seq=0
+    )
+    await ingest_repo.insert_asset(
+        db, org_id, cid, "transcript", "stale/transcript.txt", "sha", "text/plain"
+    )
 
-    with pytest.raises(RuntimeError):
-        await runner.tag_creative(ctx, cid, FakeTagger(refuse=True), FakeTranscriber())
-    first_count = await db.fetchval(
+    await runner.tag_creative(_ctx(db, blobs, settings, org_id, {}), cid, FakeTagger())
+
+    remaining = await db.fetchval(
         "SELECT count(*) FROM asset WHERE creative_id=$1 AND kind IN ('keyframe','transcript')",
         cid,
     )
-    assert first_count > 0
-
-    await runner.tag_creative(ctx, cid, FakeTagger(), FakeTranscriber())
-    second_count = await db.fetchval(
-        "SELECT count(*) FROM asset WHERE creative_id=$1 AND kind IN ('keyframe','transcript')",
-        cid,
-    )
-    assert second_count == first_count
+    assert remaining == 0
 
 
 async def test_job_handler_uses_factories(db, blobs, settings, org_id, image_creative, monkeypatch):
     monkeypatch.setattr(tagging_jobs, "TAGGER_FACTORY", lambda s: FakeTagger())
-    monkeypatch.setattr(tagging_jobs, "TRANSCRIBER_FACTORY", lambda s, http: FakeTranscriber())
     from cs.jobs.worker import run_once
 
     await queue.enqueue(db, org_id, "tagging.tag_creative", {"creative_id": str(image_creative)})
@@ -224,37 +219,8 @@ async def carousel_creative(db, org_id, settings, blobs):
 
 
 async def test_tag_carousel_creative_uses_all_cards(db, blobs, settings, org_id, carousel_creative):
-    tagger, tr = FakeTagger(), FakeTranscriber()
+    tagger = FakeTagger()
     run_id = await runner.tag_creative(
-        _ctx(db, blobs, settings, org_id, {}), carousel_creative, tagger, tr
+        _ctx(db, blobs, settings, org_id, {}), carousel_creative, tagger
     )
-    assert run_id is not None and tagger.calls[0]["n_images"] == 3 and tr.calls == 0
-
-
-@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
-async def test_ffmpeg_calls_run_off_the_event_loop_thread(
-    db, blobs, settings, org_id, tmp_path, monkeypatch
-):
-    import threading
-
-    from cs.tagging import runner as runner_mod
-    from cs.tagging.video import Keyframe
-
-    cid = await _make_video_creative(db, blobs, settings, org_id, tmp_path)
-    seen_threads = []
-
-    def fake_extract_keyframes(data):
-        seen_threads.append(threading.current_thread())
-        return [Keyframe(0.0, _png(), 64, 64)]
-
-    def fake_extract_audio(data):
-        seen_threads.append(threading.current_thread())
-        return None
-
-    monkeypatch.setattr(runner_mod, "extract_keyframes", fake_extract_keyframes)
-    monkeypatch.setattr(runner_mod, "extract_audio", fake_extract_audio)
-    await runner.tag_creative(
-        _ctx(db, blobs, settings, org_id, {}), cid, FakeTagger(), FakeTranscriber()
-    )
-    assert len(seen_threads) == 2
-    assert all(t is not threading.current_thread() for t in seen_threads)
+    assert run_id is not None and tagger.calls[0]["n_images"] == 3

@@ -29,10 +29,7 @@ TRANSCRIBER_FACTORY = default_transcriber_factory
 @handler("tagging.tag_creative")
 async def tag_creative(ctx: JobContext) -> None:
     creative_id = UUID(ctx.job.payload["creative_id"])
-    async with httpx.AsyncClient(timeout=300) as http:
-        await runner.tag_creative(
-            ctx, creative_id, TAGGER_FACTORY(ctx.settings), TRANSCRIBER_FACTORY(ctx.settings, http)
-        )
+    await runner.tag_creative(ctx, creative_id, TAGGER_FACTORY(ctx.settings))
 
 
 from cs.core import repo as ingest_repo  # noqa: E402
@@ -112,7 +109,7 @@ async def batch_submit(ctx: JobContext) -> None:
                 k: creative[k]
                 for k in ("headline", "primary_text", "description", "cta_type", "link_url")
             }
-            text = user_text(taxonomy, fmt, copy, None, None)
+            text = user_text(taxonomy, fmt, copy)
             schema = taxonomy.json_schema(fmt)
             requests.append(
                 {
