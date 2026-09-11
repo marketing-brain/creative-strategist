@@ -18,7 +18,14 @@ async def upsert_creative(
         INSERT INTO creative (id, org_id, ad_account_id, platform_creative_id, format, headline,
                               primary_text, description, cta_type, link_url, raw_path)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        ON CONFLICT (ad_account_id, platform_creative_id) DO UPDATE SET last_seen_at = now()
+        ON CONFLICT (ad_account_id, platform_creative_id) DO UPDATE SET
+          format = EXCLUDED.format,
+          headline = EXCLUDED.headline,
+          primary_text = EXCLUDED.primary_text,
+          description = EXCLUDED.description,
+          cta_type = EXCLUDED.cta_type,
+          link_url = EXCLUDED.link_url,
+          last_seen_at = now()
         RETURNING id, (xmax = 0) AS created
         """,
         new_id(),

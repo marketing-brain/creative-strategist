@@ -30,6 +30,31 @@ async def test_upsert_creative_and_ad_and_metrics(db, org_id, account_id):
     cid2, created2 = await repo.upsert_creative(db, org_id, account_id, _creative(), "raw/c1.json")
     assert cid2 == cid and not created2
 
+
+async def test_upsert_creative_refreshes_content_on_conflict(db, org_id, account_id):
+    cid, _ = await repo.upsert_creative(db, org_id, account_id, _creative(), "raw/c1.json")
+    edited = PlatformCreative(
+        "c1",
+        "image",
+        "New headline",
+        "New body",
+        None,
+        "LEARN_MORE",
+        "https://y",
+        "https://img",
+        "image/png",
+        {},
+    )
+    cid2, created2 = await repo.upsert_creative(db, org_id, account_id, edited, "raw/c1.json")
+    assert cid2 == cid and not created2
+    row = await db.fetchrow(
+        "SELECT headline, primary_text, cta_type, link_url FROM creative WHERE id=$1", cid
+    )
+    assert row["headline"] == "New headline"
+    assert row["primary_text"] == "New body"
+    assert row["cta_type"] == "LEARN_MORE"
+    assert row["link_url"] == "https://y"
+
     aid = await repo.upsert_ad(
         db, org_id, account_id, PlatformAd("ad1", "A", "ACTIVE", "as", "cp", "c1"), cid
     )
