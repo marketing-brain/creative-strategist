@@ -1,9 +1,0 @@
-.git
-.venv
-web
-tests
-docs
-deploy
-*.pem
-.env
-.env.local
