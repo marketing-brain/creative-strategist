@@ -25,14 +25,20 @@ def _creative(cid="c1", fmt="image"):
 
 
 async def test_upsert_creative_and_ad_and_metrics(db, org_id, account_id):
-    cid, created = await repo.upsert_creative(db, org_id, account_id, _creative(), "raw/c1.json")
+    cid, created = await repo.upsert_creative(
+        db, org_id, account_id, _creative(), "raw/c1.json", format_source="manual_review"
+    )
     assert created
-    cid2, created2 = await repo.upsert_creative(db, org_id, account_id, _creative(), "raw/c1.json")
+    cid2, created2 = await repo.upsert_creative(
+        db, org_id, account_id, _creative(), "raw/c1.json", format_source="manual_review"
+    )
     assert cid2 == cid and not created2
 
 
 async def test_upsert_creative_refreshes_content_on_conflict(db, org_id, account_id):
-    cid, _ = await repo.upsert_creative(db, org_id, account_id, _creative(), "raw/c1.json")
+    cid, _ = await repo.upsert_creative(
+        db, org_id, account_id, _creative(), "raw/c1.json", format_source="manual_review"
+    )
     edited = PlatformCreative(
         "c1",
         "image",
@@ -45,7 +51,9 @@ async def test_upsert_creative_refreshes_content_on_conflict(db, org_id, account
         "image/png",
         {},
     )
-    cid2, created2 = await repo.upsert_creative(db, org_id, account_id, edited, "raw/c1.json")
+    cid2, created2 = await repo.upsert_creative(
+        db, org_id, account_id, edited, "raw/c1.json", format_source="manual_review"
+    )
     assert cid2 == cid and not created2
     row = await db.fetchrow(
         "SELECT headline, primary_text, cta_type, link_url FROM creative WHERE id=$1", cid
@@ -120,7 +128,9 @@ async def test_upsert_creative_refreshes_content_on_conflict(db, org_id, account
 
 
 async def test_assets_and_listing(db, org_id, account_id, blobs):
-    cid, _ = await repo.upsert_creative(db, org_id, account_id, _creative(), "raw/c1.json")
+    cid, _ = await repo.upsert_creative(
+        db, org_id, account_id, _creative(), "raw/c1.json", format_source="manual_review"
+    )
     assert not await repo.creative_has_asset(db, org_id, cid, "original_image")
     asset_id = await repo.insert_asset(
         db, org_id, cid, "original_image", "p/x.png", "sha", "image/png", 10, 10
@@ -133,7 +143,9 @@ async def test_assets_and_listing(db, org_id, account_id, blobs):
 
 
 async def test_upsert_metrics_chunks_large_batches(db, org_id, account_id, monkeypatch):
-    cid, _ = await repo.upsert_creative(db, org_id, account_id, _creative(), "raw/c1.json")
+    cid, _ = await repo.upsert_creative(
+        db, org_id, account_id, _creative(), "raw/c1.json", format_source="manual_review"
+    )
     await repo.upsert_ad(
         db, org_id, account_id, PlatformAd("ad1", "A", "ACTIVE", "as", "cp", "c1"), cid
     )
@@ -208,6 +220,7 @@ async def test_list_assets_by_kind_orders_by_seq(db, org_id, settings):
         acct,
         PlatformCreative("cx", "carousel", "H", "P", None, None, "u", None, None, {}),
         "raw",
+        format_source="manual_review",
     )
     for i in (2, 0, 1):  # insert out of order
         await repo.insert_asset(

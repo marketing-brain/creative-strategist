@@ -37,6 +37,7 @@ async def image_creative(db, org_id, settings, blobs):
         acct,
         PlatformCreative("c1", "image", "H", "P", None, "SHOP_NOW", "u", None, None, {}),
         "raw",
+        format_source="manual_review",
     )
     key = f"{org_id}/creatives/{cid}/original.png"
     await blobs.put(key, _png(), "image/png")
@@ -107,6 +108,7 @@ async def _make_video_creative(db, blobs, settings, org_id, tmp_path):
         acct,
         PlatformCreative("v1", "video", "H", "P", None, None, "u", None, None, {}),
         "raw",
+        format_source="manual_review",
     )
     p = tmp_path / "v.mp4"
     subprocess.run(
@@ -205,6 +207,7 @@ async def carousel_creative(db, org_id, settings, blobs):
         acct,
         PlatformCreative("cx", "carousel", "H", "P", None, "SHOP_NOW", "u", None, None, {}),
         "raw",
+        format_source="manual_review",
     )
     asset_ids = []
     for i in range(3):

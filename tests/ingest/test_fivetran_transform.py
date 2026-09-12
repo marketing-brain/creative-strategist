@@ -2,6 +2,7 @@ from cs.core import repo
 from cs.ingest.fivetran import transform as fivetran_transform
 from cs.ingest.fivetran.fixtures import (
     create_fixture_schema,
+    insert_asset_feed_spec_video,
     insert_campaign_ad_creative,
     insert_video,
 )
@@ -23,6 +24,7 @@ async def test_discover_and_sync_entities(db, blobs, settings, org_id):
         name="name",
         headline="Headline",
         image_url="https://img/orig.jpg",
+        object_type="PHOTO",
     )
     conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
     connection = await repo.get_meta_connection_by_id(db, conn_id)
@@ -139,6 +141,7 @@ async def test_dead_download_job_is_reenqueued_on_resync(db, blobs, settings, or
         name="name",
         headline="Headline",
         image_url="https://img/orig.jpg",
+        object_type="PHOTO",
     )
     conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
     connection = await repo.get_meta_connection_by_id(db, conn_id)
@@ -206,10 +209,14 @@ async def test_one_malformed_ad_does_not_abort_the_whole_sync(
 
     original_upsert_creative = repo.upsert_creative
 
-    async def flaky_upsert_creative(db_, org_id_, acct_id_, platform_creative, raw_path):
+    async def flaky_upsert_creative(
+        db_, org_id_, acct_id_, platform_creative, raw_path, *, format_source
+    ):
         if platform_creative.platform_creative_id == "bad":
             raise ValueError("boom: malformed row")
-        return await original_upsert_creative(db_, org_id_, acct_id_, platform_creative, raw_path)
+        return await original_upsert_creative(
+            db_, org_id_, acct_id_, platform_creative, raw_path, format_source=format_source
+        )
 
     monkeypatch.setattr(fivetran_transform.repo, "upsert_creative", flaky_upsert_creative)
 
@@ -248,6 +255,7 @@ async def test_bigint_platform_ids_are_stringified(db, blobs, settings, org_id):
         f"name TEXT, title TEXT, body TEXT, call_to_action_type TEXT, "
         f"image_url TEXT, thumbnail_url TEXT, object_story_link_data_link TEXT, "
         f"video_id BIGINT, object_story_link_data_child_attachments JSONB, "
+        f"video_video_id BIGINT, object_type TEXT, "
         f"_fivetran_synced TIMESTAMPTZ)"
     )
     await db.execute(
@@ -265,7 +273,8 @@ async def test_bigint_platform_ids_are_stringified(db, blobs, settings, org_id):
     await db.execute(
         f'INSERT INTO "{schema}".creative_history VALUES '
         f"(3001, 266634581427459, 'name', 'Headline', 'Body', 'SHOP_NOW', "
-        f"'https://img/orig.jpg', NULL, 'https://dest.example', NULL, NULL, now())"
+        f"'https://img/orig.jpg', NULL, 'https://dest.example', NULL, NULL, "
+        f"NULL, 'PHOTO', now())"
     )
     conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", schema)
     connection = await repo.get_meta_connection_by_id(db, conn_id)
@@ -383,6 +392,7 @@ async def test_video_with_no_landed_source_yet_is_skipped_not_failed(db, blobs, 
         headline="Headline",
         image_url="https://img/orig.jpg",
         video_id="vid_missing",
+        object_type="VIDEO",
     )
     conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
     connection = await repo.get_meta_connection_by_id(db, conn_id)
@@ -422,6 +432,7 @@ async def test_unresolved_video_with_instagram_permalink_enqueues_resolve_job(
         image_url="https://img/orig.jpg",
         video_id="vid_not_in_video_history",
         instagram_permalink_url="https://www.instagram.com/p/abc123/",
+        object_type="VIDEO",
     )
     conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
     connection = await repo.get_meta_connection_by_id(db, conn_id)
@@ -493,6 +504,7 @@ async def test_dead_resolve_job_is_not_re_enqueued_on_next_sync(db, blobs, setti
         image_url="https://img/orig.jpg",
         video_id="vid_not_in_video_history",
         instagram_permalink_url="https://www.instagram.com/p/abc123/",
+        object_type="VIDEO",
     )
     conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
     connection = await repo.get_meta_connection_by_id(db, conn_id)
@@ -513,15 +525,66 @@ async def test_dead_resolve_job_is_not_re_enqueued_on_next_sync(db, blobs, setti
     assert n == 0
 
 
-def test_carousel_urls_returns_none_for_malformed_shapes():
-    """Regression test: a valid-but-non-list JSON value (e.g. a bare number) must return
-    None gracefully instead of raising a TypeError out of the list comprehension."""
-    assert fivetran_transform._carousel_urls(None) is None
-    assert fivetran_transform._carousel_urls("") is None
-    assert fivetran_transform._carousel_urls("not json") is None
-    assert fivetran_transform._carousel_urls("42") is None
-    assert fivetran_transform._carousel_urls('"a string"') is None
-    assert fivetran_transform._carousel_urls("[]") is None
-    assert fivetran_transform._carousel_urls('[{"picture": "https://x/1.jpg"}]') == [
-        "https://x/1.jpg"
-    ]
+async def test_share_creative_without_evidence_is_unresolved_and_downloads_nothing(
+    db, blobs, settings, org_id
+):
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="ad1",
+        creative_id="cr1",
+        name="n",
+        headline="H",
+        image_url=None,
+        object_type="SHARE",
+    )
+    await db.execute(
+        f'UPDATE "{SCHEMA}".creative_history SET thumbnail_url=$1', "https://cdn/frame.jpg"
+    )
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    accounts = await repo.list_ad_accounts(db, org_id)
+    await repo.set_ad_account_status(db, org_id, accounts[0]["id"], "active")
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+
+    row = await db.fetchrow("SELECT format, format_source FROM creative WHERE org_id=$1", org_id)
+    assert row["format"] == "unresolved"
+    assert row["format_source"] == "unresolved"
+    # No asset download job may be enqueued for a creative we cannot type.
+    assert (
+        await db.fetchval("SELECT count(*) FROM job WHERE job_type='meta.download_creative'") == 0
+    )
+
+
+async def test_asset_feed_spec_video_membership_classifies_as_video(db, blobs, settings, org_id):
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="ad1",
+        creative_id="cr1",
+        name="n",
+        headline="H",
+        image_url=None,
+        object_type="SHARE",
+    )
+    await insert_asset_feed_spec_video(db, SCHEMA, creative_id="cr1", video_id="v1")
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    accounts = await repo.list_ad_accounts(db, org_id)
+    await repo.set_ad_account_status(db, org_id, accounts[0]["id"], "active")
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+
+    row = await db.fetchrow("SELECT format, format_source FROM creative WHERE org_id=$1", org_id)
+    assert (row["format"], row["format_source"]) == ("video", "asset_feed_spec_video")

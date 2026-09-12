@@ -34,6 +34,7 @@ async def _seed(db, org_id):
         acct,
         PlatformCreative("cr1", "image", "H", "P", None, "SHOP_NOW", "https://x", None, None, {}),
         "",
+        format_source="manual_review",
     )
     await repo.upsert_ad(db, org_id, acct, PlatformAd("ad1", "A", "ACTIVE", None, None, "cr1"), cid)
     return acct
@@ -87,6 +88,7 @@ async def test_bigint_ad_id_still_joins_against_our_text_ad_table(db, blobs, set
         acct,
         PlatformCreative("cr1", "image", "H", "P", None, "SHOP_NOW", "https://x", None, None, {}),
         "",
+        format_source="manual_review",
     )
     ad = PlatformAd("9001", "A", "ACTIVE", None, None, "cr1")
     await repo.upsert_ad(db, org_id, acct, ad, cid)

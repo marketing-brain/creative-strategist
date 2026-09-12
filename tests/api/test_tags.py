@@ -24,6 +24,7 @@ async def _seed(client, db, settings):
         acct,
         PlatformCreative("c", "image", "H", "P", None, None, "u", None, None, {}),
         "raw",
+        format_source="manual_review",
     )
     tv = await repo.ensure_taxonomy_version(db, load_taxonomy())
     rid = await repo.start_tag_run(db, org_id, cid, tv, "fake")

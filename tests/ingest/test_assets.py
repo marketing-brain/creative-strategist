@@ -15,6 +15,7 @@ async def _creative(db, org_id):
         acct,
         PlatformCreative("cr1", "image", "H", "P", None, "SHOP_NOW", "https://x", None, None, {}),
         "",
+        format_source="manual_review",
     )
     return cid
 

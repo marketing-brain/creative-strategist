@@ -1,6 +1,6 @@
 import json
 
-from cs.ingest.fivetran.classify import classify
+from cs.ingest.fivetran.classify import carousel_urls, classify
 
 EMPTY = {"videos_by_id": {}, "afs_video_creative_ids": set(), "video_view_creative_ids": set()}
 
@@ -82,3 +82,15 @@ def test_unknown_object_type_is_unresolved():
 def test_missing_object_type_is_unresolved():
     r = classify(_row(image_url="https://cdn/i.jpg"), **EMPTY)
     assert r.format == "unresolved"
+
+
+def test_carousel_urls_returns_none_for_malformed_shapes():
+    """Regression test: a valid-but-non-list JSON value (e.g. a bare number) must return
+    None gracefully instead of raising a TypeError out of the list comprehension."""
+    assert carousel_urls(None) is None
+    assert carousel_urls("") is None
+    assert carousel_urls("not json") is None
+    assert carousel_urls("42") is None
+    assert carousel_urls('"a string"') is None
+    assert carousel_urls("[]") is None
+    assert carousel_urls('[{"picture": "https://x/1.jpg"}]') == ["https://x/1.jpg"]

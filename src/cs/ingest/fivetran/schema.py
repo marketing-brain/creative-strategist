@@ -4,6 +4,7 @@ CAMPAIGN_HISTORY = "campaign_history"
 AD_HISTORY = "ad_history"
 CREATIVE_HISTORY = "creative_history"
 AD_VIDEO_HISTORY = "ad_video_history"
+AD_ASSET_FEED_SPEC_VIDEO = "ad_asset_feed_spec_video"
 
 ENTITY_TABLES = (CAMPAIGN_HISTORY, AD_HISTORY, CREATIVE_HISTORY, AD_VIDEO_HISTORY)
 
