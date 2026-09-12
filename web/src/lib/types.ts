@@ -1,7 +1,7 @@
 export type Paginated<T> = { items: T[]; total: number };
 export type Account = { id: string; platform: string; platform_account_id: string; name: string; currency: string; status: 'active' | 'paused' | 'disconnected'; sync_cursor: Record<string, unknown>; connection_status: 'pending' | 'syncing' | 'ready' | 'error' | null; connection_error: string | null };
 export type MetaConnection = { connected: boolean; status: 'pending' | 'syncing' | 'ready' | 'error' | null; error: string | null; last_synced_at: string | null };
-export type Creative = { id: string; ad_account_id: string; platform_creative_id: string; format: 'image' | 'video' | 'carousel'; headline: string | null; primary_text: string | null; cta_type: string | null; link_url: string | null; primary_asset_url: string | null; primary_asset_mime?: string | null; first_seen_at: string; distance?: number; spend_30d: number; ctr_30d: number | null };
+export type Creative = { id: string; ad_account_id: string; platform_creative_id: string; format: 'image' | 'video' | 'carousel' | 'unresolved'; headline: string | null; primary_text: string | null; cta_type: string | null; link_url: string | null; primary_asset_url: string | null; primary_asset_mime?: string | null; first_seen_at: string; distance?: number; spend_30d: number; ctr_30d: number | null };
 export type MetricDay = { day: string; spend: number; impressions: number; clicks: number; conversions: number; conversion_value: number; ctr: number | null; cpa: number | null; roas: number | null };
 export type Tag = { dimension: string; value: string; confidence: number; evidence: string };
 export type Dimension = { name: string; group: string; applies_to: string[]; values: string[] | null; description: string };

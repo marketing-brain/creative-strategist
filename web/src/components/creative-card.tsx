@@ -1,10 +1,10 @@
 import Link from 'next/link';
-import { Layers, PlayCircle } from 'lucide-react';
+import { HelpCircle, Layers, PlayCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { blobUrl } from '@/lib/blob-url';
 import type { Creative } from '@/lib/types';
 
-const formatIcon = { video: PlayCircle, carousel: Layers, image: null } as const;
+const formatIcon = { video: PlayCircle, carousel: Layers, image: null, unresolved: HelpCircle } as const;
 
 export function CreativeCard({ creative }: { creative: Creative }) {
   const src = blobUrl(creative.primary_asset_url);

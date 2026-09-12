@@ -240,6 +240,34 @@ async def test_meta_connection_upsert_and_status(db, org_id):
     assert row["sync_status"] == "error" and row["last_error"] == "broken"
 
 
+async def test_list_and_count_creatives_exclude_unresolved_from_image_filter(
+    db, org_id, account_id
+):
+    await repo.upsert_creative(
+        db,
+        org_id,
+        account_id,
+        _creative("c-img", "image"),
+        "raw/img.json",
+        format_source="meta_object_type",
+    )
+    await repo.upsert_creative(
+        db,
+        org_id,
+        account_id,
+        _creative("c-unresolved", "unresolved"),
+        "raw/unresolved.json",
+        format_source="unresolved",
+    )
+
+    # Sanity: both rows actually landed before we assert the filter excludes one.
+    assert await repo.count_creatives(db, org_id, account_id, None, None, None) == 2
+
+    rows = await repo.list_creatives(db, org_id, account_id, "image", 50, 0, None, None)
+    assert [r["platform_creative_id"] for r in rows] == ["c-img"]
+    assert await repo.count_creatives(db, org_id, account_id, "image", None, None) == 1
+
+
 async def test_meta_connection_upsert_is_idempotent_per_org(db, org_id):
     first = await repo.upsert_meta_connection(db, org_id, "conn_1", "org1__meta_ads")
     second = await repo.upsert_meta_connection(db, org_id, "conn_2", "org1__meta_ads")
