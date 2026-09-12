@@ -22,14 +22,25 @@ Blob-cleanup decision: deleted `asset` rows leave their blob object in place
 method at all today -- adding one, and wiring it in here, is a separate, riskier
 change than this backfill needs, and an orphaned object costs storage, not
 correctness or money on every run the way a bad tag or a paid re-tag would. This
-script instead prints the `asset.path` of every row it deletes so an operator can
-feed that list to a dedicated GC pass later, if one gets built.
+script instead prints the `asset.path` of every row it deletes, one at a time as
+each creative's deletion commits (not batched to the end of the run -- a crash
+partway through must not lose the record of what was already orphaned), so an
+operator can feed that list to a dedicated GC pass later, if one gets built.
+
+FK children of `tag_run` (re-derived from db/migrations/, not assumed): `tag`
+(`tag.tag_run_id`), `creative_embedding` (`creative_embedding.tag_run_id`), and
+`tag_batch_item` (`tag_batch_item.tag_run_id`) -- all three `REFERENCES
+tag_run(id)` with no `ON DELETE` clause, so all three must be deleted before
+`tag_run` itself. `tag_batch_item`'s parent `tag_batch` row is left alone: it is
+a historical record of what was submitted to the batch API, not per-creative
+output, and nothing here invalidates it.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 from collections import Counter
 from dataclasses import dataclass, field
 from uuid import UUID
@@ -45,6 +56,8 @@ from cs.ingest.fivetran.transform import (
     _latest_rows,
     _video_view_creative_ids,
 )
+
+log = logging.getLogger("scripts.reclassify_creatives")
 
 
 def _pid(value: object) -> str | None:
@@ -72,6 +85,10 @@ class ReclassifyRow:
     def is_image_to_video(self) -> bool:
         return self.old_format == "image" and self.new_format == "video"
 
+    @property
+    def is_image_to_unresolved(self) -> bool:
+        return self.old_format == "image" and self.new_format == "unresolved"
+
 
 @dataclass
 class ReclassifyPlan:
@@ -86,6 +103,12 @@ class ReclassifyPlan:
     # script's concern: a normal sync run picks these up with the fixed
     # classifier already, they were never mislabeled by the app.
     fivetran_only: int = 0
+    # App creatives in this org with zero `ad` rows -- excluded from `rows`
+    # entirely (so the AFTER tally stays comparable to the design's "creatives
+    # with ads" validation table), but left untouched by this script. If any
+    # of these still carry format_source='legacy_guess', a later
+    # `GROUP BY format_source` audit will show it and this is why.
+    no_ads: int = 0
 
     @property
     def changed(self) -> list[ReclassifyRow]:
@@ -101,6 +124,17 @@ class ReclassifyPlan:
         return Counter(
             (r.old_format, r.old_source, r.new_format, r.new_source) for r in self.changed
         )
+
+
+@dataclass
+class ApplyResult:
+    # Blob paths behind deleted asset rows -- orphaned, not removed from blob
+    # storage. See module docstring.
+    orphaned_asset_paths: list[str] = field(default_factory=list)
+    # Creatives whose transaction raised and were skipped, not aborting the
+    # rest of the (impression-ordered) run. See log output for creative_id
+    # and the exception for each.
+    failed: int = 0
 
 
 async def build_plan(db: Database, org_id: UUID) -> ReclassifyPlan:
@@ -144,8 +178,15 @@ async def build_plan(db: Database, org_id: UUID) -> ReclassifyPlan:
         """,
         org_id,
     )
+    no_ads = await db.fetchval(
+        """
+        SELECT count(*) FROM creative c
+        WHERE c.org_id = $1 AND NOT EXISTS (SELECT 1 FROM ad a WHERE a.creative_id = c.id)
+        """,
+        org_id,
+    )
 
-    plan = ReclassifyPlan(org_id=org_id)
+    plan = ReclassifyPlan(org_id=org_id, no_ads=no_ads or 0)
     matched_pids: set[str] = set()
     for row in app_rows:
         fr = fivetran_by_pid.get(row["platform_creative_id"])
@@ -175,66 +216,97 @@ async def build_plan(db: Database, org_id: UUID) -> ReclassifyPlan:
     return plan
 
 
-async def apply_plan(db: Database, org_id: UUID, plan: ReclassifyPlan) -> list[str]:
-    """Writes every changed verdict in `plan`. Returns the blob paths of asset rows
-    it deleted (orphaned, not removed from blob storage -- see module docstring).
+async def _apply_one(db: Database, org_id: UUID, row: ReclassifyRow) -> list[str]:
+    """Writes one changed verdict inside a single transaction. Returns the blob
+    paths of any asset rows it deleted. Raises on failure -- the caller decides
+    whether to isolate that from the rest of the run."""
+    orphaned: list[str] = []
+    async with db.transaction() as tx:
+        await tx.execute(
+            "UPDATE creative SET format=$2, format_source=$3, "
+            "format_verified_at = CASE WHEN $2 = 'unresolved' THEN NULL ELSE now() END "
+            "WHERE id=$1",
+            row.creative_id,
+            row.new_format,
+            row.new_source,
+        )
+        if not row.is_image_to_video:
+            return orphaned
+        # The stored asset is a video preview frame the old bug picked more or
+        # less arbitrarily, and every tag on this creative was produced by the
+        # image model, against the image taxonomy, from that one frame -- both
+        # are invalid output, not merely stale, and must go together with the
+        # format correction, not in a later pass.
+        stale = await tx.fetch(
+            "SELECT path FROM asset WHERE org_id=$1 AND creative_id=$2"
+            " AND kind='original_image'",
+            org_id,
+            row.creative_id,
+        )
+        orphaned = [r["path"] for r in stale]
+        await tx.execute("UPDATE creative SET primary_asset_id=NULL WHERE id=$1", row.creative_id)
+        await tx.execute(
+            "DELETE FROM asset WHERE org_id=$1 AND creative_id=$2 AND kind='original_image'",
+            org_id,
+            row.creative_id,
+        )
+        # FK order: tag, creative_embedding, and tag_batch_item all reference
+        # tag_run with no ON DELETE clause (re-derived from db/migrations/ --
+        # see module docstring), so all three must go before tag_run.
+        await tx.execute("DELETE FROM tag WHERE creative_id=$1", row.creative_id)
+        await tx.execute("DELETE FROM creative_embedding WHERE creative_id=$1", row.creative_id)
+        await tx.execute(
+            "DELETE FROM tag_batch_item WHERE tag_run_id IN"
+            " (SELECT id FROM tag_run WHERE creative_id=$1)",
+            row.creative_id,
+        )
+        await tx.execute("DELETE FROM tag_run WHERE creative_id=$1", row.creative_id)
+        if row.asset_url:
+            await queue.enqueue(
+                tx,
+                org_id,
+                "meta.download_creative",
+                {
+                    "creative_id": str(row.creative_id),
+                    "asset_url": row.asset_url,
+                    "kind": "original_video",
+                },
+                # Shares the normal sync path's dedup namespace
+                # (transform.py's meta.download_creative enqueue uses
+                # dedup_key=str(creative_id)) so a concurrent sync can't
+                # double-enqueue the same download under a different key.
+                dedup_key=str(row.creative_id),
+            )
+    return orphaned
+
+
+async def apply_plan(db: Database, org_id: UUID, plan: ReclassifyPlan) -> ApplyResult:
+    """Writes every changed verdict in `plan`, one creative at a time.
 
     Only ever called when --apply is passed; the caller (`run`, below) is the
     single gate. Each creative's writes happen inside one transaction so a
-    creative is never left with a new format but stale tags, or vice versa."""
-    orphaned_asset_paths: list[str] = []
+    creative is never left with a new format but stale tags, or vice versa. A
+    failure on one creative is logged and counted, not allowed to abort the
+    rest of the (impression-ordered) run -- mirrors the per-row fault
+    isolation in cs.ingest.fivetran.transform._sync_ads_and_creatives."""
+    result = ApplyResult()
     for row in plan.changed:
-        async with db.transaction() as tx:
-            await tx.execute(
-                "UPDATE creative SET format=$2, format_source=$3, "
-                "format_verified_at = CASE WHEN $2 = 'unresolved' THEN NULL ELSE now() END "
-                "WHERE id=$1",
-                row.creative_id,
-                row.new_format,
-                row.new_source,
+        try:
+            orphaned = await _apply_one(db, org_id, row)
+        except Exception:
+            result.failed += 1
+            log.exception(
+                "failed to apply reclassification for creative",
+                extra={"org_id": str(org_id), "creative_id": str(row.creative_id)},
             )
-            if not row.is_image_to_video:
-                continue
-            # The stored asset is a video preview frame the old bug picked more
-            # or less arbitrarily, and every tag on this creative was produced
-            # by the image model, against the image taxonomy, from that one
-            # frame -- both are invalid output, not merely stale, and must go
-            # together with the format correction, not in a later pass.
-            stale = await tx.fetch(
-                "SELECT path FROM asset WHERE org_id=$1 AND creative_id=$2"
-                " AND kind='original_image'",
-                org_id,
-                row.creative_id,
-            )
-            orphaned_asset_paths.extend(r["path"] for r in stale)
-            await tx.execute(
-                "UPDATE creative SET primary_asset_id=NULL WHERE id=$1", row.creative_id
-            )
-            await tx.execute(
-                "DELETE FROM asset WHERE org_id=$1 AND creative_id=$2 AND kind='original_image'",
-                org_id,
-                row.creative_id,
-            )
-            # FK order: creative_embedding and tag both reference tag_run with no
-            # ON DELETE clause, so both must go before tag_run.
-            await tx.execute(
-                "DELETE FROM creative_embedding WHERE creative_id=$1", row.creative_id
-            )
-            await tx.execute("DELETE FROM tag WHERE creative_id=$1", row.creative_id)
-            await tx.execute("DELETE FROM tag_run WHERE creative_id=$1", row.creative_id)
-            if row.asset_url:
-                await queue.enqueue(
-                    tx,
-                    org_id,
-                    "meta.download_creative",
-                    {
-                        "creative_id": str(row.creative_id),
-                        "asset_url": row.asset_url,
-                        "kind": "original_video",
-                    },
-                    dedup_key=f"reclassify:{row.creative_id}",
-                )
-    return orphaned_asset_paths
+            continue
+        for path in orphaned:
+            # Printed as each creative commits, not batched to the end: a
+            # crash later in the run must not lose the record of what's
+            # already orphaned.
+            print(f"  orphaned (not deleted): {path}  (creative {row.creative_id})")
+        result.orphaned_asset_paths.extend(orphaned)
+    return result
 
 
 def _print_report(plan: ReclassifyPlan) -> None:
@@ -242,6 +314,13 @@ def _print_report(plan: ReclassifyPlan) -> None:
         f"org {plan.org_id}: {len(plan.rows)} creative(s) with ads matched to Fivetran, "
         f"processed in descending impression order"
     )
+    if plan.no_ads:
+        print(
+            f"  {plan.no_ads} app creative(s) have no `ad` row at all -- excluded from "
+            f"everything below (including the AFTER tally, to stay comparable to the "
+            f"design's validation table) and left untouched. If any still carry "
+            f"format_source='legacy_guess' after --apply, this is why."
+        )
     if plan.missing_from_fivetran:
         print(
             f"  {plan.missing_from_fivetran} app creative(s) with ads have no matching "
@@ -267,14 +346,35 @@ def _print_report(plan: ReclassifyPlan) -> None:
     for (of, osrc, nf, nsrc), n in plan.transition_tally().most_common():
         print(f"  {n:6d}  {of}/{osrc}  ->  {nf}/{nsrc}")
 
-    n_i2v = sum(1 for r in changed if r.is_image_to_video)
-    if n_i2v:
+    i2v = [r for r in changed if r.is_image_to_video]
+    if i2v:
+        with_url = [r for r in i2v if r.asset_url]
+        without_url = [r for r in i2v if not r.asset_url]
         print(
-            f"\n{n_i2v} of those are image -> video: primary_asset_id will be cleared, the "
-            f"stale original_image asset row deleted (blob object orphaned, not removed -- "
-            f"see module docstring), tag/tag_run/creative_embedding rows deleted, and "
-            f"meta.download_creative (kind=original_video) enqueued where an asset URL is "
-            f"known."
+            f"\n{len(i2v)} of those are image -> video: primary_asset_id cleared, the stale "
+            f"original_image asset row deleted (blob object orphaned, not removed -- see "
+            f"module docstring), and tag/tag_run/creative_embedding/tag_batch_item rows "
+            f"deleted for all of them (those tags were produced by the image model from a "
+            f"video frame and are invalid regardless of whether a replacement is available)."
+        )
+        print(f"  {len(with_url):6d}  will be re-downloaded (and re-tagged once that lands)")
+        if without_url:
+            print(
+                f"  {len(without_url):6d}  *** will be left with NO asset and NO tags -- "
+                f"classify() found no downloadable URL for these, so nothing is enqueued. "
+                f"They stay untagged until a separate resolution path (Apify/Instagram, or "
+                f"a future sync landing ad_video_history) gives them one. ***"
+            )
+
+    i2u = [r for r in changed if r.is_image_to_unresolved]
+    if i2u:
+        print(
+            f"\n{len(i2u)} of those are image -> unresolved: their tags (produced by the "
+            f"image model from what is actually a video frame) and their stale "
+            f"original_image asset/primary_asset_id are left exactly as they are -- "
+            f"format='unresolved' blocks both re-tagging and re-download, so this is a "
+            f"terminal state for these creatives until something else resolves their "
+            f"format (e.g. Task 5 / a future sync)."
         )
 
 
@@ -285,10 +385,18 @@ async def run(org_id: UUID, apply: bool) -> ReclassifyPlan:
         plan = await build_plan(db, org_id)
         _print_report(plan)
         if apply:
-            orphaned = await apply_plan(db, org_id, plan)
-            print(f"\napplied. {len(orphaned)} blob object(s) now orphaned:")
-            for path in orphaned:
-                print(f"  {path}")
+            print()
+            result = await apply_plan(db, org_id, plan)
+            print(
+                f"\napplied. {len(result.orphaned_asset_paths)} blob object(s) now orphaned "
+                f"(listed above as they were deleted)."
+            )
+            if result.failed:
+                print(
+                    f"{result.failed} creative(s) FAILED and were skipped -- see logs for "
+                    f"creative_id and exception. Re-running --apply is safe (already-fixed "
+                    f"rows have nothing left to change) and will retry them."
+                )
         else:
             print("\nDRY RUN -- pass --apply to write these changes.")
         return plan

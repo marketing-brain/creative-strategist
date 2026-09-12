@@ -9,6 +9,7 @@ database."""
 from scripts.reclassify_creatives import build_plan
 
 from cs.core import repo
+from cs.core.ids import new_id
 from cs.ingest.fivetran.fixtures import (
     create_fixture_schema,
     insert_asset_feed_spec_video,
@@ -92,6 +93,7 @@ async def test_build_plan_is_read_only_and_flags_the_image_to_video_regression(
     assert row.asset_url == "https://cdn.example/video.mp4"
     assert row.changed and row.is_image_to_video
     assert plan.transition_tally()[("image", "legacy_guess", "video", "meta_video_id")] == 1
+    assert plan.no_ads == 0  # the fixture creative does have an ad
 
     # Nothing observable changed: build_plan must never write.
     after = await db.fetchrow("SELECT format, format_source FROM creative WHERE id=$1", creative_id)
@@ -104,22 +106,47 @@ async def test_build_plan_is_read_only_and_flags_the_image_to_video_regression(
 async def test_dry_run_never_mutates_even_when_a_verdict_changes(db, blobs, settings, org_id):
     """The single most important property of this script: calling build_plan()
     alone -- the dry-run path -- must never touch the database, no matter what
-    it finds. Only apply_plan() (gated behind --apply in run()) may write."""
+    it finds. Only apply_plan() (gated behind --apply in run()) may write.
+
+    Crucially, `tag` and `tag_run` must actually be non-empty here: an earlier
+    version of this test snapshotted them in a fixture where both were empty,
+    so the assertions covering the tables whose deletion is the dangerous part
+    of apply_plan compared `[] == []` -- passing for the wrong reason."""
     creative_id = await _synced_org(db, blobs, settings, org_id)
-    before_tables = {
-        "creative": await db.fetch("SELECT * FROM creative WHERE org_id=$1", org_id),
-        "asset": await db.fetch("SELECT * FROM asset"),
-        "tag": await db.fetch("SELECT * FROM tag"),
-        "tag_run": await db.fetch("SELECT * FROM tag_run"),
-        "job": await db.fetch("SELECT * FROM job"),
+    taxonomy_id = new_id()
+    await db.execute(
+        "INSERT INTO taxonomy_version (id, version, yaml_sha256) VALUES ($1, 'v1', 'deadbeef')",
+        taxonomy_id,
+    )
+    run_id = new_id()
+    await db.execute(
+        "INSERT INTO tag_run (id, org_id, creative_id, taxonomy_version_id, model, status)"
+        " VALUES ($1, $2, $3, $4, 'image-model', 'done')",
+        run_id,
+        org_id,
+        creative_id,
+        taxonomy_id,
+    )
+    await db.execute(
+        "INSERT INTO tag (id, org_id, tag_run_id, creative_id, dimension, value, confidence)"
+        " VALUES ($1, $2, $3, $4, 'dim', 'val', 0.9)",
+        new_id(),
+        org_id,
+        run_id,
+        creative_id,
+    )
+
+    tables = ("creative", "asset", "tag", "tag_run", "job")
+    before = {
+        t: await db.fetch(f"SELECT * FROM {t} WHERE org_id=$1 ORDER BY id", org_id) for t in tables
     }
+    assert before["tag"] and before["tag_run"], "fixture must actually exercise these tables"
 
     await build_plan(db, org_id)
 
-    for table, rows in before_tables.items():
-        after = await db.fetch(f"SELECT * FROM {table}")  # table names are the fixed dict above
-        assert [dict(r) for r in after] == [dict(r) for r in rows], table
-    assert creative_id  # keep the reference alive/readable for debugging
+    for t in tables:
+        after = await db.fetch(f"SELECT * FROM {t} WHERE org_id=$1 ORDER BY id", org_id)
+        assert [dict(r) for r in after] == [dict(r) for r in before[t]], t
 
 
 async def test_ordered_by_descending_impressions(db, blobs, settings, org_id):
