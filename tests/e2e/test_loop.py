@@ -86,6 +86,7 @@ async def test_full_loop(client, db, blobs, settings, monkeypatch):
             # same placehold.co URL shape scripts/seed_dev_fivetran.py uses against a real
             # connector -- mocked above so meta.download_creative's HTTP GET stays hermetic.
             image_url=f"https://placehold.co/64x64.png?text={name}",
+            object_type="PHOTO",
         )
         for d in (date.today() - timedelta(days=n + 1) for n in range(10)):
             await insert_daily_insight(
