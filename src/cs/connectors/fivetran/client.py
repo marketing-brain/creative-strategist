@@ -24,6 +24,10 @@ REQUIRED_TABLES = (
 # curve per ad. Defined here (not just run once by hand) so every org's connector gets it
 # automatically at connect-time via lock_down_and_activate, with no manual per-org step --
 # required to scale past a handful of hand-configured accounts.
+#
+# CUSTOM_REPORTS_ENABLED is False: see the DISABLED note on lock_down_and_activate below.
+# Typed as bool (not inferred as Literal[False]) so the `if` there isn't flagged dead code.
+CUSTOM_REPORTS_ENABLED: bool = False
 CUSTOM_REPORTS: tuple[dict, ...] = (
     {
         "table_name": "video_retention_ad",
@@ -172,11 +176,15 @@ async def _custom_report_table_names(
 async def lock_down_and_activate(
     settings: Settings, http: httpx.AsyncClient, connector_id: str, schema: str
 ) -> None:
-    # Defining custom reports before the EXCLUDE reload so Fivetran has already
-    # discovered their resulting table(s) by the time we build the enable list below --
-    # unverified against a live connector as of this writing; if Fivetran only registers
-    # a custom report's tables after a subsequent sync, this ordering will need revisiting.
-    if CUSTOM_REPORTS:
+    # DISABLED 2026-09-12: confirmed live against two separate connectors on the same
+    # org that calling _configure_custom_reports here reliably flips the connector to
+    # setup_state "broken" (task: "reconnect") before it ever completes a sync -- every
+    # connect attempt for that org failed the same way until this call was removed.
+    # Root cause not yet understood (suspect PATCHing a full connector config mid-setup,
+    # before Fivetran finishes its own OAuth handshake, invalidates something on its
+    # side) -- do not re-enable without reproducing against a disposable test connector
+    # first, outside of a real org's connect flow.
+    if CUSTOM_REPORTS_ENABLED and CUSTOM_REPORTS:
         await _configure_custom_reports(settings, http, connector_id)
     await _call(
         settings,

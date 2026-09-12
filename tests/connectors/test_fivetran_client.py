@@ -126,9 +126,6 @@ async def test_set_paused(settings):
 @respx.mock
 async def test_lock_down_and_activate_excludes_then_allows_only_required_tables(settings):
     _settings(settings)
-    get_connector_route = respx.get(f"{F}/connectors/conn_1").mock(
-        return_value=httpx.Response(200, json={"data": {"config": {"sync_mode": "AllAccounts"}}})
-    )
     schemas_route = respx.get(f"{F}/connectors/conn_1/schemas").mock(
         return_value=httpx.Response(
             200,
@@ -162,8 +159,7 @@ async def test_lock_down_and_activate_excludes_then_allows_only_required_tables(
     async with httpx.AsyncClient() as http:
         await client.lock_down_and_activate(settings, http, "conn_1", "org1__meta_ads")
 
-    assert get_connector_route.called
-    assert schemas_route.called
+    assert schemas_route.called  # still used for custom-report discovery (a no-op while disabled)
 
     reload_sent = json.loads(reload_route.calls.last.request.content)
     assert reload_sent == {"exclude_mode": "EXCLUDE"}
@@ -177,6 +173,44 @@ async def test_lock_down_and_activate_excludes_then_allows_only_required_tables(
     assert all(c["enabled"] for t in tables.values() for c in t["columns"].values())
 
     assert json.loads(unpause_route.calls.last.request.content) == {"paused": False}
+
+
+@respx.mock
+async def test_lock_down_and_activate_never_touches_connector_config_while_custom_reports_disabled(
+    settings,
+):
+    """Regression test for the 2026-09-12 incident: calling _configure_custom_reports
+    from lock_down_and_activate reliably broke a live connector's setup_state before it
+    ever finished a first sync. CUSTOM_REPORTS_ENABLED must stay False until that's
+    understood -- this fails loudly if lock_down_and_activate starts calling it again
+    without this test being updated deliberately."""
+    _settings(settings)
+    assert client.CUSTOM_REPORTS_ENABLED is False
+    get_connector_route = respx.get(f"{F}/connectors/conn_1").mock(
+        return_value=httpx.Response(200, json={"data": {"config": {"sync_mode": "AllAccounts"}}})
+    )
+    respx.get(f"{F}/connectors/conn_1/schemas").mock(
+        return_value=httpx.Response(
+            200,
+            json={"data": {"schemas": {"org1__meta_ads": {"tables": {}}}}},
+        )
+    )
+    respx.post(f"{F}/connectors/conn_1/schemas/reload").mock(
+        return_value=httpx.Response(200, json={"data": {}})
+    )
+    for table in client.REQUIRED_TABLES:
+        respx.get(f"{F}/connectors/conn_1/schemas/org1__meta_ads/tables/{table}/columns").mock(
+            return_value=httpx.Response(200, json={"data": {"columns": {}}})
+        )
+    respx.patch(f"{F}/connectors/conn_1/schemas").mock(
+        return_value=httpx.Response(200, json={"data": {}})
+    )
+    respx.patch(f"{F}/connectors/conn_1").mock(return_value=httpx.Response(200, json={"data": {}}))
+
+    async with httpx.AsyncClient() as http:
+        await client.lock_down_and_activate(settings, http, "conn_1", "org1__meta_ads")
+
+    assert not get_connector_route.called  # _configure_custom_reports never invoked
 
 
 @respx.mock
