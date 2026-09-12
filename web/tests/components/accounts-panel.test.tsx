@@ -110,31 +110,51 @@ describe('AccountsPanel', () => {
     confirmSpy.mockRestore();
   });
 
-  it('reconnecting disconnects the old connection first, then starts a new one', async () => {
+  it('reconnecting starts a new connection directly, without disconnecting first', async () => {
+    // The connection row survives a disconnect as a stale 'error' record (disconnect
+    // never deletes it), so `connected: true` here does NOT mean a live Fivetran
+    // connector still exists. Reconnect must not assume it does.
+    const disconnectCallsBefore = disconnect.mock.calls.length;
     render(<AccountsPanel accounts={[]} connection={errored} />);
     const openSpy = vi.spyOn(window, 'open').mockReturnValue({ close: vi.fn() } as unknown as Window);
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     await userEvent.click(screen.getByRole('button', { name: /reconnect/i }));
-    expect(disconnect).toHaveBeenCalled();
-    await vi.waitFor(() => expect(start).toHaveBeenCalled());
-    expect(openSpy).toHaveBeenCalled();
+    await vi.waitFor(() => expect(openSpy).toHaveBeenCalled());
+    expect(disconnect.mock.calls.length).toBe(disconnectCallsBefore); // not called
     confirmSpy.mockRestore();
   });
 
   it('does not reconnect when the user cancels the confirmation', async () => {
+    const startCallsBefore = start.mock.calls.length;
+    const disconnectCallsBefore = disconnect.mock.calls.length;
     render(<AccountsPanel accounts={[]} connection={errored} />);
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
     await userEvent.click(screen.getByRole('button', { name: /reconnect/i }));
-    expect(disconnect).not.toHaveBeenCalled();
-    expect(start).not.toHaveBeenCalled();
+    expect(disconnect.mock.calls.length).toBe(disconnectCallsBefore);
+    expect(start.mock.calls.length).toBe(startCallsBefore);
     confirmSpy.mockRestore();
   });
 
-  it('recovers from a stale connection prop via a 409 by refreshing instead of tracking its own flag', async () => {
-    start.mockRejectedValueOnce(new ApiError(409, 'A Meta connection already exists -- disconnect it first.'));
+  it('self-heals a genuine 409 by disconnecting once and retrying, no dead end', async () => {
+    start
+      .mockRejectedValueOnce(new ApiError(409, 'A Meta connection already exists -- disconnect it first.'))
+      .mockResolvedValueOnce({ connect_card_url: 'https://card-2', connector_id: 'conn_2' });
     render(<AccountsPanel accounts={[]} connection={none} />);
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue({ close: vi.fn() } as unknown as Window);
     await userEvent.click(screen.getByRole('button', { name: /connect meta/i }));
-    expect(await screen.findByText(/already exists/i)).toBeInTheDocument();
+    await vi.waitFor(() => expect(disconnect).toHaveBeenCalled());
+    await vi.waitFor(() => expect(openSpy).toHaveBeenCalledWith('https://card-2', 'fivetran-connect', expect.any(String)));
+  });
+
+  it('reports failure instead of looping when the 409 persists after one retry', async () => {
+    start
+      .mockRejectedValueOnce(new ApiError(409, 'A Meta connection already exists -- disconnect it first.'))
+      .mockRejectedValueOnce(new ApiError(409, 'A Meta connection already exists -- disconnect it first.'));
+    render(<AccountsPanel accounts={[]} connection={none} />);
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue({ close: vi.fn() } as unknown as Window);
+    await userEvent.click(screen.getByRole('button', { name: /connect meta/i }));
+    expect(await screen.findByText(/still could not start/i)).toBeInTheDocument();
     expect(refresh).toHaveBeenCalled();
+    expect(openSpy).not.toHaveBeenCalled();
   });
 });

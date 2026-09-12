@@ -76,7 +76,7 @@ export function AccountsPanel({ accounts, connection }: { accounts: Account[]; c
     }
   };
 
-  const connect = async () => {
+  const connect = async (retryingAfterDisconnect = false) => {
     // If a previous connect attempt never completed (popup closed manually, or the
     // Connect Card never sent the return message), drop its listener before adding a
     // new one — otherwise a stale listener stays live and double-finalizes on the
@@ -143,18 +143,34 @@ export function AccountsPanel({ accounts, connection }: { accounts: Account[]; c
         }
       }, 500);
     } catch (e) {
-      setConnecting(false);
       if (e instanceof ApiError && e.status === 403) {
+        setConnecting(false);
         setMsg({ text: "You don't have permission to do this. Ask an admin.", kind: 'error' });
       } else if (e instanceof ApiError && e.status === 409) {
-        // The connection status shown above should already have made this unreachable
-        // via a normal click (the Connect button only renders in state 'none'). This is
-        // a genuine race (opened in two tabs, or someone else just connected) rather
-        // than a state this component needs to track -- resync from the server instead
-        // of hand-maintaining a flag for it.
-        setMsg({ text: 'A Meta connection already exists for this workspace. Refreshing.', kind: 'info' });
-        router.refresh();
+        // A live Fivetran connector still exists for this org (a real race, or our own
+        // connection row surviving disconnect as a stale 'error' record -- disconnect
+        // never deletes it, it just marks it that way). Either way the fix is the same:
+        // clear it and try once more, rather than dead-ending the user here.
+        if (retryingAfterDisconnect) {
+          setConnecting(false);
+          setMsg({ text: 'Still could not start a new connection after clearing the old one. Refreshing.', kind: 'error' });
+          router.refresh();
+          return;
+        }
+        setMsg({ text: 'Clearing the existing Meta connection…', kind: 'info' });
+        try {
+          await api.fivetranDisconnect();
+        } catch (err) {
+          setConnecting(false);
+          setMsg({
+            text: `Could not clear the existing connection: ${err instanceof Error ? err.message : 'Something went wrong.'}`,
+            kind: 'error',
+          });
+          return;
+        }
+        await connect(true);
       } else {
+        setConnecting(false);
         setMsg({ text: `Failed to connect: ${e instanceof Error ? e.message : 'Something went wrong.'}`, kind: 'error' });
       }
     }
@@ -176,18 +192,6 @@ export function AccountsPanel({ accounts, connection }: { accounts: Account[]; c
 
   const reconnect = async () => {
     if (!window.confirm('This replaces the existing Meta connection with a new one. Continue?')) return;
-    setConnecting(true);
-    setMsg(null);
-    try {
-      await api.fivetranDisconnect();
-    } catch (e) {
-      setConnecting(false);
-      setMsg({
-        text: `Failed to disconnect the existing connection: ${e instanceof Error ? e.message : 'Something went wrong.'}`,
-        kind: 'error',
-      });
-      return;
-    }
     await connect();
   };
 
@@ -243,7 +247,7 @@ export function AccountsPanel({ accounts, connection }: { accounts: Account[]; c
           </div>
           <div className="flex shrink-0 gap-2">
             {state === 'none' ? (
-              <Button size="sm" onClick={connect} disabled={connecting} className="gap-1.5">
+              <Button size="sm" onClick={() => connect()} disabled={connecting} className="gap-1.5">
                 {connecting ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Plug className="size-4" aria-hidden="true" />}
                 {connecting ? 'Connecting…' : 'Connect Meta'}
               </Button>
