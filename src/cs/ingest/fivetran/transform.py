@@ -59,7 +59,7 @@ async def _optional_creative_ids(db, sql: str, *, table: str) -> set[str]:
     warning is the precondition alert: coverage is silently reduced otherwise."""
     try:
         rows = await db.fetch(sql)
-    except asyncpg.UndefinedTableError:
+    except asyncpg.PostgresError:
         log.warning(
             "classification signal unavailable -- coverage degraded, more creatives "
             "will be unresolved",
@@ -85,7 +85,7 @@ async def _video_view_creative_ids(db, schema: str) -> set[str]:
         SELECT DISTINCT a.creative_id FROM (
           SELECT id, creative_id, row_number() OVER (PARTITION BY id
             ORDER BY _fivetran_synced DESC) rn FROM {_q(schema, AD_HISTORY)}
-        ) a JOIN {_q(schema, BASIC_AD_ACTIONS)} act ON act.ad_id = a.id::text
+        ) a JOIN {_q(schema, BASIC_AD_ACTIONS)} act ON act.ad_id::text = a.id::text
         WHERE a.rn = 1 AND act.action_type = 'video_view' AND act.value > 0
         """,
         table=BASIC_AD_ACTIONS,

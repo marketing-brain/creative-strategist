@@ -24,7 +24,8 @@ async def upsert_creative(
         INSERT INTO creative (id, org_id, ad_account_id, platform_creative_id, format, headline,
                               primary_text, description, cta_type, link_url, raw_path,
                               format_source, format_verified_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                CASE WHEN $12 = 'unresolved' THEN NULL ELSE now() END)
         ON CONFLICT (ad_account_id, platform_creative_id) DO UPDATE SET
           format = EXCLUDED.format,
           headline = EXCLUDED.headline,
