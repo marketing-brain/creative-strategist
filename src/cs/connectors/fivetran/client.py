@@ -14,9 +14,34 @@ REQUIRED_TABLES = (
     "creative_history",
     "ad_video_history",
     "ad_asset_feed_spec_video",
+    "ad_asset_feed_spec_image",
+    "ad_asset_feed_spec_asset_customization_rule",
+    "ad_image_history",
+    "ad_video_thumbnail",
     "basic_ad",
     "basic_ad_actions",
     "basic_ad_action_values",
+)
+
+VIDEO_RETENTION_TABLE = "video_retention_ad"
+
+# Custom reports Fivetran builds for every new connector. Each *_actions field lands in
+# its own child table named with the report's table_name as prefix.
+CUSTOM_TABLES = (
+    {
+        "table_name": VIDEO_RETENTION_TABLE,
+        "config_type": "Custom",
+        "level": "ad",
+        "aggregation": "Day",
+        "action_report_time": "mixed",
+        "fields": [
+            "ad_id", "ad_name", "adset_id", "campaign_id",
+            "video_p25_watched_actions", "video_p50_watched_actions",
+            "video_p75_watched_actions", "video_p95_watched_actions",
+            "video_p100_watched_actions", "video_thruplay_watched_actions",
+            "video_avg_time_watched_actions", "video_play_actions",
+        ],
+    },
 )
 
 
@@ -79,7 +104,11 @@ async def create_connector(
             "group_id": group_id,
             "run_setup_tests": False,
             "paused": True,
-            "config": {"schema": schema, "pause_after_trial": True},
+            "config": {
+                "schema": schema,
+                "pause_after_trial": True,
+                "custom_tables": list(CUSTOM_TABLES),
+            },
             # all_fields=True is required to show the connector's own setup fields (notably
             # Facebook Ads' "sync specific accounts" picker) in the embedded Connect Card --
             # without it, Fivetran renders only the OAuth login step and silently defaults to
@@ -120,7 +149,7 @@ async def get_table_columns(
 async def lock_down_and_activate(
     settings: Settings, http: httpx.AsyncClient, connector_id: str, schema: str
 ) -> None:
-    await _call(
+    reloaded = await _call(
         settings,
         http,
         "POST",
@@ -130,8 +159,15 @@ async def lock_down_and_activate(
     # Right after EXCLUDE, Fivetran has barely discovered each table's real column set --
     # BLOCK_ALL would permanently lock out every column it finds later during the actual
     # sync. ALLOW_COLUMNS still blocks new tables (all we need) but lets columns self-heal.
+    discovered = reloaded.get("schemas", {}).get(schema, {}).get("tables", {})
+    prefixes = [t["table_name"] for t in CUSTOM_TABLES]
+    custom = [
+        name
+        for name in discovered
+        if any(name == p or name.startswith(f"{p}_") for p in prefixes)
+    ]
     tables = {}
-    for table in REQUIRED_TABLES:
+    for table in (*REQUIRED_TABLES, *custom):
         columns = await get_table_columns(settings, http, connector_id, schema, table)
         tables[table] = {
             "enabled": True,

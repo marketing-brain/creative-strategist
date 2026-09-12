@@ -46,6 +46,40 @@ async def test_create_connector_returns_connect_card_url(settings):
 
 
 @respx.mock
+async def test_create_connector_requests_video_retention_custom_report(settings):
+    _settings(settings)
+    route = respx.post(f"{F}/connectors").mock(
+        return_value=httpx.Response(200, json={"data": {"id": "conn_1"}})
+    )
+    async with httpx.AsyncClient() as http:
+        await client.create_connector(
+            settings,
+            http,
+            service="facebook_ads",
+            group_id="grp_1",
+            schema="org1__meta_ads",
+            redirect_uri="https://app.example/fivetran-return",
+        )
+    config = json.loads(route.calls.last.request.content)["config"]
+    assert config["custom_tables"] == [
+        {
+            "table_name": "video_retention_ad",
+            "config_type": "Custom",
+            "level": "ad",
+            "aggregation": "Day",
+            "action_report_time": "mixed",
+            "fields": [
+                "ad_id", "ad_name", "adset_id", "campaign_id",
+                "video_p25_watched_actions", "video_p50_watched_actions",
+                "video_p75_watched_actions", "video_p95_watched_actions",
+                "video_p100_watched_actions", "video_thruplay_watched_actions",
+                "video_avg_time_watched_actions", "video_play_actions",
+            ],
+        }
+    ]
+
+
+@respx.mock
 async def test_get_connector(settings):
     _settings(settings)
     respx.get(f"{F}/connectors/conn_1").mock(
@@ -159,8 +193,60 @@ async def test_lock_down_and_activate_excludes_then_allows_only_required_tables(
     assert json.loads(unpause_route.calls.last.request.content) == {"paused": False}
 
 
+@respx.mock
+async def test_lock_down_keeps_custom_report_tables_the_reload_discovers(settings):
+    # Fivetran splits each *_actions field of a custom report into its own child table,
+    # and its exact naming (p25 vs p_25) isn't something to hardcode. Enable the report's
+    # main table and every child table the reload reports under its prefix -- nothing else.
+    _settings(settings)
+    discovered = {
+        "video_retention_ad": {"enabled": False},
+        "video_retention_ad_video_p25_watched_actions": {"enabled": False},
+        "video_retention_ad_video_play_actions": {"enabled": False},
+        "demographics_age": {"enabled": False},
+        "video_retention_adx": {"enabled": False},
+    }
+    respx.post(f"{F}/connectors/conn_1/schemas/reload").mock(
+        return_value=httpx.Response(
+            200, json={"data": {"schemas": {"org1__meta_ads": {"tables": discovered}}}}
+        )
+    )
+    for table in (*client.REQUIRED_TABLES, *discovered):
+        respx.get(f"{F}/connectors/conn_1/schemas/org1__meta_ads/tables/{table}/columns").mock(
+            return_value=httpx.Response(200, json={"data": {"columns": {"id": {"enabled": True}}}})
+        )
+    schema_route = respx.patch(f"{F}/connectors/conn_1/schemas").mock(
+        return_value=httpx.Response(200, json={"data": {}})
+    )
+    respx.patch(f"{F}/connectors/conn_1").mock(return_value=httpx.Response(200, json={"data": {}}))
+    async with httpx.AsyncClient() as http:
+        await client.lock_down_and_activate(settings, http, "conn_1", "org1__meta_ads")
+
+    sent = json.loads(schema_route.calls.last.request.content)
+    tables = sent["schemas"]["org1__meta_ads"]["tables"]
+    assert set(tables) == {
+        *client.REQUIRED_TABLES,
+        "video_retention_ad",
+        "video_retention_ad_video_p25_watched_actions",
+        "video_retention_ad_video_play_actions",
+    }
+
+
 def test_asset_feed_spec_video_is_required():
     # Rule 4 of the classification contract reads this table. lock_down_and_activate
     # sets ALLOW_COLUMNS, which blocks tables discovered later -- so a table missing
     # from REQUIRED_TABLES can never appear for a new connection.
     assert "ad_asset_feed_spec_video" in client.REQUIRED_TABLES
+
+
+def test_placement_customization_media_tables_are_required():
+    # PLACEMENT asset-customization creatives keep their media in the asset feed spec,
+    # not image_url: images per placement, the rule mapping assets to placements, the
+    # full-size image library the hashes resolve against, and video thumbnails.
+    for table in (
+        "ad_asset_feed_spec_image",
+        "ad_asset_feed_spec_asset_customization_rule",
+        "ad_image_history",
+        "ad_video_thumbnail",
+    ):
+        assert table in client.REQUIRED_TABLES
