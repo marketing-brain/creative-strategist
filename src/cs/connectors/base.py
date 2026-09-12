@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Literal
 
-Format = Literal["image", "video", "carousel"]
+Format = Literal["image", "video", "carousel", "unresolved"]
 
 
 @dataclass
