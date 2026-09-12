@@ -7,7 +7,7 @@ export const metadata = { title: 'Settings' };
 
 export default async function Settings() {
   await requireAuth();
-  const [me, accounts] = await Promise.all([api.me(), api.accounts()]);
+  const [me, accounts, connection] = await Promise.all([api.me(), api.accounts(), api.fivetranStatus()]);
   const kit = await api.brandKit().catch((e) => (e instanceof ApiError && e.status === 404 ? null : Promise.reject(e)));
   return (
     <div className="mx-auto max-w-2xl space-y-8">
@@ -17,7 +17,7 @@ export default async function Settings() {
           Signed in as {me.user_id} · role {me.role} · org {me.org_id}
         </p>
       </div>
-      <AccountsPanel accounts={accounts} />
+      <AccountsPanel accounts={accounts} connection={connection} />
       <BrandKitForm initial={kit} />
     </div>
   );

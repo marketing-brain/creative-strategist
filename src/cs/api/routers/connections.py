@@ -2,7 +2,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from cs.api.auth import AuthContext, require_admin
+from cs.api.auth import AuthContext, current_auth, require_admin
 from cs.api.deps import get_db, get_settings_dep
 from cs.connectors.fivetran import connect as fivetran_connect
 from cs.core import repo
@@ -18,6 +18,27 @@ class FinalizeBody(BaseModel):
     # field, so a missing connector_id yields a 400 rather than FastAPI's default 422 --
     # matching the explicit contract in tests/api/test_connections.py.
     connector_id: str = ""
+
+
+@router.get("")
+async def status(
+    auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)
+) -> dict:
+    """Connection status independent of ad_account rows -- a meta_connection can exist
+    (mid first-sync, or errored with zero accounts ever discovered) while /accounts
+    returns nothing, which used to leave the UI with no signal that a connection was
+    already in progress."""
+    conn = await repo.get_meta_connection(db, auth.org_id)
+    if conn is None:
+        return {"connected": False, "status": None, "error": None, "last_synced_at": None}
+    return {
+        "connected": True,
+        "status": conn["sync_status"],
+        "error": conn["last_error"],
+        "last_synced_at": (
+            conn["last_synced_at"].isoformat() if conn["last_synced_at"] else None
+        ),
+    }
 
 
 @router.post("/start")

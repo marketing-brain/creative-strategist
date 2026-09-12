@@ -24,6 +24,7 @@ export const api = {
   accounts: () => apiFetch<import('./types').Account[]>('/accounts'),
   activateAccount: (id: string) => apiFetch<{ job_id: string | null }>(`/accounts/${id}/activate`, { method: 'POST' }),
   syncAccount: (id: string) => apiFetch<{ job_id: string | null }>(`/accounts/${id}/sync`, { method: 'POST' }),
+  fivetranStatus: () => apiFetch<import('./types').MetaConnection>('/connections/meta'),
   fivetranConnectStart: () => apiFetch<{ connect_card_url: string; connector_id: string }>('/connections/meta/start', { method: 'POST' }),
   fivetranConnectFinalize: (connectorId: string) => apiFetch<{ ok: boolean }>('/connections/meta/finalize', { method: 'POST', body: JSON.stringify({ connector_id: connectorId }) }),
   fivetranDisconnect: () => apiFetch<{ ok: boolean }>('/connections/meta/disconnect', { method: 'POST' }),

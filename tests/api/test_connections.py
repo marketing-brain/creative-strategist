@@ -122,3 +122,48 @@ async def test_disconnect_returns_404_when_no_connection_exists(client, settings
     )
     r = await client.post("/connections/meta/disconnect", headers=H)
     assert r.status_code == 404
+
+
+async def test_status_reports_disconnected_when_no_connection_exists(client):
+    r = await client.get("/connections/meta", headers=dev_headers(org="org_conn_status_none"))
+    assert r.status_code == 200
+    assert r.json() == {"connected": False, "status": None, "error": None, "last_synced_at": None}
+
+
+async def test_status_visible_before_any_account_is_discovered(client, db):
+    from uuid import UUID
+
+    from cs.core import repo
+
+    org_id = UUID(
+        (await client.get("/me", headers=dev_headers(org="org_conn_status_pending"))).json()[
+            "org_id"
+        ]
+    )
+    await repo.upsert_meta_connection(db, org_id, "conn_1", "s")
+    r = await client.get("/connections/meta", headers=dev_headers(org="org_conn_status_pending"))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["connected"] is True
+    assert body["status"] == "pending"
+    assert body["error"] is None
+
+
+async def test_status_surfaces_error_message(client, db):
+    from uuid import UUID
+
+    from cs.core import repo
+
+    org_id = UUID(
+        (await client.get("/me", headers=dev_headers(org="org_conn_status_error"))).json()[
+            "org_id"
+        ]
+    )
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", "s")
+    await repo.set_meta_connection_status(
+        db, conn_id, "error", last_error="Disconnected -- reconnect to resume syncing."
+    )
+    r = await client.get("/connections/meta", headers=dev_headers(org="org_conn_status_error"))
+    body = r.json()
+    assert body["status"] == "error"
+    assert body["error"] == "Disconnected -- reconnect to resume syncing."
