@@ -32,6 +32,10 @@ async def test_valid_combinations_are_accepted(db, org_id, ad_account_id):
     await _insert(db, org_id, ad_account_id, fmt="video", source="video_view_metric")
 
 
+async def test_zero_video_views_image_is_storable(db, org_id, ad_account_id):
+    await _insert(db, org_id, ad_account_id, fmt="image", source="no_video_views")
+
+
 async def test_format_source_has_no_default(db, org_id, ad_account_id):
     with pytest.raises(asyncpg.NotNullViolationError):
         await db.execute(

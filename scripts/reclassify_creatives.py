@@ -62,6 +62,7 @@ from cs.ingest.fivetran.classify import classify
 from cs.ingest.fivetran.schema import AD_VIDEO_HISTORY, CREATIVE_HISTORY
 from cs.ingest.fivetran.transform import (
     _afs_video_creative_ids,
+    _impressions_by_creative,
     _latest_rows,
     _video_view_creative_ids,
 )
@@ -162,6 +163,7 @@ async def build_plan(db: Database, org_id: UUID) -> ReclassifyPlan:
     }
     afs_ids = await _afs_video_creative_ids(db, schema)
     vv_ids = await _video_view_creative_ids(db, schema)
+    impressions = await _impressions_by_creative(db, schema)
 
     fivetran_by_pid = {
         pid: r
@@ -208,6 +210,7 @@ async def build_plan(db: Database, org_id: UUID) -> ReclassifyPlan:
             videos_by_id=videos_by_id,
             afs_video_creative_ids=afs_ids,
             video_view_creative_ids=vv_ids,
+            impressions_by_creative_id=impressions,
         )
         plan.rows.append(
             ReclassifyRow(

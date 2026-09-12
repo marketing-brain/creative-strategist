@@ -4,6 +4,9 @@ import json
 from collections.abc import Container, Mapping
 from dataclasses import dataclass
 
+# Calibrated on org 2: no object_type=VIDEO creative with >=50 impressions has zero views.
+NO_VIDEO_VIEWS_MIN_IMPRESSIONS = 50
+
 
 @dataclass(frozen=True)
 class Classification:
@@ -37,6 +40,7 @@ def classify(
     videos_by_id: Mapping[str, str],
     afs_video_creative_ids: Container[str],
     video_view_creative_ids: Container[str],
+    impressions_by_creative_id: Mapping[str, int] | None,
 ) -> Classification:
     """Ordered evidence rules. There is deliberately no default branch: anything
     unproven returns 'unresolved' rather than falling through to 'image'."""
@@ -63,5 +67,13 @@ def classify(
         return Classification("video", "asset_feed_spec_video")
     if creative_id in video_view_creative_ids:
         return Classification("video", "video_view_metric")
+
+    # Zero views proves "not a video" only if view data synced; None must never yield image.
+    if (
+        object_type == "SHARE"
+        and impressions_by_creative_id is not None
+        and impressions_by_creative_id.get(creative_id or "", 0) >= NO_VIDEO_VIEWS_MIN_IMPRESSIONS
+    ):
+        return Classification("image", "no_video_views", row["image_url"] or row["thumbnail_url"])
 
     return Classification("unresolved", "unresolved")

@@ -13,6 +13,7 @@ from cs.ingest.fivetran.schema import (
     AD_ASSET_FEED_SPEC_VIDEO,
     AD_HISTORY,
     AD_VIDEO_HISTORY,
+    BASIC_AD,
     BASIC_AD_ACTIONS,
     CAMPAIGN_HISTORY,
     CREATIVE_HISTORY,
@@ -101,6 +102,31 @@ async def _video_view_creative_ids(db, schema: str) -> set[str]:
     )
 
 
+async def _impressions_by_creative(db, schema: str) -> dict[str, int] | None:
+    """Impressions per creative; None if basic_ad_actions is missing/empty, so views are unknown."""
+    try:
+        if await db.fetchval(f"SELECT 1 FROM {_q(schema, BASIC_AD_ACTIONS)} LIMIT 1") is None:
+            log.warning("zero-video-views rule disabled: no action data", extra={"schema": schema})
+            return None
+        rows = await db.fetch(f"""
+            SELECT a.creative_id, sum(b.impressions) AS impressions FROM (
+              SELECT id, creative_id, row_number() OVER (PARTITION BY id
+                ORDER BY _fivetran_synced DESC) rn FROM {_q(schema, AD_HISTORY)}
+            ) a JOIN {_q(schema, BASIC_AD)} b ON b.ad_id::text = a.id::text
+            WHERE a.rn = 1 GROUP BY a.creative_id
+        """)
+    except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
+        log.warning(
+            "zero-video-views rule disabled: insights table missing", extra={"schema": schema}
+        )
+        return None
+    return {
+        str(r["creative_id"]): int(r["impressions"] or 0)
+        for r in rows
+        if r["creative_id"] is not None
+    }
+
+
 async def _discover_accounts(db, org_id: UUID, connection_id: UUID, schema: str) -> dict[str, UUID]:
     """Every distinct account_id seen in campaign_history becomes (or already is) an
     ad_account row, starting 'paused' until a human activates it -- same default the old
@@ -130,6 +156,7 @@ async def _sync_ads_and_creatives(
     }
     afs_ids = await _afs_video_creative_ids(db, schema)
     vv_ids = await _video_view_creative_ids(db, schema)
+    impressions = await _impressions_by_creative(db, schema)
 
     new_creatives = 0
     synced_ads = 0
@@ -147,6 +174,7 @@ async def _sync_ads_and_creatives(
                 videos_by_id=videos_by_id,
                 afs_video_creative_ids=afs_ids,
                 video_view_creative_ids=vv_ids,
+                impressions_by_creative_id=impressions,
             )
             platform_creative = PlatformCreative(
                 platform_creative_id=_pid(cr["id"]),

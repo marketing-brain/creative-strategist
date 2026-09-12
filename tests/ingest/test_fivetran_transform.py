@@ -1,3 +1,5 @@
+from datetime import date
+
 import asyncpg
 import pytest
 
@@ -351,6 +353,86 @@ async def test_video_view_loader_joins_bigint_ad_id_against_text_ad_history_id(
     assert summary["failed"] == 0
     row = await db.fetchrow("SELECT format, format_source FROM creative WHERE org_id=$1", org_id)
     assert (row["format"], row["format_source"]) == ("video", "video_view_metric")
+
+
+async def _ad_with_impressions(db, *, ad_id: str, impressions: int) -> None:
+    """A second ad row for creative cr1, plus its basic_ad impressions."""
+    await db.execute(
+        f'INSERT INTO "{SCHEMA}".ad_history VALUES ($1, $2, $3, $4, $5, $6, $7, now())',
+        ad_id, "999", "as1", "c1", "cr1", "name", "ACTIVE",
+    )
+    await db.execute(
+        f"INSERT INTO \"{SCHEMA}\".basic_ad VALUES ($1, '2026-09-01', 1.0, $2, 0)",
+        int(ad_id), impressions,
+    )
+
+
+async def _schema_with_bigint_basic_ad(db) -> None:
+    await create_fixture_schema(db, SCHEMA)
+    await db.execute(f'DROP TABLE "{SCHEMA}".basic_ad')
+    await db.execute(
+        f'CREATE TABLE "{SCHEMA}".basic_ad (ad_id BIGINT, date DATE, '
+        f"spend NUMERIC, impressions INT, inline_link_clicks INT)"
+    )
+
+
+async def test_impressions_loader_sums_each_creative_across_its_ads(db):
+    # Two sub-threshold ads (30, 25) sum to 55; BIGINT basic_ad.ad_id is the real shape.
+    await _schema_with_bigint_basic_ad(db)
+    await _ad_with_impressions(db, ad_id="9001", impressions=30)
+    await _ad_with_impressions(db, ad_id="9002", impressions=25)
+    await db.execute(
+        f'INSERT INTO "{SCHEMA}".basic_ad_actions VALUES ($1, $2, $3, 0, 1)',
+        "9001", date(2026, 9, 1), "link_click",
+    )
+
+    assert await fivetran_transform._impressions_by_creative(db, SCHEMA) == {"cr1": 55}
+
+
+async def test_impressions_loader_returns_none_when_actions_table_is_missing(db):
+    # No actions table means "no data", not "no views" -- else every video becomes an image.
+    await _schema_with_bigint_basic_ad(db)
+    await _ad_with_impressions(db, ad_id="9001", impressions=100_000)
+    await db.execute(f'DROP TABLE "{SCHEMA}".basic_ad_actions')
+
+    assert await fivetran_transform._impressions_by_creative(db, SCHEMA) is None
+
+
+async def test_sync_stores_zero_views_boosted_post_as_image(db, blobs, settings, org_id):
+    # End to end: a boosted post that served 5,000 times with no video views is an image.
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db, SCHEMA, campaign_id="c1", account_id="999", adset_id="as1", ad_id="9001",
+        creative_id="cr1", name="n", headline="H", image_url="https://cdn/i.jpg",
+        object_type="SHARE",
+    )
+    await db.execute(
+        f'INSERT INTO "{SCHEMA}".basic_ad VALUES ($1, $2, 1.0, 5000, 0)', "9001", date(2026, 9, 1)
+    )
+    await db.execute(
+        f'INSERT INTO "{SCHEMA}".basic_ad_actions VALUES ($1, $2, $3, 0, 7)',
+        "9001", date(2026, 9, 1), "link_click",
+    )
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    accounts = await repo.list_ad_accounts(db, org_id)
+    await repo.set_ad_account_status(db, org_id, accounts[0]["id"], "active")
+
+    summary = await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+
+    assert summary["failed"] == 0
+    row = await db.fetchrow("SELECT format, format_source FROM creative WHERE org_id=$1", org_id)
+    assert (row["format"], row["format_source"]) == ("image", "no_video_views")
+
+
+async def test_impressions_loader_returns_none_when_actions_table_is_empty(db):
+    # Synced-but-empty actions data proves nothing about views either.
+    await _schema_with_bigint_basic_ad(db)
+    await _ad_with_impressions(db, ad_id="9001", impressions=100_000)
+
+    assert await fivetran_transform._impressions_by_creative(db, SCHEMA) is None
 
 
 async def test_video_creative_downloads_from_ad_video_history_source(db, blobs, settings, org_id):
