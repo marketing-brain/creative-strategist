@@ -39,6 +39,7 @@ async def main() -> None:
             name=name,
             headline=headline,
             image_url=f"https://placehold.co/600x600.png?text={name}",
+            object_type="PHOTO",
         )
         await insert_daily_insight(
             db,

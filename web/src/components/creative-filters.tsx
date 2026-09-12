@@ -7,6 +7,7 @@ const formats = [
   { value: 'image', label: 'Image' },
   { value: 'video', label: 'Video' },
   { value: 'carousel', label: 'Carousel' },
+  { value: 'unresolved', label: 'Unresolved' },
 ];
 
 export function CreativeFilters({ accounts, dimensions }: { accounts: { id: string; name: string }[]; dimensions: Dimension[] }) {

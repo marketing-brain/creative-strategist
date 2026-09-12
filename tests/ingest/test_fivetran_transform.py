@@ -1,3 +1,6 @@
+import asyncpg
+import pytest
+
 from cs.core import repo
 from cs.ingest.fivetran import transform as fivetran_transform
 from cs.ingest.fivetran.fixtures import (
@@ -613,6 +616,61 @@ async def test_share_creative_without_evidence_is_unresolved_and_downloads_nothi
     assert (
         await db.fetchval("SELECT count(*) FROM job WHERE job_type='meta.download_creative'") == 0
     )
+
+
+async def test_video_view_loader_does_not_swallow_timeout_class_errors(db, org_id, monkeypatch):
+    """The optional-signal catch in _optional_creative_ids is deliberately narrowed to
+    UndefinedTableError | UndefinedColumnError -- a missing table degrades completeness,
+    never soundness. asyncpg.PostgresError, the old catch, also covers
+    ConnectionDoesNotExistError, QueryCanceledError (statement timeout), SerializationError
+    and AdminShutdownError -- and _video_view_creative_ids is an unbounded join over the
+    whole of basic_ad_actions, so a timeout there is plausible, not hypothetical. Swallowing
+    one used to turn a single flaky query into a silent, org-wide 'video' -> 'unresolved'
+    downgrade for every creative whose only evidence was this signal. A timeout-class error
+    must propagate instead of degrading."""
+
+    async def raise_timeout(sql, *args):
+        raise asyncpg.QueryCanceledError("statement timeout")
+
+    monkeypatch.setattr(db, "fetch", raise_timeout)
+
+    with pytest.raises(asyncpg.QueryCanceledError):
+        await fivetran_transform._video_view_creative_ids(db, SCHEMA)
+
+
+async def test_video_view_loader_still_degrades_gracefully_when_table_is_missing(
+    db, blobs, settings, org_id
+):
+    """Confirms the narrowed catch still covers its actual purpose: a genuinely-missing
+    optional table (basic_ad_actions not yet landed by Fivetran for this connection) must
+    still degrade to an empty set -- and hence 'unresolved', never 'video' -- rather than
+    raising and aborting the whole sync, the same as before this catch was narrowed."""
+    await create_fixture_schema(db, SCHEMA)
+    await db.execute(f'DROP TABLE "{SCHEMA}".basic_ad_actions')
+    await insert_campaign_ad_creative(
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="ad1",
+        creative_id="cr1",
+        name="n",
+        headline="H",
+        image_url=None,
+        object_type="SHARE",
+    )
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    accounts = await repo.list_ad_accounts(db, org_id)
+    await repo.set_ad_account_status(db, org_id, accounts[0]["id"], "active")
+    summary = await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+
+    assert summary["failed"] == 0
+    row = await db.fetchrow("SELECT format, format_source FROM creative WHERE org_id=$1", org_id)
+    assert row["format"] == "unresolved"
 
 
 async def test_asset_feed_spec_video_membership_classifies_as_video(db, blobs, settings, org_id):

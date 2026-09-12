@@ -59,7 +59,16 @@ async def _optional_creative_ids(db, sql: str, *, table: str) -> set[str]:
     warning is the precondition alert: coverage is silently reduced otherwise."""
     try:
         rows = await db.fetch(sql)
-    except asyncpg.PostgresError:
+    except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
+        # Deliberately narrow: this catch exists for a table Fivetran has not landed
+        # yet, not for query failures in general. asyncpg.PostgresError also covers
+        # ConnectionDoesNotExistError, QueryCanceledError (statement timeout -- and
+        # _video_view_creative_ids below is an unbounded join over the whole of
+        # basic_ad_actions, so a timeout here is plausible), SerializationError and
+        # AdminShutdownError. Swallowing those would silently downgrade every
+        # creative whose only evidence was this signal from 'video' to 'unresolved'
+        # for the whole sync, org-wide -- soundness over completeness cuts the other
+        # way for a failed query, which proves nothing about the data.
         log.warning(
             "classification signal unavailable -- coverage degraded, more creatives "
             "will be unresolved",

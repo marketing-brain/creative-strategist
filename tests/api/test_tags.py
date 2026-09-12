@@ -62,3 +62,28 @@ async def test_backfill_rejects_out_of_range_limit(client, db, settings):
     assert r.status_code == 422
     r = await client.post("/tagging/backfill", headers=H, json={"limit": 0})
     assert r.status_code == 422
+
+
+async def test_retag_rejects_unresolved_format(client, db, settings):
+    """An 'unresolved' creative (e.g. after the reclassification backfill, which
+    deliberately leaves primary_asset_id set on image -> unresolved rows) must never be
+    enqueued for tagging: taxonomy.for_format('unresolved') returns [], which turns into
+    a JSON schema enum of [] that structured-output APIs reject -- a doomed job and a
+    burned model call."""
+    from uuid import UUID
+
+    org_id = UUID((await client.get("/me", headers=H)).json()["org_id"])
+    acct = await ingest_repo.upsert_ad_account(db, org_id, "1", "M", "USD")
+    cid, _ = await ingest_repo.upsert_creative(
+        db,
+        org_id,
+        acct,
+        PlatformCreative("c_unresolved", "unresolved", "H", "P", None, None, "u", None, None, {}),
+        "raw",
+        format_source="unresolved",
+    )
+
+    r = await client.post(f"/creatives/{cid}/retag", headers=H)
+
+    assert r.status_code == 422
+    assert await db.fetchval("SELECT count(*) FROM job") == 0
