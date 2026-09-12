@@ -13,6 +13,7 @@ REQUIRED_TABLES = (
     "ad_history",
     "creative_history",
     "ad_video_history",
+    "ad_asset_feed_spec_video",
     "basic_ad",
     "basic_ad_actions",
     "basic_ad_action_values",

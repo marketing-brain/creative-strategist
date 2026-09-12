@@ -157,3 +157,10 @@ async def test_lock_down_and_activate_excludes_then_allows_only_required_tables(
     assert all(c["enabled"] for t in tables.values() for c in t["columns"].values())
 
     assert json.loads(unpause_route.calls.last.request.content) == {"paused": False}
+
+
+def test_asset_feed_spec_video_is_required():
+    # Rule 4 of the classification contract reads this table. lock_down_and_activate
+    # sets ALLOW_COLUMNS, which blocks tables discovered later -- so a table missing
+    # from REQUIRED_TABLES can never appear for a new connection.
+    assert "ad_asset_feed_spec_video" in client.REQUIRED_TABLES
