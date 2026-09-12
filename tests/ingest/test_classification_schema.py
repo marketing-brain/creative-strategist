@@ -30,3 +30,12 @@ async def test_unknown_source_is_rejected(db, org_id, ad_account_id):
 async def test_valid_combinations_are_accepted(db, org_id, ad_account_id):
     await _insert(db, org_id, ad_account_id, fmt="unresolved", source="unresolved")
     await _insert(db, org_id, ad_account_id, fmt="video", source="video_view_metric")
+
+
+async def test_format_source_has_no_default(db, org_id, ad_account_id):
+    with pytest.raises(asyncpg.NotNullViolationError):
+        await db.execute(
+            "INSERT INTO creative (id, org_id, ad_account_id, platform_creative_id,"
+            " format, raw_path) VALUES ($1, $2, $3, $4, $5, '')",
+            new_id(), org_id, ad_account_id, new_id().hex, "image",
+        )
