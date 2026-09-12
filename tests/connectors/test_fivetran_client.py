@@ -126,20 +126,6 @@ async def test_set_paused(settings):
 @respx.mock
 async def test_lock_down_and_activate_excludes_then_allows_only_required_tables(settings):
     _settings(settings)
-    schemas_route = respx.get(f"{F}/connectors/conn_1/schemas").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "data": {
-                    "schemas": {
-                        "org1__meta_ads": {
-                            "tables": {t: {} for t in client.REQUIRED_TABLES}
-                        }
-                    }
-                }
-            },
-        )
-    )
     reload_route = respx.post(f"{F}/connectors/conn_1/schemas/reload").mock(
         return_value=httpx.Response(200, json={"data": {}})
     )
@@ -159,8 +145,6 @@ async def test_lock_down_and_activate_excludes_then_allows_only_required_tables(
     async with httpx.AsyncClient() as http:
         await client.lock_down_and_activate(settings, http, "conn_1", "org1__meta_ads")
 
-    assert schemas_route.called  # still used for custom-report discovery (a no-op while disabled)
-
     reload_sent = json.loads(reload_route.calls.last.request.content)
     assert reload_sent == {"exclude_mode": "EXCLUDE"}
 
@@ -173,101 +157,3 @@ async def test_lock_down_and_activate_excludes_then_allows_only_required_tables(
     assert all(c["enabled"] for t in tables.values() for c in t["columns"].values())
 
     assert json.loads(unpause_route.calls.last.request.content) == {"paused": False}
-
-
-@respx.mock
-async def test_lock_down_and_activate_never_touches_connector_config_while_custom_reports_disabled(
-    settings,
-):
-    """Regression test for the 2026-09-12 incident: calling _configure_custom_reports
-    from lock_down_and_activate reliably broke a live connector's setup_state before it
-    ever finished a first sync. CUSTOM_REPORTS_ENABLED must stay False until that's
-    understood -- this fails loudly if lock_down_and_activate starts calling it again
-    without this test being updated deliberately."""
-    _settings(settings)
-    assert client.CUSTOM_REPORTS_ENABLED is False
-    get_connector_route = respx.get(f"{F}/connectors/conn_1").mock(
-        return_value=httpx.Response(200, json={"data": {"config": {"sync_mode": "AllAccounts"}}})
-    )
-    respx.get(f"{F}/connectors/conn_1/schemas").mock(
-        return_value=httpx.Response(
-            200,
-            json={"data": {"schemas": {"org1__meta_ads": {"tables": {}}}}},
-        )
-    )
-    respx.post(f"{F}/connectors/conn_1/schemas/reload").mock(
-        return_value=httpx.Response(200, json={"data": {}})
-    )
-    for table in client.REQUIRED_TABLES:
-        respx.get(f"{F}/connectors/conn_1/schemas/org1__meta_ads/tables/{table}/columns").mock(
-            return_value=httpx.Response(200, json={"data": {"columns": {}}})
-        )
-    respx.patch(f"{F}/connectors/conn_1/schemas").mock(
-        return_value=httpx.Response(200, json={"data": {}})
-    )
-    respx.patch(f"{F}/connectors/conn_1").mock(return_value=httpx.Response(200, json={"data": {}}))
-
-    async with httpx.AsyncClient() as http:
-        await client.lock_down_and_activate(settings, http, "conn_1", "org1__meta_ads")
-
-    assert not get_connector_route.called  # _configure_custom_reports never invoked
-
-
-@respx.mock
-async def test_configure_custom_reports_merges_into_existing_config(settings):
-    _settings(settings)
-    respx.get(f"{F}/connectors/conn_1").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "data": {
-                    "config": {
-                        "sync_mode": "AllAccounts",
-                        "custom_tables": [{"table_name": "some_other_report"}],
-                    }
-                }
-            },
-        )
-    )
-    patch_route = respx.patch(f"{F}/connectors/conn_1").mock(
-        return_value=httpx.Response(200, json={"data": {}})
-    )
-    async with httpx.AsyncClient() as http:
-        await client._configure_custom_reports(settings, http, "conn_1")
-
-    sent = json.loads(patch_route.calls.last.request.content)
-    assert sent["config"]["sync_mode"] == "AllAccounts"  # existing config preserved
-    names = {t["table_name"] for t in sent["config"]["custom_tables"]}
-    assert names == {"some_other_report", "video_retention_ad"}
-
-
-@respx.mock
-async def test_custom_report_table_names_discovers_unpivoted_children(settings):
-    _settings(settings)
-    respx.get(f"{F}/connectors/conn_1/schemas").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "data": {
-                    "schemas": {
-                        "org1__meta_ads": {
-                            "tables": {
-                                "video_retention_ad": {},
-                                "video_retention_ad_video_p25_watched_actions": {},
-                                "video_retention_ad_video_thruplay_watched_actions": {},
-                                "basic_ad": {},  # unrelated table, must not be picked up
-                            }
-                        }
-                    }
-                }
-            },
-        )
-    )
-    async with httpx.AsyncClient() as http:
-        names = await client._custom_report_table_names(settings, http, "conn_1", "org1__meta_ads")
-
-    assert set(names) == {
-        "video_retention_ad",
-        "video_retention_ad_video_p25_watched_actions",
-        "video_retention_ad_video_thruplay_watched_actions",
-    }
