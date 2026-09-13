@@ -25,8 +25,11 @@ from cs.core.repo.connections import (
     upsert_meta_connection,
 )
 from cs.core.repo.creatives import (
+    baseline_window_sums,
     count_creatives,
+    creative_first_metric_day,
     creative_metrics,
+    creative_window_sums,
     get_creative,
     list_creatives,
     upsert_creative,
@@ -35,10 +38,13 @@ from cs.core.repo.metrics import upsert_metrics
 from cs.core.repo.partitions import ensure_metric_partition
 
 __all__ = [
+    "baseline_window_sums",
     "count_creatives",
     "creative_has_asset",
     "creative_has_primary_asset",
+    "creative_first_metric_day",
     "creative_metrics",
+    "creative_window_sums",
     "delete_assets_by_kind",
     "ensure_metric_partition",
     "get_ad_account",

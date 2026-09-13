@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -10,8 +10,12 @@ from cs.core import repo
 from cs.core.blobs import BlobStore
 from cs.core.db import Database
 from cs.core.metrics import derived_metrics
+from cs.insights.diagnosis import FATIGUE_MIN_DAYS, Sums, diagnose
 
 router = APIRouter(prefix="/creatives")
+
+# Diagnosis window: trailing 30 days ending today (UTC), matching the library's 30d columns.
+WINDOW_DAYS = 30
 
 
 # Postgres sums bigint columns into numeric; these are counts and must stay integers.
@@ -107,3 +111,48 @@ async def creative_metrics(
     return [
         _derived(r) for r in await repo.creative_metrics(db, auth.org_id, creative_id, since, until)
     ]
+
+
+@router.get("/{creative_id}/diagnosis")
+async def creative_diagnosis(
+    creative_id: UUID,
+    auth: AuthContext = Depends(current_auth),
+    db: Database = Depends(get_db),
+) -> dict:
+    c = await repo.get_creative(db, auth.org_id, creative_id)
+    if not c:
+        raise HTTPException(404)
+    until = datetime.now(UTC).date()
+    since = until - timedelta(days=WINDOW_DAYS - 1)
+    window = Sums.from_record(
+        await repo.creative_window_sums(db, auth.org_id, creative_id, since, until)
+    )
+    base = await repo.baseline_window_sums(
+        db, auth.org_id, c["ad_account_id"], c["format"], creative_id, since, until
+    )
+    first_day = await repo.creative_first_metric_day(db, auth.org_id, creative_id)
+    days_live = (until - first_day).days + 1 if first_day else None
+    first14 = trailing7 = None
+    if first_day is not None and days_live is not None and days_live >= FATIGUE_MIN_DAYS:
+        first14 = Sums.from_record(
+            await repo.creative_window_sums(
+                db, auth.org_id, creative_id, first_day, first_day + timedelta(days=13)
+            )
+        )
+        trailing7 = Sums.from_record(
+            await repo.creative_window_sums(
+                db, auth.org_id, creative_id, until - timedelta(days=6), until
+            )
+        )
+    return diagnose(
+        fmt=c["format"],
+        window=window,
+        baseline=Sums.from_record(base),
+        baseline_creatives=int(base["creatives"] or 0),
+        first14=first14,
+        trailing7=trailing7,
+        days_live=days_live,
+        duration_ms=c["primary_asset_duration_ms"],
+        window_start=since,
+        window_end=until,
+    ).to_dict()

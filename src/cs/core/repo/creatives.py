@@ -125,7 +125,8 @@ async def count_creatives(
 async def get_creative(db: Database, org_id: UUID, creative_id: UUID) -> asyncpg.Record | None:
     return await db.fetchrow(
         """
-        SELECT c.*, a.path AS primary_asset_path, a.mime AS primary_asset_mime
+        SELECT c.*, a.path AS primary_asset_path, a.mime AS primary_asset_mime,
+               a.duration_ms AS primary_asset_duration_ms
         FROM creative c LEFT JOIN asset a ON a.id = c.primary_asset_id
         WHERE c.org_id = $1 AND c.id = $2
         """,
@@ -150,4 +151,63 @@ async def creative_metrics(
         creative_id,
         since,
         until,
+    )
+
+
+_SUMS_SQL = """
+    sum(impressions) AS impressions, sum(reach) AS reach, sum(link_clicks) AS link_clicks,
+    sum(spend) AS spend, sum(video_3s_views) AS video_3s_views, sum(video_plays) AS video_plays,
+    sum(video_p25) AS video_p25, sum(video_p50) AS video_p50, sum(video_p75) AS video_p75,
+    sum(video_p95) AS video_p95, sum(video_p100) AS video_p100,
+    sum(video_thruplay) AS video_thruplay, sum(video_watch_seconds) AS video_watch_seconds,
+    sum(landing_page_views) AS landing_page_views, sum(content_views) AS content_views,
+    sum(add_to_carts) AS add_to_carts, sum(checkouts) AS checkouts, sum(purchases) AS purchases,
+    sum(post_reactions) AS post_reactions, sum(comments) AS comments, sum(saves) AS saves,
+    sum(conversions) AS conversions, sum(conversion_value) AS conversion_value
+"""
+
+
+async def creative_window_sums(
+    db: Database, org_id: UUID, creative_id: UUID, since: date, until: date
+) -> asyncpg.Record:
+    """Always returns one row; every sum is NULL when no rows fall in the window."""
+    return await db.fetchrow(
+        f"SELECT {_SUMS_SQL} FROM metric_daily "
+        "WHERE org_id=$1 AND creative_id=$2 AND day BETWEEN $3 AND $4",
+        org_id,
+        creative_id,
+        since,
+        until,
+    )
+
+
+async def baseline_window_sums(
+    db: Database,
+    org_id: UUID,
+    ad_account_id: UUID,
+    fmt: str,
+    exclude_creative_id: UUID,
+    since: date,
+    until: date,
+) -> asyncpg.Record:
+    """Pooled sums over every *other* creative of the same format in the account."""
+    return await db.fetchrow(
+        f"SELECT {_SUMS_SQL}, count(DISTINCT m.creative_id) AS creatives "
+        "FROM metric_daily m JOIN creative c ON c.id = m.creative_id "
+        "WHERE m.org_id=$1 AND m.ad_account_id=$2 AND c.format=$3 AND m.creative_id <> $4 "
+        "AND m.day BETWEEN $5 AND $6",
+        org_id,
+        ad_account_id,
+        fmt,
+        exclude_creative_id,
+        since,
+        until,
+    )
+
+
+async def creative_first_metric_day(db: Database, org_id: UUID, creative_id: UUID) -> date | None:
+    return await db.fetchval(
+        "SELECT min(day) FROM metric_daily WHERE org_id=$1 AND creative_id=$2 AND impressions > 0",
+        org_id,
+        creative_id,
     )
