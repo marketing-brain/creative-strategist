@@ -272,3 +272,49 @@ def test_diagnose_healthy_and_too_early():
     d = _diagnose(fmt="image", window=sums(impressions=640), days_live=3, duration_ms=None)
     assert d.verdict.kind == "too_early" and "640" in d.verdict.detail
     assert d.broken_tier is None
+
+
+def test_conversion_skips_stages_the_account_does_not_track():
+    """Real case (org 3, 2026-09-12): the advertiser fires almost no view_content or
+    add_to_cart events, so checkouts vastly exceed both. A funnel cannot grow, so those
+    stages are untracked, not weak, and the chain must run click -> landing -> checkout ->
+    purchase instead of naming 'Content view' as the broken step."""
+    w = sums(
+        link_clicks=6_000, landing_page_views=5_400, content_views=20, add_to_carts=50,
+        checkouts=700, purchases=240,
+    )  # fmt: skip
+    b = sums(
+        link_clicks=600_000, landing_page_views=540_000, content_views=2_000,
+        add_to_carts=5_000, checkouts=64_000, purchases=22_000,
+    )  # fmt: skip
+    t = conversion_tier(w, b)
+    assert [s.key for s in t.steps] == ["landing_page", "checkout", "purchase"]
+    assert [s.label for s in t.steps] == ["Click → Landing page", "→ Checkout", "→ Purchase"]
+    co = t.steps[1]
+    assert co.readable and co.rate == pytest.approx(700 / 5_400)
+    assert co.baseline_rate == pytest.approx(64_000 / 540_000)
+    assert t.status == "on_par"
+    assert "Content view and Add to cart are not tracked consistently" in t.reason
+
+
+def test_conversion_keeps_a_tracked_middle_stage_and_first_last_always():
+    # add_to_cart tracked (monotone), content_view not (smaller than add_to_cart).
+    w = sums(link_clicks=5_000, landing_page_views=3_000, content_views=10, add_to_carts=900,
+             checkouts=400, purchases=150)  # fmt: skip
+    b = sums(link_clicks=50_000, landing_page_views=30_000, content_views=100,
+             add_to_carts=9_000, checkouts=4_000, purchases=1_500)  # fmt: skip
+    t = conversion_tier(w, b)
+    assert [s.key for s in t.steps] == ["landing_page", "add_to_cart", "checkout", "purchase"]
+    assert t.steps[1].label == "→ Add to cart" and t.steps[1].rate == pytest.approx(900 / 3_000)
+    # With no events past the click anywhere, every middle stage is untracked; the chain
+    # collapses to click -> purchase, which stays (unreadable) so the tier is still honest.
+    t = conversion_tier(sums(link_clicks=500), sums(link_clicks=50_000))
+    assert [s.key for s in t.steps] == ["purchase"]
+    assert t.steps[0].label == "Click → Purchase" and t.steps[0].lift is None
+    assert t.status == "not_enough_data"
+
+
+def test_retention_unresolved_format_gets_its_own_reason():
+    t = retention_tier("unresolved", sums(), sums(), None)
+    assert t.status == "not_applicable" and "not resolved" in t.reason
+    assert "Image creative" in retention_tier("image", sums(), sums(), None).reason

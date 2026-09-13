@@ -195,7 +195,7 @@ def attention_tier(fmt: str, w: Sums, b: Sums) -> Tier:
             "The first three seconds are not stopping the scroll. "
             "Recut the opening or swap the thumbnail; keep the rest."
             if fmt == "video"
-            else "The image is not stopping the scroll. "
+            else "This creative is not stopping the scroll. "
             "Try a different visual or headline; keep the offer."
         )
     else:
@@ -244,11 +244,16 @@ def retention_tier(fmt: str, w: Sums, b: Sums, duration_ms: int | None) -> Tier:
         2, "retention", "Retention", "Where in the video does attention drop?", "not_applicable"
     )
     if fmt != "video":
-        noun = "Carousel" if fmt == "carousel" else "Image"
-        tier.reason = (
-            f"{noun} creative. There is no watch-through curve to read; "
-            "link CTR carries the scroll-stopping question."
-        )
+        if fmt in ("image", "carousel"):
+            tier.reason = (
+                f"{fmt.capitalize()} creative. There is no watch-through curve to read; "
+                "link CTR carries the scroll-stopping question."
+            )
+        else:
+            tier.reason = (
+                "This creative's format is not resolved yet, so there is no watch-through "
+                "curve to read."
+            )
         return tier
     enough = w.video_plays >= RETENTION_FLOOR and b.video_plays >= RETENTION_FLOOR
     hold = _metric(
@@ -293,19 +298,48 @@ def retention_tier(fmt: str, w: Sums, b: Sums, duration_ms: int | None) -> Tier:
 
 # ---------------------------------------------------------------- tier 3: conversion
 
-_STEPS = (
-    ("landing_page", "Click → Landing page", "link_clicks", "landing_page_views"),
-    ("content_view", "→ Content view", "landing_page_views", "content_views"),
-    ("add_to_cart", "→ Add to cart", "content_views", "add_to_carts"),
-    ("checkout", "→ Checkout", "add_to_carts", "checkouts"),
-    ("purchase", "→ Purchase", "checkouts", "purchases"),
+# Funnel stages in order: (step key, human name, Sums attribute). The chain starts at
+# link clicks and ends at purchases; the middle stages are only kept when the account
+# actually instruments them (see _instrumented_stages).
+_STAGES = (
+    ("click", "Click", "link_clicks"),
+    ("landing_page", "Landing page", "landing_page_views"),
+    ("content_view", "Content view", "content_views"),
+    ("add_to_cart", "Add to cart", "add_to_carts"),
+    ("checkout", "Checkout", "checkouts"),
+    ("purchase", "Purchase", "purchases"),
 )
 
 
+def _instrumented_stages(w: Sums, b: Sums) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """Drop middle stages the account does not track.
+
+    A real funnel is non-increasing: no stage can have more events than the one before it.
+    Meta only reports the pixel events an advertiser fires, so an account that skips
+    `view_content` or `add_to_cart` shows a tiny count there and a far larger count at
+    checkout. Such a stage is untracked, not weak, and must not be diagnosed. Counts are
+    account-level (creative + baseline) so the shape reflects the account's instrumentation,
+    not this creative's volume. First and last stages are always kept.
+    """
+    counts = [getattr(w, attr) + getattr(b, attr) for _, _, attr in _STAGES]
+    kept: list[tuple[str, str, str]] = []
+    skipped: list[str] = []
+    for i, stage in enumerate(_STAGES):
+        first_or_last = i in (0, len(_STAGES) - 1)
+        later_max = max(counts[i + 1 :], default=0)
+        if first_or_last or (counts[i] > 0 and counts[i] >= later_max):
+            kept.append(stage)
+        else:
+            skipped.append(stage[1])
+    return kept, skipped
+
+
 def conversion_tier(w: Sums, b: Sums) -> Tier:
+    stages, skipped = _instrumented_stages(w, b)
     steps: list[Step] = []
     readable = True
-    for key, label, den_attr, num_attr in _STEPS:
+    for (_, prev_name, den_attr), (key, name, num_attr) in zip(stages, stages[1:], strict=False):
+        label = f"{prev_name} → {name}" if den_attr == "link_clicks" else f"→ {name}"
         den_w, den_b = getattr(w, den_attr), getattr(b, den_attr)
         readable = readable and den_w >= STEP_FLOOR and den_b >= STEP_FLOOR
         rate = ratio(getattr(w, num_attr), den_w) if readable else None
@@ -322,6 +356,12 @@ def conversion_tier(w: Sums, b: Sums) -> Tier:
                 readable,
             )
         )
+    skipped_note = (
+        f" {' and '.join(skipped)} {'are' if len(skipped) > 1 else 'is'} not tracked "
+        "consistently for this account, so that step is left out."
+        if skipped
+        else ""
+    )
     cpa_w, cpa_b = ratio(w.spend, w.conversions), ratio(b.spend, b.conversions)
     cpa_lift = lift(cpa_w, cpa_b)
     cpa_signed = -cpa_lift if cpa_lift is not None else None  # lower CPA is better
@@ -340,14 +380,15 @@ def conversion_tier(w: Sums, b: Sums) -> Tier:
         tier.status = "not_enough_data"
         tier.reason = (
             f"Steps show only once the previous step has {STEP_FLOOR} events. "
-            "Nothing past the click is readable yet."
+            "Nothing past the click is readable yet." + skipped_note
         )
         return tier
     worst = min(scored, key=lambda s: s.lift or 0.0)
     if worst.lift is not None and worst.lift <= -LIFT_THRESHOLD:
         tier.status = "weak"
+        stage_name = worst.label.split("→ ")[-1]
         tier.decision = (
-            f"People drop at {worst.label.lstrip('→ ')}. "
+            f"People drop at {stage_name}. "
             "Check that the landing page delivers what the creative promises."
         )
         return tier
@@ -362,7 +403,7 @@ def conversion_tier(w: Sums, b: Sums) -> Tier:
         if tier.status == "strong"
         else "The people who click convert like everyone else's. "
         "The landing page is not the problem."
-    )
+    ) + skipped_note
     return tier
 
 
