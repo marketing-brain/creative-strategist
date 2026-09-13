@@ -58,6 +58,7 @@ async def _seed(db, client, *, today: date):
             acct,
             PlatformCreative(pid, fmt, "H " + pid, "P", None, None, "u", None, None, {}),
             "raw",
+            format_source="manual_review",
         )
         await repo.upsert_ad(
             db, org_id, acct, PlatformAd("ad_" + pid, pid, "ACTIVE", None, None, pid), cid
@@ -136,6 +137,7 @@ async def test_diagnosis_with_no_metrics_is_too_early(client, db):
         acct,
         PlatformCreative("x", "image", "H", "P", None, None, "u", None, None, {}),
         "raw",
+        format_source="manual_review",
     )
     d = (await client.get(f"/creatives/{cid}/diagnosis", headers=H)).json()
     assert d["verdict"]["kind"] == "too_early" and d["baseline_creatives"] == 0

@@ -284,6 +284,7 @@ async def test_upsert_metrics_persists_diagnosis_columns(db, org_id):
         acct,
         PlatformCreative("cr", "video", "H", "P", None, None, "u", None, None, {}),
         "raw",
+        format_source="manual_review",
     )
     await repo.upsert_ad(db, org_id, acct, PlatformAd("ad77", "A", "ACTIVE", None, None, "cr"), cid)
     row = MetricRow(
