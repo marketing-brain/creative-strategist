@@ -14,10 +14,12 @@ from cs.ingest.fivetran.schema import (
     CAMPAIGN_HISTORY,
     CREATIVE_HISTORY,
     INSIGHTS_ACTION_TABLES,
+    VIDEO_RETENTION_AD,
+    VIDEO_RETENTION_CHILD_COLUMNS,
 )
 
 
-async def create_fixture_schema(db: Database, schema: str) -> None:
+async def create_fixture_schema(db: Database, schema: str, *, with_retention: bool = True) -> None:
     await db.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
     await db.execute(f'CREATE SCHEMA "{schema}"')
     await db.execute(f"""
@@ -52,12 +54,28 @@ async def create_fixture_schema(db: Database, schema: str) -> None:
     """)
     await db.execute(
         f'CREATE TABLE "{schema}".{BASIC_AD} (ad_id TEXT, date DATE, '
-        f"spend NUMERIC, impressions INT, inline_link_clicks INT)"
+        f"spend NUMERIC, impressions INT, inline_link_clicks INT, reach INT)"
     )
     for t in INSIGHTS_ACTION_TABLES:
         await db.execute(
             f'CREATE TABLE "{schema}".{t} '
             f"(ad_id TEXT, date DATE, action_type TEXT, index INT, value NUMERIC)"
+        )
+    if with_retention:
+        await create_retention_tables(db, schema)
+
+
+async def create_retention_tables(db: Database, schema: str) -> None:
+    """The video_retention_ad custom report and its unpivoted child tables, shaped like
+    the ones Fivetran lands for org 2 in production."""
+    await db.execute(
+        f'CREATE TABLE "{schema}".{VIDEO_RETENTION_AD} (ad_id TEXT, date DATE, '
+        f"account_id BIGINT, adset_id BIGINT, campaign_id BIGINT, ad_name TEXT)"
+    )
+    for suffix in VIDEO_RETENTION_CHILD_COLUMNS:
+        await db.execute(
+            f'CREATE TABLE "{schema}".{VIDEO_RETENTION_AD}_{suffix} '
+            f"(ad_id TEXT, date DATE, index INT, value DOUBLE PRECISION, action_type TEXT)"
         )
 
 
@@ -128,12 +146,56 @@ async def insert_daily_insight(
     spend: float,
     impressions: int,
     link_clicks: int,
+    reach: int = 0,
 ) -> None:
     await db.execute(
-        f'INSERT INTO "{schema}".basic_ad VALUES ($1, $2, $3, $4, $5)',
+        f'INSERT INTO "{schema}".basic_ad VALUES ($1, $2, $3, $4, $5, $6)',
         ad_id,
         date.fromisoformat(day),
         spend,
         impressions,
         link_clicks,
+        reach,
     )
+
+
+async def insert_retention(
+    db: Database,
+    schema: str,
+    *,
+    ad_id: str,
+    day: str,
+    plays: float,
+    p25: float,
+    p50: float,
+    p75: float,
+    p95: float,
+    p100: float,
+    thruplay: float,
+    avg_time_watched: float,
+) -> None:
+    d = date.fromisoformat(day)
+    await db.execute(
+        f'INSERT INTO "{schema}".{VIDEO_RETENTION_AD} VALUES ($1, $2, 1, 1, 1, $3)',
+        ad_id,
+        d,
+        ad_id,
+    )
+    values = {
+        "video_play_actions": plays,
+        "video_p_25_watched_actions": p25,
+        "video_p_50_watched_actions": p50,
+        "video_p_75_watched_actions": p75,
+        "video_p_95_watched_actions": p95,
+        "video_p_100_watched_actions": p100,
+        "video_thruplay_watched_actions": thruplay,
+        "video_avg_time_watched_actions": avg_time_watched,
+    }
+    for suffix, v in values.items():
+        await db.execute(
+            f'INSERT INTO "{schema}".{VIDEO_RETENTION_AD}_{suffix} VALUES ($1, $2, 0, $3, $4)',
+            ad_id,
+            d,
+            v,
+            "video_view",
+        )

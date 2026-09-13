@@ -1,14 +1,20 @@
+import pytest
+
 from cs.connectors.base import PlatformAd, PlatformCreative
 from cs.core import repo
 from cs.ingest.fivetran import insights as fivetran_insights
-from cs.ingest.fivetran.fixtures import create_fixture_schema, insert_daily_insight
+from cs.ingest.fivetran.fixtures import (
+    create_fixture_schema,
+    insert_daily_insight,
+    insert_retention,
+)
 from cs.jobs.registry import JobContext
 
 SCHEMA = "testorg__meta_ads"
 
 
-async def _seed(db, org_id):
-    await create_fixture_schema(db, SCHEMA)
+async def _seed(db, org_id, *, with_retention=True):
+    await create_fixture_schema(db, SCHEMA, with_retention=with_retention)
     await insert_daily_insight(
         db,
         SCHEMA,
@@ -17,22 +23,49 @@ async def _seed(db, org_id):
         spend=10.0,
         impressions=1000,
         link_clicks=20,
+        reach=800,
     )
     await db.execute(f"""
-        INSERT INTO "{SCHEMA}".basic_ad_actions
-        VALUES ('ad1', '2026-09-01', 'omni_purchase', 0, 2)
+        INSERT INTO "{SCHEMA}".basic_ad_actions VALUES
+        ('ad1', '2026-09-01', 'omni_purchase', 0, 2),
+        ('ad1', '2026-09-01', 'purchase', 0, 2),
+        ('ad1', '2026-09-01', 'video_view', 0, 30),
+        ('ad1', '2026-09-01', 'omni_landing_page_view', 0, 15),
+        ('ad1', '2026-09-01', 'landing_page_view', 0, 15),
+        ('ad1', '2026-09-01', 'view_content', 0, 9),
+        ('ad1', '2026-09-01', 'omni_add_to_cart', 0, 4),
+        ('ad1', '2026-09-01', 'add_to_cart', 0, 3),
+        ('ad1', '2026-09-01', 'initiate_checkout', 0, 3),
+        ('ad1', '2026-09-01', 'post_reaction', 0, 12),
+        ('ad1', '2026-09-01', 'comment', 0, 3),
+        ('ad1', '2026-09-01', 'onsite_conversion.post_save', 0, 5)
     """)
     await db.execute(f"""
         INSERT INTO "{SCHEMA}".basic_ad_action_values VALUES
         ('ad1', '2026-09-01', 'omni_purchase', 0, 100)
     """)
+    if with_retention:
+        await insert_retention(
+            db,
+            SCHEMA,
+            ad_id="ad1",
+            day="2026-09-01",
+            plays=400,
+            p25=280,
+            p50=120,
+            p75=60,
+            p95=40,
+            p100=30,
+            thruplay=90,
+            avg_time_watched=7.1,
+        )
 
     acct = await repo.upsert_ad_account(db, org_id, "999", "Main", "USD")
     cid, _ = await repo.upsert_creative(
         db,
         org_id,
         acct,
-        PlatformCreative("cr1", "image", "H", "P", None, "SHOP_NOW", "https://x", None, None, {}),
+        PlatformCreative("cr1", "video", "H", "P", None, "SHOP_NOW", "https://x", None, None, {}),
         "",
     )
     await repo.upsert_ad(db, org_id, acct, PlatformAd("ad1", "A", "ACTIVE", None, None, "cr1"), cid)
@@ -46,7 +79,7 @@ async def test_sync_insights_folds_action_breakdowns_into_metric_daily(db, blobs
     ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
 
     summary = await fivetran_insights.sync_insights(ctx, org_id, connection)
-    assert summary["written"] == 1 and summary["skipped"] == 0
+    assert summary == {"written": 1, "skipped": 0, "retention_tables": True}
 
     rows = await db.fetch("SELECT * FROM metric_daily WHERE org_id=$1", org_id)
     assert len(rows) == 1
@@ -54,8 +87,37 @@ async def test_sync_insights_folds_action_breakdowns_into_metric_daily(db, blobs
     assert row["ad_account_id"] == acct
     assert row["placement"] == "all"
     assert row["spend"] == 10 and row["impressions"] == 1000 and row["clicks"] == 20
+    assert row["reach"] == 800
     assert row["conversions"] == 2 and row["conversion_value"] == 100
-    assert row["video_thruplay"] == 0 and row["video_3s_views"] == 0
+    # video_view is Meta's 3-second-view action_type -> hook-rate numerator.
+    assert row["video_3s_views"] == 30
+    # Step conversions: omni_* wins when present, plain action_type otherwise.
+    assert row["landing_page_views"] == 15 and row["content_views"] == 9
+    assert row["add_to_carts"] == 4 and row["checkouts"] == 3 and row["purchases"] == 2
+    assert row["post_reactions"] == 12 and row["comments"] == 3 and row["saves"] == 5
+    # Retention from the video_retention_ad custom report child tables.
+    assert row["video_plays"] == 400
+    curve_cols = ("video_p25", "video_p50", "video_p75", "video_p95", "video_p100")
+    assert tuple(row[k] for k in curve_cols) == (280, 120, 60, 40, 30)
+    assert row["video_thruplay"] == 90
+    # avg_time_watched is a per-day average; stored as avg * plays so it sums across days.
+    assert float(row["video_watch_seconds"]) == pytest.approx(7.1 * 400)
+
+
+async def test_sync_insights_without_retention_report_writes_zeros(db, blobs, settings, org_id):
+    """Org 1's Fivetran schema has no video_retention_ad tables at all. The sync must
+    still land everything else and say so in the summary, never raise."""
+    await _seed(db, org_id, with_retention=False)
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    summary = await fivetran_insights.sync_insights(ctx, org_id, connection)
+    assert summary == {"written": 1, "skipped": 0, "retention_tables": False}
+    row = await db.fetchrow("SELECT * FROM metric_daily WHERE org_id=$1", org_id)
+    assert row["video_3s_views"] == 30 and row["purchases"] == 2
+    assert row["video_plays"] == 0 and row["video_p25"] == 0 and row["video_thruplay"] == 0
+    assert row["video_watch_seconds"] == 0
 
 
 async def test_bigint_ad_id_still_joins_against_our_text_ad_table(db, blobs, settings, org_id):
