@@ -48,6 +48,7 @@ async def two_tagged(db, org_id, settings):
             acct,
             PlatformCreative(n, "image", hook, "P", None, None, "u", None, None, {}),
             "raw",
+            format_source="manual_review",
         )
         rid = await repo.start_tag_run(db, org_id, cid, tv, "fake")
         await repo.finish_tag_run(

@@ -27,6 +27,7 @@ async def _seed(db, settings, client):
         acct,
         PlatformCreative("c1", "image", "H", "P", None, "SHOP_NOW", "https://x", None, None, {}),
         "raw",
+        format_source="manual_review",
     )
     aid = await repo.insert_asset(
         db, org_id, cid, "original_image", "o/c1/original.png", "sha", "image/png"
@@ -121,6 +122,7 @@ async def test_creatives_pagination(client, db, settings):
                 f"c{i}", "image", "H", "P", None, "SHOP_NOW", "https://x", None, None, {}
             ),
             "raw",
+            format_source="manual_review",
         )
     full = (await client.get("/creatives?limit=200", headers=H)).json()
     assert full["total"] == 3 and len(full["items"]) == 3
@@ -144,6 +146,7 @@ async def test_creatives_filter_by_tag(client, db, settings):
         acct,
         PlatformCreative("c2", "image", "H2", "P2", None, "SHOP_NOW", "https://x", None, None, {}),
         "raw",
+        format_source="manual_review",
     )
     tv = await tagging_repo.ensure_taxonomy_version(db, load_taxonomy())
     rid = await tagging_repo.start_tag_run(db, org_id, cid, tv, "fake")
@@ -189,6 +192,7 @@ async def test_creatives_spend_30d_excludes_older_metrics(client, db, settings):
             "c_recent", "image", "H", "P", None, "SHOP_NOW", "https://x", None, None, {}
         ),
         "raw",
+        format_source="manual_review",
     )
     await repo.upsert_ad(
         db, org_id, acct, PlatformAd("ad_recent", "A", "ACTIVE", None, None, "c_recent"), recent_cid
@@ -250,6 +254,7 @@ async def test_creatives_spend_30d_defaults_to_zero_with_no_metrics(client, db, 
             "c_zero", "image", "H", "P", None, "SHOP_NOW", "https://x", None, None, {}
         ),
         "raw",
+        format_source="manual_review",
     )
 
     body = (await client.get("/creatives?limit=200", headers=H)).json()

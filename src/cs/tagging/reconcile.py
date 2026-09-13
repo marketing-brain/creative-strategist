@@ -12,7 +12,7 @@ async def reenqueue_untagged(db: Database) -> int:
     rows = await db.fetch(
         """
         SELECT c.id, c.org_id FROM creative c
-        WHERE c.primary_asset_id IS NOT NULL
+        WHERE c.primary_asset_id IS NOT NULL AND c.format IN ('image', 'video', 'carousel')
           AND NOT EXISTS (SELECT 1 FROM tag_run r WHERE r.creative_id = c.id AND r.status = 'done')
         """
     )

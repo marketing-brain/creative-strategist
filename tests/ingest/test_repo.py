@@ -25,14 +25,20 @@ def _creative(cid="c1", fmt="image"):
 
 
 async def test_upsert_creative_and_ad_and_metrics(db, org_id, account_id):
-    cid, created = await repo.upsert_creative(db, org_id, account_id, _creative(), "raw/c1.json")
+    cid, created = await repo.upsert_creative(
+        db, org_id, account_id, _creative(), "raw/c1.json", format_source="manual_review"
+    )
     assert created
-    cid2, created2 = await repo.upsert_creative(db, org_id, account_id, _creative(), "raw/c1.json")
+    cid2, created2 = await repo.upsert_creative(
+        db, org_id, account_id, _creative(), "raw/c1.json", format_source="manual_review"
+    )
     assert cid2 == cid and not created2
 
 
 async def test_upsert_creative_refreshes_content_on_conflict(db, org_id, account_id):
-    cid, _ = await repo.upsert_creative(db, org_id, account_id, _creative(), "raw/c1.json")
+    cid, _ = await repo.upsert_creative(
+        db, org_id, account_id, _creative(), "raw/c1.json", format_source="manual_review"
+    )
     edited = PlatformCreative(
         "c1",
         "image",
@@ -45,7 +51,9 @@ async def test_upsert_creative_refreshes_content_on_conflict(db, org_id, account
         "image/png",
         {},
     )
-    cid2, created2 = await repo.upsert_creative(db, org_id, account_id, edited, "raw/c1.json")
+    cid2, created2 = await repo.upsert_creative(
+        db, org_id, account_id, edited, "raw/c1.json", format_source="manual_review"
+    )
     assert cid2 == cid and not created2
     row = await db.fetchrow(
         "SELECT headline, primary_text, cta_type, link_url FROM creative WHERE id=$1", cid
@@ -120,7 +128,9 @@ async def test_upsert_creative_refreshes_content_on_conflict(db, org_id, account
 
 
 async def test_assets_and_listing(db, org_id, account_id, blobs):
-    cid, _ = await repo.upsert_creative(db, org_id, account_id, _creative(), "raw/c1.json")
+    cid, _ = await repo.upsert_creative(
+        db, org_id, account_id, _creative(), "raw/c1.json", format_source="manual_review"
+    )
     assert not await repo.creative_has_asset(db, org_id, cid, "original_image")
     asset_id = await repo.insert_asset(
         db, org_id, cid, "original_image", "p/x.png", "sha", "image/png", 10, 10
@@ -133,7 +143,9 @@ async def test_assets_and_listing(db, org_id, account_id, blobs):
 
 
 async def test_upsert_metrics_chunks_large_batches(db, org_id, account_id, monkeypatch):
-    cid, _ = await repo.upsert_creative(db, org_id, account_id, _creative(), "raw/c1.json")
+    cid, _ = await repo.upsert_creative(
+        db, org_id, account_id, _creative(), "raw/c1.json", format_source="manual_review"
+    )
     await repo.upsert_ad(
         db, org_id, account_id, PlatformAd("ad1", "A", "ACTIVE", "as", "cp", "c1"), cid
     )
@@ -208,6 +220,7 @@ async def test_list_assets_by_kind_orders_by_seq(db, org_id, settings):
         acct,
         PlatformCreative("cx", "carousel", "H", "P", None, None, "u", None, None, {}),
         "raw",
+        format_source="manual_review",
     )
     for i in (2, 0, 1):  # insert out of order
         await repo.insert_asset(
@@ -225,6 +238,34 @@ async def test_meta_connection_upsert_and_status(db, org_id):
     await repo.set_meta_connection_status(db, cid, "error", last_error="broken")
     row = await repo.get_meta_connection_by_id(db, cid)
     assert row["sync_status"] == "error" and row["last_error"] == "broken"
+
+
+async def test_list_and_count_creatives_exclude_unresolved_from_image_filter(
+    db, org_id, account_id
+):
+    await repo.upsert_creative(
+        db,
+        org_id,
+        account_id,
+        _creative("c-img", "image"),
+        "raw/img.json",
+        format_source="meta_object_type",
+    )
+    await repo.upsert_creative(
+        db,
+        org_id,
+        account_id,
+        _creative("c-unresolved", "unresolved"),
+        "raw/unresolved.json",
+        format_source="unresolved",
+    )
+
+    # Sanity: both rows actually landed before we assert the filter excludes one.
+    assert await repo.count_creatives(db, org_id, account_id, None, None, None) == 2
+
+    rows = await repo.list_creatives(db, org_id, account_id, "image", 50, 0, None, None)
+    assert [r["platform_creative_id"] for r in rows] == ["c-img"]
+    assert await repo.count_creatives(db, org_id, account_id, "image", None, None) == 1
 
 
 async def test_meta_connection_upsert_is_idempotent_per_org(db, org_id):

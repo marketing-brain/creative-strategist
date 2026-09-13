@@ -43,6 +43,7 @@ async def three_images(db, org_id, settings, blobs):
             acct,
             PlatformCreative(n, "image", n, "P", None, None, "u", None, None, {}),
             "raw",
+            format_source="manual_review",
         )
         key = f"{org_id}/creatives/{cid}/original.png"
         await blobs.put(key, _png(), "image/png")

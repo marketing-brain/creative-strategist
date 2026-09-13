@@ -71,6 +71,17 @@ async def org_id(db):
 
 
 @pytest.fixture
+async def ad_account_id(db, org_id):
+    aid = new_id()
+    await db.execute(
+        "INSERT INTO ad_account (id, org_id, platform, platform_account_id, name)"
+        " VALUES ($1, $2, 'meta', 'act_test', 'test account')",
+        aid, org_id,
+    )
+    return aid
+
+
+@pytest.fixture
 def blobs(tmp_path):
     return LocalBlobStore(tmp_path / "blobs")
 

@@ -30,12 +30,21 @@ async def creative_tags(
     ]
 
 
+TAGGABLE_FORMATS = ("image", "video", "carousel")
+
+
 @router.post("/creatives/{creative_id}/retag")
 async def retag(
     creative_id: UUID, auth: AuthContext = Depends(require_admin), db: Database = Depends(get_db)
 ) -> dict:
-    if not await ingest_repo.get_creative(db, auth.org_id, creative_id):
+    creative = await ingest_repo.get_creative(db, auth.org_id, creative_id)
+    if not creative:
         raise HTTPException(404)
+    if creative["format"] not in TAGGABLE_FORMATS:
+        # 'unresolved' creatives have no proven format: taxonomy.for_format('unresolved')
+        # returns [], which turns into a JSON schema enum of [] -- a request structured-
+        # output APIs reject outright. Never enqueue a job doomed to fail before it starts.
+        raise HTTPException(422, f"cannot tag a creative with format '{creative['format']}'")
     jid = await queue.enqueue(
         db,
         auth.org_id,

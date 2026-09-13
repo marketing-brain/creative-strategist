@@ -33,6 +33,7 @@ async def untagged_and_tagged(db, org_id, settings, blobs):
             acct,
             PlatformCreative(n, "image", "H", "P", None, None, "u", None, None, {}),
             "raw",
+            format_source="manual_review",
         )
         key = f"{org_id}/creatives/{cid}/original.png"
         await blobs.put(key, _png(), "image/png")
@@ -86,3 +87,30 @@ async def test_reenqueue_revives_a_dead_lettered_job(db, org_id, untagged_and_ta
     n = await reenqueue_untagged(db)
     assert n == 1
     assert await db.fetchval("SELECT count(*) FROM job WHERE status='pending'") == 1
+
+
+async def test_unresolved_creative_with_a_stale_asset_is_never_reenqueued(db, org_id, blobs):
+    """The reclassification backfill (scripts/reclassify_creatives.py) deliberately
+    leaves primary_asset_id set on an image -> unresolved row -- so this must be guarded
+    by format, not just 'has a primary asset'. Reaching tag_creative with fmt='unresolved'
+    makes taxonomy.for_format('unresolved') return [], turning the JSON schema's dimension
+    enum into [], which structured-output APIs reject outright: a doomed job and a burned
+    model call."""
+    acct = await ingest_repo.upsert_ad_account(db, org_id, "1", "M", "USD")
+    cid, _ = await ingest_repo.upsert_creative(
+        db,
+        org_id,
+        acct,
+        PlatformCreative("c_unresolved", "unresolved", "H", "P", None, None, "u", None, None, {}),
+        "raw",
+        format_source="unresolved",
+    )
+    key = f"{org_id}/creatives/{cid}/original.png"
+    await blobs.put(key, _png(), "image/png")
+    aid = await ingest_repo.insert_asset(db, org_id, cid, "original_image", key, "sha", "image/png")
+    await ingest_repo.set_primary_asset(db, org_id, cid, aid)
+
+    n = await reenqueue_untagged(db)
+
+    assert n == 0
+    assert await db.fetchval("SELECT count(*) FROM job") == 0

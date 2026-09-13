@@ -35,6 +35,7 @@ async def seed_creative(
         account_id,
         PlatformCreative(name, fmt, f"H {name}", "P", None, None, "u", None, None, {}),
         "raw",
+        format_source="unresolved" if fmt == "unresolved" else "manual_review",
     )
     await ingest_repo.upsert_ad(
         db, org_id, account_id, PlatformAd(f"ad_{name}", name, "ACTIVE", "as", "cp", name), cid

@@ -8,6 +8,7 @@ from datetime import date
 
 from cs.core.db import Database
 from cs.ingest.fivetran.schema import (
+    AD_ASSET_FEED_SPEC_VIDEO,
     AD_HISTORY,
     AD_VIDEO_HISTORY,
     BASIC_AD,
@@ -44,12 +45,17 @@ async def create_fixture_schema(db: Database, schema: str, *, with_retention: bo
           call_to_action_type TEXT, image_url TEXT, thumbnail_url TEXT,
           object_story_link_data_link TEXT, video_id TEXT, video_video_id TEXT,
           object_story_link_data_child_attachments TEXT, instagram_permalink_url TEXT,
-          _fivetran_synced TIMESTAMPTZ
+          object_type TEXT, _fivetran_synced TIMESTAMPTZ
         )
     """)
     await db.execute(f"""
         CREATE TABLE "{schema}".{AD_VIDEO_HISTORY} (
           id TEXT, source TEXT, picture TEXT, _fivetran_synced TIMESTAMPTZ
+        )
+    """)
+    await db.execute(f"""
+        CREATE TABLE "{schema}".{AD_ASSET_FEED_SPEC_VIDEO} (
+          creative_id TEXT, video_id TEXT, _fivetran_synced TIMESTAMPTZ
         )
     """)
     await db.execute(
@@ -94,6 +100,7 @@ async def insert_campaign_ad_creative(
     video_id: str | None = None,
     video_video_id: str | None = None,
     instagram_permalink_url: str | None = None,
+    object_type: str | None = None,
 ) -> None:
     await db.execute(
         f'INSERT INTO "{schema}".campaign_history VALUES ($1, $2, $3, now())',
@@ -113,7 +120,7 @@ async def insert_campaign_ad_creative(
     )
     await db.execute(
         f'INSERT INTO "{schema}".creative_history VALUES '
-        f"($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, $12, now())",
+        f"($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, $12, $13, now())",
         creative_id,
         account_id,
         name,
@@ -126,6 +133,7 @@ async def insert_campaign_ad_creative(
         video_id,
         video_video_id,
         instagram_permalink_url,
+        object_type,
     )
 
 
@@ -134,6 +142,16 @@ async def insert_video(db: Database, schema: str, *, video_id: str, source: str 
         f'INSERT INTO "{schema}".ad_video_history VALUES ($1, $2, NULL, now())',
         video_id,
         source,
+    )
+
+
+async def insert_asset_feed_spec_video(
+    db: Database, schema: str, *, creative_id: str, video_id: str
+) -> None:
+    await db.execute(
+        f'INSERT INTO "{schema}".{AD_ASSET_FEED_SPEC_VIDEO} VALUES ($1, $2, now())',
+        creative_id,
+        video_id,
     )
 
 

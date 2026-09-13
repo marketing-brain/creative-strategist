@@ -1,7 +1,13 @@
+from datetime import date
+
+import asyncpg
+import pytest
+
 from cs.core import repo
 from cs.ingest.fivetran import transform as fivetran_transform
 from cs.ingest.fivetran.fixtures import (
     create_fixture_schema,
+    insert_asset_feed_spec_video,
     insert_campaign_ad_creative,
     insert_video,
 )
@@ -23,6 +29,7 @@ async def test_discover_and_sync_entities(db, blobs, settings, org_id):
         name="name",
         headline="Headline",
         image_url="https://img/orig.jpg",
+        object_type="PHOTO",
     )
     conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
     connection = await repo.get_meta_connection_by_id(db, conn_id)
@@ -139,6 +146,7 @@ async def test_dead_download_job_is_reenqueued_on_resync(db, blobs, settings, or
         name="name",
         headline="Headline",
         image_url="https://img/orig.jpg",
+        object_type="PHOTO",
     )
     conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
     connection = await repo.get_meta_connection_by_id(db, conn_id)
@@ -206,10 +214,14 @@ async def test_one_malformed_ad_does_not_abort_the_whole_sync(
 
     original_upsert_creative = repo.upsert_creative
 
-    async def flaky_upsert_creative(db_, org_id_, acct_id_, platform_creative, raw_path):
+    async def flaky_upsert_creative(
+        db_, org_id_, acct_id_, platform_creative, raw_path, *, format_source
+    ):
         if platform_creative.platform_creative_id == "bad":
             raise ValueError("boom: malformed row")
-        return await original_upsert_creative(db_, org_id_, acct_id_, platform_creative, raw_path)
+        return await original_upsert_creative(
+            db_, org_id_, acct_id_, platform_creative, raw_path, format_source=format_source
+        )
 
     monkeypatch.setattr(fivetran_transform.repo, "upsert_creative", flaky_upsert_creative)
 
@@ -248,6 +260,7 @@ async def test_bigint_platform_ids_are_stringified(db, blobs, settings, org_id):
         f"name TEXT, title TEXT, body TEXT, call_to_action_type TEXT, "
         f"image_url TEXT, thumbnail_url TEXT, object_story_link_data_link TEXT, "
         f"video_id BIGINT, object_story_link_data_child_attachments JSONB, "
+        f"video_video_id BIGINT, object_type TEXT, "
         f"_fivetran_synced TIMESTAMPTZ)"
     )
     await db.execute(
@@ -265,7 +278,8 @@ async def test_bigint_platform_ids_are_stringified(db, blobs, settings, org_id):
     await db.execute(
         f'INSERT INTO "{schema}".creative_history VALUES '
         f"(3001, 266634581427459, 'name', 'Headline', 'Body', 'SHOP_NOW', "
-        f"'https://img/orig.jpg', NULL, 'https://dest.example', NULL, NULL, now())"
+        f"'https://img/orig.jpg', NULL, 'https://dest.example', NULL, NULL, "
+        f"NULL, 'PHOTO', now())"
     )
     conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", schema)
     connection = await repo.get_meta_connection_by_id(db, conn_id)
@@ -287,6 +301,138 @@ async def test_bigint_platform_ids_are_stringified(db, blobs, settings, org_id):
     assert ad["platform_ad_id"] == "9001"
     creative = await db.fetchrow("SELECT * FROM creative WHERE org_id=$1", org_id)
     assert creative["platform_creative_id"] == "3001"
+
+
+async def test_video_view_loader_joins_bigint_ad_id_against_text_ad_history_id(
+    db, blobs, settings, org_id
+):
+    """Regression test: Meta's ad_id lands as bigint on basic_ad_actions on some real
+    Fivetran connectors (confirmed by this repo's own
+    test_bigint_ad_id_still_joins_against_our_text_ad_table for the insights path) while
+    ad_history.id is text in our fixture convention -- the video-view membership loader's
+    join must not assume either side's type. Without casting both sides to text,
+    `act.ad_id = a.id::text` is `bigint = text`, which Postgres has no operator for, and
+    asyncpg raises UndefinedFunctionError for the whole org's sync."""
+    await create_fixture_schema(db, SCHEMA)
+    # ad_history.id is TEXT in this fixture schema (fine -- a real connector lands it as
+    # bigint too, and the join must tolerate either), but it must hold a numeric string
+    # so it can actually match a BIGINT ad_id on the other side of the join once both are
+    # cast to text.
+    await insert_campaign_ad_creative(
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="9001",
+        creative_id="cr1",
+        name="name",
+        headline="Headline",
+        image_url=None,
+        object_type="SHARE",
+    )
+    # Fixture schema's basic_ad_actions is TEXT-typed -- replace it with a BIGINT-typed
+    # one to exercise the real-connector shape the join must also tolerate.
+    await db.execute(f'DROP TABLE "{SCHEMA}".basic_ad_actions')
+    await db.execute(
+        f'CREATE TABLE "{SCHEMA}".basic_ad_actions '
+        f"(ad_id BIGINT, date DATE, action_type TEXT, index INT, value NUMERIC)"
+    )
+    await db.execute(
+        f"INSERT INTO \"{SCHEMA}\".basic_ad_actions VALUES (9001, '2026-09-01', 'video_view', 0, 1)"
+    )
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    accounts = await repo.list_ad_accounts(db, org_id)
+    await repo.set_ad_account_status(db, org_id, accounts[0]["id"], "active")
+    summary = await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+
+    assert summary["failed"] == 0
+    row = await db.fetchrow("SELECT format, format_source FROM creative WHERE org_id=$1", org_id)
+    assert (row["format"], row["format_source"]) == ("video", "video_view_metric")
+
+
+async def _ad_with_impressions(db, *, ad_id: str, impressions: int) -> None:
+    """A second ad row for creative cr1, plus its basic_ad impressions."""
+    await db.execute(
+        f'INSERT INTO "{SCHEMA}".ad_history VALUES ($1, $2, $3, $4, $5, $6, $7, now())',
+        ad_id, "999", "as1", "c1", "cr1", "name", "ACTIVE",
+    )
+    await db.execute(
+        f"INSERT INTO \"{SCHEMA}\".basic_ad VALUES ($1, '2026-09-01', 1.0, $2, 0)",
+        int(ad_id), impressions,
+    )
+
+
+async def _schema_with_bigint_basic_ad(db) -> None:
+    await create_fixture_schema(db, SCHEMA)
+    await db.execute(f'DROP TABLE "{SCHEMA}".basic_ad')
+    await db.execute(
+        f'CREATE TABLE "{SCHEMA}".basic_ad (ad_id BIGINT, date DATE, '
+        f"spend NUMERIC, impressions INT, inline_link_clicks INT)"
+    )
+
+
+async def test_impressions_loader_sums_each_creative_across_its_ads(db):
+    # Two sub-threshold ads (30, 25) sum to 55; BIGINT basic_ad.ad_id is the real shape.
+    await _schema_with_bigint_basic_ad(db)
+    await _ad_with_impressions(db, ad_id="9001", impressions=30)
+    await _ad_with_impressions(db, ad_id="9002", impressions=25)
+    await db.execute(
+        f'INSERT INTO "{SCHEMA}".basic_ad_actions VALUES ($1, $2, $3, 0, 1)',
+        "9001", date(2026, 9, 1), "link_click",
+    )
+
+    assert await fivetran_transform._impressions_by_creative(db, SCHEMA) == {"cr1": 55}
+
+
+async def test_impressions_loader_returns_none_when_actions_table_is_missing(db):
+    # No actions table means "no data", not "no views" -- else every video becomes an image.
+    await _schema_with_bigint_basic_ad(db)
+    await _ad_with_impressions(db, ad_id="9001", impressions=100_000)
+    await db.execute(f'DROP TABLE "{SCHEMA}".basic_ad_actions')
+
+    assert await fivetran_transform._impressions_by_creative(db, SCHEMA) is None
+
+
+async def test_sync_stores_zero_views_boosted_post_as_image(db, blobs, settings, org_id):
+    # End to end: a boosted post that served 5,000 times with no video views is an image.
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db, SCHEMA, campaign_id="c1", account_id="999", adset_id="as1", ad_id="9001",
+        creative_id="cr1", name="n", headline="H", image_url="https://cdn/i.jpg",
+        object_type="SHARE",
+    )
+    await db.execute(
+        f'INSERT INTO "{SCHEMA}".basic_ad VALUES ($1, $2, 1.0, 5000, 0)', "9001", date(2026, 9, 1)
+    )
+    await db.execute(
+        f'INSERT INTO "{SCHEMA}".basic_ad_actions VALUES ($1, $2, $3, 0, 7)',
+        "9001", date(2026, 9, 1), "link_click",
+    )
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    accounts = await repo.list_ad_accounts(db, org_id)
+    await repo.set_ad_account_status(db, org_id, accounts[0]["id"], "active")
+
+    summary = await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+
+    assert summary["failed"] == 0
+    row = await db.fetchrow("SELECT format, format_source FROM creative WHERE org_id=$1", org_id)
+    assert (row["format"], row["format_source"]) == ("image", "no_video_views")
+
+
+async def test_impressions_loader_returns_none_when_actions_table_is_empty(db):
+    # Synced-but-empty actions data proves nothing about views either.
+    await _schema_with_bigint_basic_ad(db)
+    await _ad_with_impressions(db, ad_id="9001", impressions=100_000)
+
+    assert await fivetran_transform._impressions_by_creative(db, SCHEMA) is None
 
 
 async def test_video_creative_downloads_from_ad_video_history_source(db, blobs, settings, org_id):
@@ -383,6 +529,7 @@ async def test_video_with_no_landed_source_yet_is_skipped_not_failed(db, blobs, 
         headline="Headline",
         image_url="https://img/orig.jpg",
         video_id="vid_missing",
+        object_type="VIDEO",
     )
     conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
     connection = await repo.get_meta_connection_by_id(db, conn_id)
@@ -422,6 +569,7 @@ async def test_unresolved_video_with_instagram_permalink_enqueues_resolve_job(
         image_url="https://img/orig.jpg",
         video_id="vid_not_in_video_history",
         instagram_permalink_url="https://www.instagram.com/p/abc123/",
+        object_type="VIDEO",
     )
     conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
     connection = await repo.get_meta_connection_by_id(db, conn_id)
@@ -461,6 +609,7 @@ async def test_unresolved_video_without_instagram_permalink_is_skipped_not_enque
         headline="Headline",
         image_url="https://img/orig.jpg",
         video_id="vid_not_in_video_history",
+        object_type="VIDEO",
     )
     conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
     connection = await repo.get_meta_connection_by_id(db, conn_id)
@@ -493,6 +642,7 @@ async def test_dead_resolve_job_is_not_re_enqueued_on_next_sync(db, blobs, setti
         image_url="https://img/orig.jpg",
         video_id="vid_not_in_video_history",
         instagram_permalink_url="https://www.instagram.com/p/abc123/",
+        object_type="VIDEO",
     )
     conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
     connection = await repo.get_meta_connection_by_id(db, conn_id)
@@ -513,15 +663,121 @@ async def test_dead_resolve_job_is_not_re_enqueued_on_next_sync(db, blobs, setti
     assert n == 0
 
 
-def test_carousel_urls_returns_none_for_malformed_shapes():
-    """Regression test: a valid-but-non-list JSON value (e.g. a bare number) must return
-    None gracefully instead of raising a TypeError out of the list comprehension."""
-    assert fivetran_transform._carousel_urls(None) is None
-    assert fivetran_transform._carousel_urls("") is None
-    assert fivetran_transform._carousel_urls("not json") is None
-    assert fivetran_transform._carousel_urls("42") is None
-    assert fivetran_transform._carousel_urls('"a string"') is None
-    assert fivetran_transform._carousel_urls("[]") is None
-    assert fivetran_transform._carousel_urls('[{"picture": "https://x/1.jpg"}]') == [
-        "https://x/1.jpg"
-    ]
+async def test_share_creative_without_evidence_is_unresolved_and_downloads_nothing(
+    db, blobs, settings, org_id
+):
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="ad1",
+        creative_id="cr1",
+        name="n",
+        headline="H",
+        image_url=None,
+        object_type="SHARE",
+    )
+    await db.execute(
+        f'UPDATE "{SCHEMA}".creative_history SET thumbnail_url=$1', "https://cdn/frame.jpg"
+    )
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    accounts = await repo.list_ad_accounts(db, org_id)
+    await repo.set_ad_account_status(db, org_id, accounts[0]["id"], "active")
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+
+    row = await db.fetchrow("SELECT format, format_source FROM creative WHERE org_id=$1", org_id)
+    assert row["format"] == "unresolved"
+    assert row["format_source"] == "unresolved"
+    # No asset download job may be enqueued for a creative we cannot type.
+    assert (
+        await db.fetchval("SELECT count(*) FROM job WHERE job_type='meta.download_creative'") == 0
+    )
+
+
+async def test_video_view_loader_does_not_swallow_timeout_class_errors(db, org_id, monkeypatch):
+    """The optional-signal catch in _optional_creative_ids is deliberately narrowed to
+    UndefinedTableError | UndefinedColumnError -- a missing table degrades completeness,
+    never soundness. asyncpg.PostgresError, the old catch, also covers
+    ConnectionDoesNotExistError, QueryCanceledError (statement timeout), SerializationError
+    and AdminShutdownError -- and _video_view_creative_ids is an unbounded join over the
+    whole of basic_ad_actions, so a timeout there is plausible, not hypothetical. Swallowing
+    one used to turn a single flaky query into a silent, org-wide 'video' -> 'unresolved'
+    downgrade for every creative whose only evidence was this signal. A timeout-class error
+    must propagate instead of degrading."""
+
+    async def raise_timeout(sql, *args):
+        raise asyncpg.QueryCanceledError("statement timeout")
+
+    monkeypatch.setattr(db, "fetch", raise_timeout)
+
+    with pytest.raises(asyncpg.QueryCanceledError):
+        await fivetran_transform._video_view_creative_ids(db, SCHEMA)
+
+
+async def test_video_view_loader_still_degrades_gracefully_when_table_is_missing(
+    db, blobs, settings, org_id
+):
+    """Confirms the narrowed catch still covers its actual purpose: a genuinely-missing
+    optional table (basic_ad_actions not yet landed by Fivetran for this connection) must
+    still degrade to an empty set -- and hence 'unresolved', never 'video' -- rather than
+    raising and aborting the whole sync, the same as before this catch was narrowed."""
+    await create_fixture_schema(db, SCHEMA)
+    await db.execute(f'DROP TABLE "{SCHEMA}".basic_ad_actions')
+    await insert_campaign_ad_creative(
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="ad1",
+        creative_id="cr1",
+        name="n",
+        headline="H",
+        image_url=None,
+        object_type="SHARE",
+    )
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    accounts = await repo.list_ad_accounts(db, org_id)
+    await repo.set_ad_account_status(db, org_id, accounts[0]["id"], "active")
+    summary = await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+
+    assert summary["failed"] == 0
+    row = await db.fetchrow("SELECT format, format_source FROM creative WHERE org_id=$1", org_id)
+    assert row["format"] == "unresolved"
+
+
+async def test_asset_feed_spec_video_membership_classifies_as_video(db, blobs, settings, org_id):
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="ad1",
+        creative_id="cr1",
+        name="n",
+        headline="H",
+        image_url=None,
+        object_type="SHARE",
+    )
+    await insert_asset_feed_spec_video(db, SCHEMA, creative_id="cr1", video_id="v1")
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    accounts = await repo.list_ad_accounts(db, org_id)
+    await repo.set_ad_account_status(db, org_id, accounts[0]["id"], "active")
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+
+    row = await db.fetchrow("SELECT format, format_source FROM creative WHERE org_id=$1", org_id)
+    assert (row["format"], row["format_source"]) == ("video", "asset_feed_spec_video")

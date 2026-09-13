@@ -134,16 +134,35 @@ async def test_sync_from_fivetran_stays_ready_when_insights_table_is_missing(
         name="name",
         headline="Headline",
         image_url="https://img/orig.jpg",
+        object_type="PHOTO",
     )
     conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", schema)
+    # Pre-activate the account this fixture's campaign_history declares. Without this,
+    # the activation gate (a separate, deliberate concern -- see
+    # test_paused_account_is_discovered_but_not_ingested) blocks all ingestion, and this
+    # test would pass even if entity sync were completely broken -- proving nothing about
+    # the "ads/creatives are fully usable without metrics" claim in the docstring above.
+    acct_id = await repo.upsert_ad_account(db, org_id, "999", "999", "USD", conn_id)
+    await repo.set_ad_account_status(db, org_id, acct_id, "active")
 
     await queue.enqueue(db, org_id, "meta.sync_from_fivetran", {"meta_connection_id": str(conn_id)})
     assert await run_once(db, blobs, settings, "w1") is True
 
     row = await repo.get_meta_connection_by_id(db, conn_id)
     assert row["sync_status"] == "ready"
-    assert await db.fetchval("SELECT status FROM job") == "done"
+    assert (
+        await db.fetchval("SELECT status FROM job WHERE job_type='meta.sync_from_fivetran'")
+        == "done"
+    )
     assert await db.fetchval("SELECT count(*) FROM ad_account WHERE org_id=$1", org_id) == 1
+
+    # The actual claim under test: entity sync (ads/creatives) succeeds and is usable
+    # even though insights sync failed on the missing table.
+    creative = await db.fetchrow("SELECT * FROM creative WHERE org_id=$1", org_id)
+    assert creative is not None and creative["format"] == "image"
+    assert await db.fetchval("SELECT count(*) FROM ad WHERE org_id=$1", org_id) == 1
+    download_job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.download_creative'")
+    assert download_job is not None and download_job["status"] == "pending"
 
 
 async def test_nightly_sync_enqueues_sync_for_ready_connections_with_active_account(
@@ -181,6 +200,7 @@ async def _creative(db, org_id):
         acct,
         PlatformCreative("cr1", "video", "H", "P", None, "SHOP_NOW", "https://x", None, None, {}),
         "",
+        format_source="manual_review",
     )
     return cid
 
