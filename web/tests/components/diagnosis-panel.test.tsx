@@ -86,7 +86,7 @@ describe('DiagnosisPanel', () => {
   it('renders the verdict, baseline note, and every tier with its status label', () => {
     render(<DiagnosisPanel diagnosis={broken} />);
     expect(screen.getByText(/Broken layer: Retention/)).toBeInTheDocument();
-    expect(screen.getByText('vs 41 other video creatives in this account')).toBeInTheDocument();
+    expect(screen.getByText('Compared with 41 other video creatives in this account')).toBeInTheDocument();
     expect(screen.getByText('Strong')).toBeInTheDocument();
     expect(screen.getAllByText('Weak')).toHaveLength(1); // fatigue's weak is labelled differently
     expect(screen.getByText('Early decay')).toBeInTheDocument();
@@ -113,8 +113,9 @@ describe('DiagnosisPanel', () => {
 
   it('draws the retention curve with point labels and marks unreadable steps', () => {
     render(<DiagnosisPanel diagnosis={broken} />);
-    expect(screen.getByText('p50 · 29%')).toBeInTheDocument();
-    expect(screen.getByText(/Avg watch time 7.1s of 24s/)).toBeInTheDocument();
+    expect(screen.getByText('50%')).toBeInTheDocument();
+    expect(screen.getByText('29%')).toBeInTheDocument();
+    expect(screen.getByText(/Average watch 7.1s of 24s/)).toBeInTheDocument();
     expect(screen.getByText('42 · below floor')).toBeInTheDocument();
   });
 
