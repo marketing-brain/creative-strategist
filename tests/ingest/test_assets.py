@@ -36,6 +36,52 @@ async def test_download_creative_stores_asset_and_queues_tagging(db, blobs, sett
 
 
 @respx.mock
+async def test_download_creative_stores_the_verdict_once_the_file_lands(
+    db, blobs, settings, org_id
+):
+    respx.get("https://cdn.example/v.mp4").mock(
+        return_value=httpx.Response(200, content=b"vid", headers={"content-type": "video/mp4"})
+    )
+    cid = await _creative(db, org_id)
+    await db.execute(
+        "UPDATE creative SET format='unresolved', format_source='unresolved' WHERE id=$1", cid
+    )
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=type("J", (), {"org_id": org_id})())
+    async with httpx.AsyncClient() as http:
+        await assets.download_creative(
+            ctx, http, cid, "https://cdn.example/v.mp4", "original_video",
+            verdict=("video", "asset_feed_spec_video"),
+        )
+
+    row = await db.fetchrow("SELECT format, format_source, format_verified_at FROM creative"
+                            " WHERE id=$1", cid)
+    assert (row["format"], row["format_source"]) == ("video", "asset_feed_spec_video")
+    assert row["format_verified_at"] is not None
+
+
+@respx.mock
+async def test_download_creative_that_fails_leaves_the_creative_unresolved(
+    db, blobs, settings, org_id
+):
+    respx.get("https://cdn.example/gone.mp4").mock(return_value=httpx.Response(403))
+    cid = await _creative(db, org_id)
+    await db.execute(
+        "UPDATE creative SET format='unresolved', format_source='unresolved' WHERE id=$1", cid
+    )
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=type("J", (), {"org_id": org_id})())
+    async with httpx.AsyncClient() as http:
+        try:
+            await assets.download_creative(
+                ctx, http, cid, "https://cdn.example/gone.mp4", "original_video",
+                verdict=("video", "asset_feed_spec_video"),
+            )
+        except httpx.HTTPStatusError:
+            pass
+
+    assert await db.fetchval("SELECT format FROM creative WHERE id=$1", cid) == "unresolved"
+
+
+@respx.mock
 async def test_download_creative_skips_tagging_when_video_tagging_disabled(
     db, blobs, settings, org_id
 ):

@@ -54,6 +54,32 @@ async def upsert_creative(
     return row["id"], row["created"]
 
 
+async def set_creative_format(
+    db: Database, org_id: UUID, creative_id: UUID, format: str, format_source: str
+) -> None:
+    await db.execute(
+        "UPDATE creative SET format=$3, format_source=$4,"
+        " format_verified_at = CASE WHEN $4 = 'unresolved' THEN NULL ELSE now() END"
+        " WHERE org_id=$1 AND id=$2",
+        org_id,
+        creative_id,
+        format,
+        format_source,
+    )
+
+
+async def primary_asset_kind(
+    db: Database, ad_account_id: UUID, platform_creative_id: str
+) -> str | None:
+    """Kind of the stored creative's primary file, or None (no file, or not stored yet)."""
+    return await db.fetchval(
+        "SELECT a.kind FROM creative c JOIN asset a ON a.id = c.primary_asset_id"
+        " WHERE c.ad_account_id=$1 AND c.platform_creative_id=$2",
+        ad_account_id,
+        platform_creative_id,
+    )
+
+
 def _tag_filter_sql(dim_param: str, value_param: str) -> str:
     return f"""
       AND ({dim_param}::text IS NULL OR EXISTS (

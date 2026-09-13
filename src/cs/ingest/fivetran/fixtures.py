@@ -59,7 +59,7 @@ async def create_fixture_schema(db: Database, schema: str, *, with_retention: bo
     """)
     await db.execute(f"""
         CREATE TABLE "{schema}".{AD_ASSET_FEED_SPEC_VIDEO} (
-          creative_id TEXT, video_id TEXT, _fivetran_synced TIMESTAMPTZ
+          creative_id TEXT, video_id TEXT, index INT, adlabels TEXT, _fivetran_synced TIMESTAMPTZ
         )
     """)
     await db.execute(f"""
@@ -166,12 +166,23 @@ async def insert_video(db: Database, schema: str, *, video_id: str, source: str 
 
 
 async def insert_asset_feed_spec_video(
-    db: Database, schema: str, *, creative_id: str, video_id: str
+    db: Database,
+    schema: str,
+    *,
+    creative_id: str,
+    video_id: str,
+    index: int = 0,
+    label_id: str | None = None,
 ) -> None:
+    labels = None
+    if label_id:
+        labels = json.dumps([{"id": label_id, "name": f"placement_asset_{label_id}"}])
     await db.execute(
-        f'INSERT INTO "{schema}".{AD_ASSET_FEED_SPEC_VIDEO} VALUES ($1, $2, now())',
+        f'INSERT INTO "{schema}".{AD_ASSET_FEED_SPEC_VIDEO} VALUES ($1, $2, $3, $4, now())',
         creative_id,
         video_id,
+        index,
+        labels,
     )
 
 
@@ -193,18 +204,26 @@ async def insert_customization_rule(
     *,
     creative_id: str,
     index: int,
-    image_label_id: str,
     facebook_positions: list[str] | None,
+    image_label_id: str | None = None,
+    video_label_id: str | None = None,
 ) -> None:
     spec: dict[str, object] = {"age_min": 18}
     if facebook_positions is not None:
         spec["facebook_positions"] = facebook_positions
+
+    def label(label_id):
+        if not label_id:
+            return None
+        return json.dumps({"id": label_id, "name": f"placement_asset_{label_id}"})
+
     await db.execute(
         f'INSERT INTO "{schema}".{AD_ASSET_CUSTOMIZATION_RULE}'
-        " VALUES ($1, $2, $3, NULL, $4, now())",
+        " VALUES ($1, $2, $3, $4, $5, now())",
         creative_id,
         index,
-        json.dumps({"id": image_label_id, "name": f"placement_asset_{image_label_id}"}),
+        label(image_label_id),
+        label(video_label_id),
         json.dumps(spec),
     )
 

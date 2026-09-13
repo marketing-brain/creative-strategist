@@ -60,7 +60,8 @@ async def _synced_org(db, blobs, settings, org_id):
     await discover_and_sync_entities(ctx, org_id, connection)
 
     creative = await db.fetchrow("SELECT * FROM creative WHERE org_id=$1", org_id)
-    assert creative["format"] == "video"  # sanity: the fixed classifier gets this right today
+    # sanity: the classifier proves a video; with no file yet it is stored unresolved
+    assert creative["format"] == "unresolved"
 
     # Roll the row back to what the old `else: image` bug actually wrote to
     # production, including the tell-tale legacy_guess source and a stale
@@ -93,10 +94,12 @@ async def test_build_plan_is_read_only_and_flags_the_image_to_video_regression(
     row = plan.rows[0]
     assert row.creative_id == creative_id
     assert (row.old_format, row.old_source) == ("image", "legacy_guess")
-    assert (row.new_format, row.new_source) == ("video", "meta_video_id")
+    assert (row.verdict_format, row.verdict_source) == ("video", "meta_video_id")
+    # Its only file is the stale frame, so the video label waits for the video download.
+    assert (row.new_format, row.new_source) == ("unresolved", "unresolved")
     assert row.asset_url == "https://cdn.example/video.mp4"
     assert row.changed and row.is_image_to_video
-    assert plan.transition_tally()[("image", "legacy_guess", "video", "meta_video_id")] == 1
+    assert plan.transition_tally()[("image", "legacy_guess", "unresolved", "unresolved")] == 1
     assert plan.no_ads == 0  # the fixture creative does have an ad
 
     # Nothing observable changed: build_plan must never write.
@@ -198,25 +201,47 @@ async def test_ordered_by_descending_impressions(db, blobs, settings, org_id):
 
 
 FEED_IMAGE = ("image", "asset_feed_spec_image")
+UNRESOLVED = ("unresolved", "unresolved")
 
 
-def _needs_download(old, new, asset_url="https://cdn/full.jpg"):
-    return ReclassifyRow(uuid4(), "cr1", 0, *old, *new, asset_url).needs_image_download
+def _row(old, verdict, *, asset_url="https://cdn/full.jpg", primary_kind=None):
+    return ReclassifyRow(
+        creative_id=uuid4(), platform_creative_id="cr1", impressions=0,
+        old_format=old[0], old_source=old[1], verdict_format=verdict[0],
+        verdict_source=verdict[1], asset_url=asset_url, primary_asset_kind=primary_kind,
+    )
 
 
 def test_switching_a_thumbnail_image_to_its_feed_spec_image_needs_the_full_size_file():
-    assert _needs_download(("image", "no_video_views"), FEED_IMAGE)
+    row = _row(("image", "no_video_views"), FEED_IMAGE, primary_kind="original_image")
+    assert row.needs_image_download
+    assert (row.new_format, row.new_source) == UNRESOLVED  # until the full-size file lands
 
 
 def test_an_image_url_image_already_has_its_file():
     # classify() always preferred image_url, so the stored file is already the full image.
-    assert not _needs_download(("image", "no_video_views"), ("image", "image_url"))
+    row = _row(("image", "no_video_views"), ("image", "image_url"), primary_kind="original_image")
+    assert not row.needs_image_download
+    assert (row.new_format, row.new_source) == ("image", "image_url")
 
 
 def test_a_new_image_needs_its_file_but_only_when_one_exists():
-    assert _needs_download(("unresolved", "unresolved"), FEED_IMAGE)
-    assert _needs_download(("video", "video_view_metric"), FEED_IMAGE)
-    assert not _needs_download(("unresolved", "unresolved"), FEED_IMAGE, None)
+    assert _row(UNRESOLVED, FEED_IMAGE).needs_image_download
+    assert _row(("video", "video_view_metric"), FEED_IMAGE).needs_image_download
+    assert not _row(UNRESOLVED, FEED_IMAGE, asset_url=None).needs_image_download
+
+
+def test_a_video_without_its_file_is_stored_unresolved():
+    row = _row(("video", "video_view_metric"), ("video", "video_full_watch"), asset_url=None)
+    assert (row.new_format, row.new_source) == UNRESOLVED
+    assert row.changed
+
+
+def test_a_video_with_its_file_keeps_the_label():
+    row = _row(("video", "meta_object_type"), ("video", "meta_object_type"), asset_url=None,
+               primary_kind="original_video")
+    assert (row.new_format, row.new_source) == ("video", "meta_object_type")
+    assert not row.changed
 
 
 async def _thumbnail_image_creative(db, blobs, settings, org_id):
@@ -273,7 +298,7 @@ async def test_plan_upgrades_a_thumbnail_image_to_its_full_size_feed_spec_image(
 
     (row,) = plan.rows
     assert row.creative_id == creative_id
-    assert (row.new_format, row.new_source, row.asset_url) == (
+    assert (row.verdict_format, row.verdict_source, row.asset_url) == (
         "image", "asset_feed_spec_image", "https://cdn/full-1080.jpg"
     )
     assert row.needs_image_download
@@ -289,7 +314,8 @@ async def test_apply_replaces_the_thumbnail_file_and_its_tags_with_a_full_size_d
     assert result.failed == 0
     assert result.orphaned_asset_paths == ["crop600.jpg"]
     creative = await db.fetchrow("SELECT * FROM creative WHERE id=$1", creative_id)
-    assert (creative["format"], creative["format_source"]) == ("image", "asset_feed_spec_image")
+    # Unresolved until the queued full-size download lands and stores the image label.
+    assert (creative["format"], creative["format_source"]) == ("unresolved", "unresolved")
     assert creative["primary_asset_id"] is None
     assert await db.fetchval("SELECT count(*) FROM asset WHERE creative_id=$1", creative_id) == 0
     assert await db.fetchval("SELECT count(*) FROM tag WHERE creative_id=$1", creative_id) == 0
@@ -298,3 +324,4 @@ async def test_apply_replaces_the_thumbnail_file_and_its_tags_with_a_full_size_d
     assert (job["payload"]["asset_url"], job["payload"]["kind"]) == (
         "https://cdn/full-1080.jpg", "original_image"
     )
+    assert (job["payload"]["format"], job["payload"]["format_source"]) == FEED_IMAGE

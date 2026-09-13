@@ -63,7 +63,12 @@ async def test_discover_and_sync_entities(db, blobs, settings, org_id):
     assert len(creatives) == 1
     c = creatives[0]
     assert c["platform_creative_id"] == "cr1"
-    assert c["format"] == "image"
+    # No file yet, so the image label waits for the download that carries it.
+    assert (c["format"], c["format_source"]) == ("unresolved", "unresolved")
+    job = await db.fetchrow("SELECT payload FROM job WHERE job_type='meta.download_creative'")
+    assert (job["payload"]["format"], job["payload"]["format_source"]) == (
+        "image", "meta_object_type"
+    )
     assert c["headline"] == "Headline" and c["primary_text"] == "Primary text"
     assert c["cta_type"] == "SHOP_NOW" and c["link_url"] == "https://example.com"
 
@@ -356,7 +361,8 @@ async def test_video_view_loader_joins_bigint_ad_id_against_text_ad_history_id(
 
     assert summary["failed"] == 0
     row = await db.fetchrow("SELECT format, format_source FROM creative WHERE org_id=$1", org_id)
-    assert (row["format"], row["format_source"]) == ("video", "video_view_metric")
+    # Proven a video, but nothing can fetch its file: stored unresolved.
+    assert (row["format"], row["format_source"]) == ("unresolved", "unresolved")
 
 
 async def _ad_with_impressions(db, *, ad_id: str, impressions: int) -> None:
@@ -441,8 +447,9 @@ async def test_sync_stores_served_image_url_post_without_full_watches_as_image(
 
     assert summary["failed"] == 0
     row = await db.fetchrow("SELECT format, format_source FROM creative WHERE org_id=$1", org_id)
-    assert (row["format"], row["format_source"]) == ("image", "image_url")
+    assert (row["format"], row["format_source"]) == ("unresolved", "unresolved")
     job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.download_creative'")
+    assert (job["payload"]["format"], job["payload"]["format_source"]) == ("image", "image_url")
     assert (job["payload"]["asset_url"], job["payload"]["kind"]) == (
         "https://cdn/i.jpg", "original_image"
     )
@@ -461,8 +468,9 @@ async def test_sync_downloads_the_full_size_feed_spec_image(db, blobs, settings,
 
     assert summary["failed"] == 0
     row = await db.fetchrow("SELECT format, format_source FROM creative WHERE org_id=$1", org_id)
-    assert (row["format"], row["format_source"]) == ("image", "asset_feed_spec_image")
+    assert (row["format"], row["format_source"]) == ("unresolved", "unresolved")
     job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.download_creative'")
+    assert job["payload"]["format_source"] == "asset_feed_spec_image"
     assert (job["payload"]["asset_url"], job["payload"]["kind"]) == (
         "https://cdn/full-1080.jpg", "original_image"
     )
@@ -573,9 +581,12 @@ async def test_video_creative_downloads_from_ad_video_history_source(db, blobs, 
 
     assert summary["failed"] == 0
     creative = await db.fetchrow("SELECT * FROM creative WHERE org_id=$1", org_id)
-    assert creative["format"] == "video"
+    assert creative["format"] == "unresolved"
     job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.download_creative'")
     assert job is not None
+    assert (job["payload"]["format"], job["payload"]["format_source"]) == (
+        "video", "meta_video_id"
+    )
     assert job["payload"]["asset_url"] == "https://cdn.example/video.mp4"
     assert job["payload"]["kind"] == "original_video"
 
@@ -648,7 +659,7 @@ async def test_video_with_no_landed_source_yet_is_skipped_not_failed(db, blobs, 
 
     assert summary["failed"] == 0
     creative = await db.fetchrow("SELECT * FROM creative WHERE org_id=$1", org_id)
-    assert creative["format"] == "video"
+    assert creative["format"] == "unresolved"
     n = await db.fetchval("SELECT count(*) FROM job WHERE job_type='meta.download_creative'")
     assert n == 0
 
@@ -696,12 +707,11 @@ async def test_unresolved_video_with_instagram_permalink_enqueues_resolve_job(
     )
 
 
-async def test_unresolved_video_without_instagram_permalink_is_skipped_not_enqueued(
+async def test_unresolved_video_without_instagram_permalink_resolves_its_video_id_on_facebook(
     db, blobs, settings, org_id
 ):
-    """No video source AND no Instagram permalink -- there's nowhere left to look, so
-    this must stay a silent skip (same as before this feature existed), not an attempt
-    to call Apify with no URL."""
+    """No video source and no Instagram permalink: the video id itself is still worth
+    trying against Facebook's public player, which serves videos published on the Page."""
     await create_fixture_schema(db, SCHEMA)
     await insert_campaign_ad_creative(
         db,
@@ -727,7 +737,60 @@ async def test_unresolved_video_without_instagram_permalink_is_skipped_not_enque
     summary = await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
 
     assert summary["failed"] == 0
-    assert await db.fetchval("SELECT count(*) FROM job") == 0
+    job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.resolve_facebook_video'")
+    assert job["payload"]["video_ids"] == ["vid_not_in_video_history"]
+    assert job["payload"]["kind"] == "original_video"
+    assert job["max_attempts"] == 3
+    assert await db.fetchval("SELECT count(*) FROM job") == 1
+
+
+async def test_placement_video_creative_resolves_feed_placement_video_first(
+    db, blobs, settings, org_id
+):
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db, SCHEMA, campaign_id="c1", account_id="999", adset_id="as1", ad_id="ad1",
+        creative_id="cr1", name="n", headline="H", image_url=None, object_type="SHARE",
+    )
+    for index, vid, label in ((0, "v_story", "Ls"), (1, "v_feed", "Lf"), (2, "v_reels", "Lr")):
+        await insert_asset_feed_spec_video(
+            db, SCHEMA, creative_id="cr1", video_id=vid, index=index, label_id=label
+        )
+    await insert_customization_rule(db, SCHEMA, creative_id="cr1", index=0, video_label_id="Ls",
+                                    facebook_positions=["story"])
+    await insert_customization_rule(db, SCHEMA, creative_id="cr1", index=1, video_label_id="Lf",
+                                    facebook_positions=["feed", "marketplace"])
+
+    summary = await _sync_active(db, blobs, settings, org_id)
+
+    assert summary["failed"] == 0
+    job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.resolve_facebook_video'")
+    assert job["payload"]["video_ids"] == ["v_feed", "v_story", "v_reels"]
+
+
+async def test_feed_spec_video_loader_is_empty_when_the_table_has_not_synced(db):
+    await create_fixture_schema(db, SCHEMA)
+    await db.execute(f'DROP TABLE "{SCHEMA}".ad_asset_feed_spec_video')
+
+    assert await fivetran_transform._feed_spec_video_ids(db, SCHEMA) == {}
+
+
+async def test_dead_facebook_video_resolve_is_not_re_enqueued(db, blobs, settings, org_id):
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db, SCHEMA, campaign_id="c1", account_id="999", adset_id="as1", ad_id="ad1",
+        creative_id="cr1", name="n", headline="H", image_url=None, object_type="SHARE",
+    )
+    await insert_asset_feed_spec_video(db, SCHEMA, creative_id="cr1", video_id="v1")
+    await _sync_active(db, blobs, settings, org_id)
+    await db.execute("UPDATE job SET status='dead' WHERE job_type='meta.resolve_facebook_video'")
+    conn = await repo.get_meta_connection(db, org_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, conn)
+
+    statuses = await db.fetch("SELECT status FROM job WHERE job_type='meta.resolve_facebook_video'")
+    assert [r["status"] for r in statuses] == ["dead"]
 
 
 async def test_dead_resolve_job_is_not_re_enqueued_on_next_sync(db, blobs, settings, org_id):
@@ -886,4 +949,53 @@ async def test_asset_feed_spec_video_membership_classifies_as_video(db, blobs, s
     await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
 
     row = await db.fetchrow("SELECT format, format_source FROM creative WHERE org_id=$1", org_id)
+    assert (row["format"], row["format_source"]) == ("unresolved", "unresolved")
+    job = await db.fetchrow("SELECT payload FROM job WHERE job_type='meta.resolve_facebook_video'")
+    assert (job["payload"]["format"], job["payload"]["format_source"]) == (
+        "video", "asset_feed_spec_video"
+    )
+
+
+async def test_resync_keeps_the_label_of_a_creative_whose_file_is_stored(
+    db, blobs, settings, org_id
+):
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db, SCHEMA, campaign_id="c1", account_id="999", adset_id="as1", ad_id="ad1",
+        creative_id="cr1", name="n", headline="H", image_url=None, object_type="SHARE",
+    )
+    await insert_asset_feed_spec_video(db, SCHEMA, creative_id="cr1", video_id="v1")
+    await _sync_active(db, blobs, settings, org_id)
+    cid = await db.fetchval("SELECT id FROM creative WHERE org_id=$1", org_id)
+    asset_id = await repo.insert_asset(
+        db, org_id, cid, "original_video", "v.mp4", "sha", "video/mp4"
+    )
+    await repo.set_primary_asset(db, org_id, cid, asset_id)
+    conn = await repo.get_meta_connection(db, org_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, conn)
+
+    row = await db.fetchrow("SELECT format, format_source FROM creative WHERE id=$1", cid)
     assert (row["format"], row["format_source"]) == ("video", "asset_feed_spec_video")
+
+
+async def test_resync_does_not_count_a_file_of_the_wrong_kind(db, blobs, settings, org_id):
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db, SCHEMA, campaign_id="c1", account_id="999", adset_id="as1", ad_id="ad1",
+        creative_id="cr1", name="n", headline="H", image_url=None, object_type="SHARE",
+    )
+    await insert_asset_feed_spec_video(db, SCHEMA, creative_id="cr1", video_id="v1")
+    await _sync_active(db, blobs, settings, org_id)
+    cid = await db.fetchval("SELECT id FROM creative WHERE org_id=$1", org_id)
+    asset_id = await repo.insert_asset(
+        db, org_id, cid, "original_image", "frame.jpg", "sha", "image/jpeg"
+    )
+    await repo.set_primary_asset(db, org_id, cid, asset_id)
+    conn = await repo.get_meta_connection(db, org_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, conn)
+
+    assert await db.fetchval("SELECT format FROM creative WHERE id=$1", cid) == "unresolved"

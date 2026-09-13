@@ -10,12 +10,19 @@ from cs.connectors.fivetran import client as fivetran_client
 from cs.core import queue, repo
 from cs.core.config import Settings
 from cs.core.db import Database
-from cs.ingest import assets, instagram_scrape
+from cs.ingest import assets, facebook_video, instagram_scrape
 from cs.ingest.fivetran import insights, transform
 from cs.jobs.registry import JobContext, handler
 from cs.jobs.scheduler import register_schedule
 
 log = logging.getLogger("cs.ingest")
+
+
+def _verdict(payload: dict) -> tuple[str, str] | None:
+    """The label a queued download stores once its file lands (absent on older jobs)."""
+    if payload.get("format") and payload.get("format_source"):
+        return payload["format"], payload["format_source"]
+    return None
 
 
 @handler("meta.await_first_sync")
@@ -100,7 +107,9 @@ async def download_creative(ctx: JobContext) -> None:
     p = ctx.job.payload
     creative_id = UUID(p["creative_id"])
     async with httpx.AsyncClient(timeout=120) as http:
-        await assets.download_creative(ctx, http, creative_id, p["asset_url"], p["kind"])
+        await assets.download_creative(
+            ctx, http, creative_id, p["asset_url"], p["kind"], verdict=_verdict(p)
+        )
     log.info("creative downloaded", extra={"creative_id": str(creative_id)})
 
 
@@ -121,8 +130,41 @@ async def resolve_instagram_video(ctx: JobContext) -> None:
                 extra={"creative_id": str(creative_id), "error": str(exc)},
             )
             return
-        await assets.download_creative(ctx, http, creative_id, video_url, p["kind"])
+        await assets.download_creative(
+            ctx, http, creative_id, video_url, p["kind"], verdict=_verdict(p)
+        )
     log.info("resolved instagram-sourced video via Apify", extra={"creative_id": str(creative_id)})
+
+
+@handler("meta.resolve_facebook_video")
+async def resolve_facebook_video(ctx: JobContext) -> None:
+    p = ctx.job.payload
+    creative_id = UUID(p["creative_id"])
+    async with httpx.AsyncClient(timeout=120) as http:
+        try:
+            urls = await facebook_video.resolve_video_urls(http, ctx.settings, p["video_ids"])
+        except facebook_video.FacebookVideoError as exc:
+            if exc.retryable:
+                raise
+            log.warning(
+                "facebook video could not be resolved -- giving up",
+                extra={"creative_id": str(creative_id), "error": str(exc)},
+            )
+            return
+        video_id = next((v for v in p["video_ids"] if v in urls), None)
+        if video_id is None:
+            log.info(
+                "no public facebook video for creative -- giving up",
+                extra={"creative_id": str(creative_id), "video_ids": p["video_ids"]},
+            )
+            return
+        await assets.download_creative(
+            ctx, http, creative_id, urls[video_id], p["kind"], verdict=_verdict(p)
+        )
+    log.info(
+        "resolved facebook video via Apify",
+        extra={"creative_id": str(creative_id), "video_id": video_id},
+    )
 
 
 @handler("meta.download_carousel")

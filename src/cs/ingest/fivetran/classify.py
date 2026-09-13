@@ -16,6 +16,19 @@ class Classification:
     child_urls: list[str] | None = None
 
 
+# The file an image or video verdict must have before that label is stored.
+FILE_KIND = {"image": "original_image", "video": "original_video"}
+
+
+def stored_verdict(verdict: Classification, primary_asset_kind: str | None) -> tuple[str, str]:
+    """(format, format_source) to store. image and video are only stored once the
+    creative's primary file is of that kind; until then the creative is unresolved."""
+    kind = FILE_KIND.get(verdict.format)
+    if kind is None or primary_asset_kind == kind:
+        return verdict.format, verdict.source
+    return "unresolved", "unresolved"
+
+
 def _pid(value: object) -> str | None:
     return None if value is None else str(value)
 

@@ -159,7 +159,8 @@ async def test_sync_from_fivetran_stays_ready_when_insights_table_is_missing(
     # The actual claim under test: entity sync (ads/creatives) succeeds and is usable
     # even though insights sync failed on the missing table.
     creative = await db.fetchrow("SELECT * FROM creative WHERE org_id=$1", org_id)
-    assert creative is not None and creative["format"] == "image"
+    # The image label is stored when its download lands, not before.
+    assert creative is not None and creative["format"] == "unresolved"
     assert await db.fetchval("SELECT count(*) FROM ad WHERE org_id=$1", org_id) == 1
     download_job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.download_creative'")
     assert download_job is not None and download_job["status"] == "pending"
@@ -198,9 +199,12 @@ async def _creative(db, org_id):
         db,
         org_id,
         acct,
-        PlatformCreative("cr1", "video", "H", "P", None, "SHOP_NOW", "https://x", None, None, {}),
+        # Stored unresolved: no file yet, so the label waits for the download.
+        PlatformCreative(
+            "cr1", "unresolved", "H", "P", None, "SHOP_NOW", "https://x", None, None, {}
+        ),
         "",
-        format_source="manual_review",
+        format_source="unresolved",
     )
     return cid
 
@@ -223,6 +227,8 @@ async def test_resolve_instagram_video_downloads_and_tags_on_success(db, blobs, 
             "creative_id": str(cid),
             "permalink_url": "https://www.instagram.com/p/abc/",
             "kind": "original_video",
+            "format": "video",
+            "format_source": "meta_object_type",
         },
         dedup_key=str(cid),
         max_attempts=3,
@@ -237,6 +243,8 @@ async def test_resolve_instagram_video_downloads_and_tags_on_success(db, blobs, 
         await db.fetchval("SELECT job_type FROM job WHERE job_type='tagging.tag_creative'")
         == "tagging.tag_creative"
     )
+    creative = await db.fetchrow("SELECT format, format_source FROM creative WHERE id=$1", cid)
+    assert (creative["format"], creative["format_source"]) == ("video", "meta_object_type")
 
 
 @respx.mock
@@ -287,6 +295,88 @@ async def test_resolve_instagram_video_retries_on_transient_apify_failure(
     )
     assert await run_once(db, blobs, settings, "w1") is True
     assert await db.fetchval("SELECT status FROM job") == "pending"  # retried, not dead yet
+
+
+FB_VIDEO_URL = (
+    "https://api.apify.com/v2/acts/convertfleetdotonline~facebook-downloader/"
+    "run-sync-get-dataset-items"
+)
+
+
+async def _enqueue_facebook_resolve(db, org_id, cid, video_ids):
+    await queue.enqueue(
+        db,
+        org_id,
+        "meta.resolve_facebook_video",
+        {
+            "creative_id": str(cid),
+            "video_ids": video_ids,
+            "kind": "original_video",
+            "format": "video",
+            "format_source": "asset_feed_spec_video",
+        },
+        dedup_key=str(cid),
+        max_attempts=3,
+    )
+
+
+@respx.mock
+async def test_resolve_facebook_video_downloads_the_first_playable_id_in_order(
+    db, blobs, settings, org_id
+):
+    settings.apify_api_key = "test-token"
+    respx.post(FB_VIDEO_URL).mock(return_value=httpx.Response(200, json=[
+        {"input_url": "https://www.facebook.com/watch/?v=v_feed", "error": "Cannot parse data"},
+        {"input_url": "https://www.facebook.com/watch/?v=v_story",
+         "best_combined_url": "https://video.fbcdn/story.mp4"},
+        {"input_url": "https://www.facebook.com/watch/?v=v_reels",
+         "best_combined_url": "https://video.fbcdn/reels.mp4"},
+    ]))
+    respx.get("https://video.fbcdn/story.mp4").mock(
+        return_value=httpx.Response(200, content=b"vid", headers={"content-type": "video/mp4"})
+    )
+    cid = await _creative(db, org_id)
+    await _enqueue_facebook_resolve(db, org_id, cid, ["v_feed", "v_story", "v_reels"])
+
+    assert await run_once(db, blobs, settings, "w1") is True
+
+    assert await repo.creative_has_primary_asset(db, org_id, cid)
+    status = await db.fetchval(
+        "SELECT status FROM job WHERE job_type='meta.resolve_facebook_video'"
+    )
+    assert status == "done"
+    creative = await db.fetchrow("SELECT format, format_source FROM creative WHERE id=$1", cid)
+    assert (creative["format"], creative["format_source"]) == ("video", "asset_feed_spec_video")
+
+
+@respx.mock
+async def test_resolve_facebook_video_gives_up_when_no_id_plays(db, blobs, settings, org_id):
+    # Unpublished ad-only videos are never publicly served; retrying learns nothing.
+    settings.apify_api_key = "test-token"
+    respx.post(FB_VIDEO_URL).mock(return_value=httpx.Response(200, json=[
+        {"input_url": "https://www.facebook.com/watch/?v=v1", "error": "Cannot parse data"},
+    ]))
+    cid = await _creative(db, org_id)
+    await _enqueue_facebook_resolve(db, org_id, cid, ["v1"])
+
+    assert await run_once(db, blobs, settings, "w1") is True
+
+    assert await db.fetchval("SELECT status FROM job") == "done"
+    assert await repo.creative_has_primary_asset(db, org_id, cid) is False
+
+
+@respx.mock
+async def test_resolve_facebook_video_retries_on_transient_apify_failure(
+    db, blobs, settings, org_id
+):
+    settings.apify_api_key = "test-token"
+    respx.post(FB_VIDEO_URL).mock(return_value=httpx.Response(503, text="rate limited"))
+    cid = await _creative(db, org_id)
+    await _enqueue_facebook_resolve(db, org_id, cid, ["v1"])
+
+    assert await run_once(db, blobs, settings, "w1") is True
+
+    assert await db.fetchval("SELECT status FROM job") == "pending"
 
 
 async def test_nightly_sync_skips_non_ready_connections(db, settings, org_id):

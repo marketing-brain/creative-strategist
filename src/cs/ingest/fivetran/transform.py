@@ -9,7 +9,7 @@ import asyncpg
 
 from cs.connectors.base import PlatformAd, PlatformCreative
 from cs.core import queue, repo
-from cs.ingest.fivetran.classify import classify
+from cs.ingest.fivetran.classify import classify, stored_verdict
 from cs.ingest.fivetran.schema import (
     AD_ASSET_CUSTOMIZATION_RULE,
     AD_ASSET_FEED_SPEC_IMAGE,
@@ -177,19 +177,7 @@ async def _feed_spec_image_urls(db, schema: str) -> dict[str, str | None]:
     except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
         log.warning("no full-size image files: image library missing", extra={"schema": schema})
         library = {}
-    feed_labels: dict[str, set[str]] = {}
-    try:
-        rules = await db.fetch(
-            f"SELECT creative_id, image_label, customization_spec"
-            f" FROM {_q(schema, AD_ASSET_CUSTOMIZATION_RULE)} WHERE image_label IS NOT NULL"
-        )
-    except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
-        rules = []
-    for r in rules:
-        spec = _json(r["customization_spec"])
-        if isinstance(spec, dict) and "feed" in (spec.get("facebook_positions") or []):
-            labels = feed_labels.setdefault(str(r["creative_id"]), set())
-            labels.update(_label_ids(r["image_label"]))
+    feed_labels = await _feed_placement_labels(db, schema, "image_label")
 
     by_creative: dict[str, list[asyncpg.Record]] = {}
     for r in images:
@@ -202,6 +190,52 @@ async def _feed_spec_image_urls(db, schema: str) -> dict[str, str | None]:
         ordered = [r for r in rows if _label_ids(r["adlabels"]) & feed] + rows
         out[creative_id] = next((library[r["hash"]] for r in ordered if r["hash"] in library), None)
     return out
+
+
+async def _feed_placement_labels(db, schema: str, label_column: str) -> dict[str, set[str]]:
+    """creative_id -> label ids that a customization rule places in Facebook feed."""
+    try:
+        rules = await db.fetch(
+            f"SELECT creative_id, {label_column} AS label, customization_spec"
+            f" FROM {_q(schema, AD_ASSET_CUSTOMIZATION_RULE)} WHERE {label_column} IS NOT NULL"
+        )
+    except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
+        return {}
+    out: dict[str, set[str]] = {}
+    for r in rules:
+        spec = _json(r["customization_spec"])
+        if isinstance(spec, dict) and "feed" in (spec.get("facebook_positions") or []):
+            out.setdefault(str(r["creative_id"]), set()).update(_label_ids(r["label"]))
+    return out
+
+
+async def _feed_spec_video_ids(db, schema: str) -> dict[str, list[str]]:
+    """creative_id -> its feed-spec video ids, the Facebook feed placement's video first."""
+    try:
+        rows = await db.fetch(
+            "SELECT creative_id, video_id, index, adlabels"
+            f" FROM {_q(schema, AD_ASSET_FEED_SPEC_VIDEO)}"
+            " WHERE video_id IS NOT NULL ORDER BY creative_id, index"
+        )
+    except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
+        return {}
+    feed = await _feed_placement_labels(db, schema, "video_label")
+    out: dict[str, list[str]] = {}
+    for r in rows:
+        cid, vid = str(r["creative_id"]), str(r["video_id"])
+        ids = out.setdefault(cid, [])
+        if vid in ids:
+            continue
+        if _label_ids(r["adlabels"]) & feed.get(cid, set()):
+            ids.insert(0, vid)
+        else:
+            ids.append(vid)
+    return out
+
+
+def _video_ids_to_resolve(cr: asyncpg.Record, feed_spec_videos: dict[str, list[str]]) -> list[str]:
+    own = _pid(cr["video_video_id"] or cr["video_id"])
+    return feed_spec_videos.get(_pid(cr["id"]) or "") or ([own] if own else [])
 
 
 async def _full_watch_creative_ids(db, schema: str) -> set[str] | None:
@@ -256,6 +290,7 @@ async def _sync_ads_and_creatives(
     impressions = await _impressions_by_creative(db, schema)
     feed_spec_images = await _feed_spec_image_urls(db, schema)
     full_watches = await _full_watch_creative_ids(db, schema)
+    feed_spec_videos = await _feed_spec_video_ids(db, schema)
 
     new_creatives = 0
     synced_ads = 0
@@ -277,9 +312,13 @@ async def _sync_ads_and_creatives(
                 feed_spec_image_urls=feed_spec_images,
                 full_watch_creative_ids=full_watches,
             )
+            # image/video are only stored once the file is; until then, unresolved.
+            stored_format, stored_source = stored_verdict(
+                verdict, await repo.primary_asset_kind(db, acct_id, _pid(cr["id"]))
+            )
             platform_creative = PlatformCreative(
                 platform_creative_id=_pid(cr["id"]),
-                format=verdict.format,
+                format=stored_format,
                 headline=cr["title"],
                 primary_text=cr["body"],
                 description=None,
@@ -296,7 +335,7 @@ async def _sync_ads_and_creatives(
                 acct_id,
                 platform_creative,
                 raw_path="",
-                format_source=verdict.source,
+                format_source=stored_source,
             )
             new_creatives += int(created)
 
@@ -334,6 +373,8 @@ async def _sync_ads_and_creatives(
                         "creative_id": str(creative_id),
                         "asset_url": verdict.asset_url,
                         "kind": kind,
+                        "format": verdict.format,
+                        "format_source": verdict.source,
                     },
                     dedup_key=str(creative_id),
                 )
@@ -361,6 +402,34 @@ async def _sync_ads_and_creatives(
                         "creative_id": str(creative_id),
                         "permalink_url": cr["instagram_permalink_url"],
                         "kind": kind,
+                        "format": verdict.format,
+                        "format_source": verdict.source,
+                    },
+                    dedup_key=str(creative_id),
+                    max_attempts=3,
+                )
+            elif (
+                verdict.format == "video"
+                and not verdict.asset_url
+                and not cr["instagram_permalink_url"]
+                and (video_ids := _video_ids_to_resolve(cr, feed_spec_videos))
+                and not await repo.creative_has_asset(db, org_id, creative_id, kind)
+                and not await queue.is_dead(
+                    db, org_id, "meta.resolve_facebook_video", str(creative_id)
+                )
+            ):
+                # No synced source and no Instagram post: Facebook's public player serves
+                # the video if it was published on the Page. One Apify run tries every id.
+                await queue.enqueue(
+                    db,
+                    org_id,
+                    "meta.resolve_facebook_video",
+                    {
+                        "creative_id": str(creative_id),
+                        "video_ids": video_ids,
+                        "kind": kind,
+                        "format": verdict.format,
+                        "format_source": verdict.source,
                     },
                     dedup_key=str(creative_id),
                     max_attempts=3,

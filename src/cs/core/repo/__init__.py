@@ -32,6 +32,8 @@ from cs.core.repo.creatives import (
     creative_window_sums,
     get_creative,
     list_creatives,
+    primary_asset_kind,
+    set_creative_format,
     upsert_creative,
 )
 from cs.core.repo.metrics import upsert_metrics
@@ -58,7 +60,9 @@ __all__ = [
     "list_assets_by_kind",
     "list_creatives",
     "list_ready_meta_connections_with_active_account",
+    "primary_asset_kind",
     "set_ad_account_status",
+    "set_creative_format",
     "set_meta_connection_status",
     "set_primary_asset",
     "upsert_ad",

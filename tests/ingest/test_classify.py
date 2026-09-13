@@ -1,6 +1,12 @@
 import json
 
-from cs.ingest.fivetran.classify import IMAGE_URL_MIN_IMPRESSIONS, carousel_urls, classify
+from cs.ingest.fivetran.classify import (
+    IMAGE_URL_MIN_IMPRESSIONS,
+    Classification,
+    carousel_urls,
+    classify,
+    stored_verdict,
+)
 
 EMPTY = {
     "videos_by_id": {},
@@ -180,6 +186,40 @@ def test_image_url_rule_only_applies_to_boosted_posts():
     r = _classify(_row(object_type="PRIVACY_CHECK_FAIL", image_url="https://cdn/i.jpg"),
                   impressions_by_creative_id={"cr1": 100_000}, full_watch_creative_ids=set())
     assert r.format == "unresolved"
+
+
+# --- image and video labels are only stored once their file is ---
+
+
+def test_a_video_verdict_is_stored_once_its_video_file_is():
+    v = Classification("video", "asset_feed_spec_video")
+    assert stored_verdict(v, "original_video") == ("video", "asset_feed_spec_video")
+
+
+def test_a_video_verdict_without_its_file_is_stored_unresolved():
+    v = Classification("video", "meta_object_type")
+    assert stored_verdict(v, None) == ("unresolved", "unresolved")
+
+
+def test_a_file_of_the_wrong_kind_does_not_count():
+    # A stale image file on a creative now proven to be a video is not its video file.
+    v = Classification("video", "video_view_metric")
+    assert stored_verdict(v, "original_image") == ("unresolved", "unresolved")
+
+
+def test_an_image_verdict_needs_its_image_file():
+    v = Classification("image", "image_url", "https://cdn/i.jpg")
+    assert stored_verdict(v, None) == ("unresolved", "unresolved")
+    assert stored_verdict(v, "original_image") == ("image", "image_url")
+
+
+def test_carousel_and_unresolved_verdicts_are_stored_as_they_are():
+    assert stored_verdict(Classification("carousel", "carousel_attachments"), None) == (
+        "carousel", "carousel_attachments"
+    )
+    assert stored_verdict(Classification("unresolved", "unresolved"), None) == (
+        "unresolved", "unresolved"
+    )
 
 
 def test_carousel_urls_returns_none_for_malformed_shapes():

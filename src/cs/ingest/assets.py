@@ -18,8 +18,16 @@ async def _fetch(http: httpx.AsyncClient, url: str) -> tuple[bytes, str]:
 
 
 async def download_creative(
-    ctx: JobContext, http: httpx.AsyncClient, creative_id: UUID, asset_url: str, kind: str
+    ctx: JobContext,
+    http: httpx.AsyncClient,
+    creative_id: UUID,
+    asset_url: str,
+    kind: str,
+    *,
+    verdict: tuple[str, str] | None = None,
 ) -> None:
+    """verdict: the (format, format_source) the creative was kept unresolved for until its
+    file existed; stored once the file is."""
     org_id = ctx.job.org_id
     data, mime = await _fetch(http, asset_url)
     ext = _EXT_BY_MIME.get(mime, "bin")
@@ -29,6 +37,8 @@ async def download_creative(
         ctx.db, org_id, creative_id, kind, key, sha256_hex(data), mime
     )
     await repo.set_primary_asset(ctx.db, org_id, creative_id, asset_id)
+    if verdict is not None:
+        await repo.set_creative_format(ctx.db, org_id, creative_id, *verdict)
     if kind != "original_video" or ctx.settings.video_tagging_enabled:
         await queue.enqueue(
             ctx.db,

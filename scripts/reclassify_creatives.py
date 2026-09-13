@@ -58,7 +58,7 @@ from cs.core import queue
 from cs.core.config import get_settings
 from cs.core.db import Database
 from cs.core.repo import get_meta_connection
-from cs.ingest.fivetran.classify import classify
+from cs.ingest.fivetran.classify import Classification, classify, stored_verdict
 from cs.ingest.fivetran.schema import AD_VIDEO_HISTORY, CREATIVE_HISTORY
 from cs.ingest.fivetran.transform import (
     _afs_video_creative_ids,
@@ -85,32 +85,53 @@ class ReclassifyRow:
     impressions: int
     old_format: str
     old_source: str
-    new_format: str
-    new_source: str
+    # What classify() proves, before the "image/video need their file" rule is applied.
+    verdict_format: str
+    verdict_source: str
     asset_url: str | None
-
-    @property
-    def changed(self) -> bool:
-        return (self.old_format, self.old_source) != (self.new_format, self.new_source)
+    primary_asset_kind: str | None = None
 
     @property
     def is_image_to_video(self) -> bool:
-        return self.old_format == "image" and self.new_format == "video"
+        return self.old_format == "image" and self.verdict_format == "video"
 
     @property
     def is_image_to_unresolved(self) -> bool:
-        return self.old_format == "image" and self.new_format == "unresolved"
+        return self.old_format == "image" and self.verdict_format == "unresolved"
 
     @property
     def needs_image_download(self) -> bool:
-        """The verdict is an image with a file we don't have yet: a new image, or one
+        """The verdict is an image whose file we don't have yet: a new image, or one
         whose stored file came from the cropped thumbnail and now has a feed-spec image.
         An image_url verdict already has its file -- classify() always preferred it."""
-        if self.new_format != "image" or not self.asset_url:
+        if self.verdict_format != "image" or not self.asset_url:
             return False
         feed_image = "asset_feed_spec_image"
-        return self.old_format != "image" or (
-            self.new_source == feed_image and self.old_source != feed_image
+        return self.primary_asset_kind != "original_image" or (
+            self.old_format == "image"
+            and self.verdict_source == feed_image
+            and self.old_source != feed_image
+        )
+
+    @property
+    def _stored(self) -> tuple[str, str]:
+        # A file this run deletes doesn't count toward keeping the label.
+        replaced = self.needs_image_download or self.is_image_to_video
+        kind = None if replaced else self.primary_asset_kind
+        return stored_verdict(Classification(self.verdict_format, self.verdict_source), kind)
+
+    @property
+    def new_format(self) -> str:
+        return self._stored[0]
+
+    @property
+    def new_source(self) -> str:
+        return self._stored[1]
+
+    @property
+    def changed(self) -> bool:
+        return (self.old_format, self.old_source) != (self.new_format, self.new_source) or (
+            self.needs_image_download
         )
 
 
@@ -194,8 +215,9 @@ async def build_plan(db: Database, org_id: UUID) -> ReclassifyPlan:
     app_rows = await db.fetch(
         """
         SELECT c.id, c.platform_creative_id, c.format, c.format_source,
-               COALESCE(m.impressions, 0) AS impressions
+               COALESCE(m.impressions, 0) AS impressions, pa.kind AS primary_asset_kind
         FROM creative c
+        LEFT JOIN asset pa ON pa.id = c.primary_asset_id
         LEFT JOIN (
             SELECT creative_id, sum(impressions) AS impressions
             FROM metric_daily WHERE org_id = $1 GROUP BY creative_id
@@ -237,9 +259,10 @@ async def build_plan(db: Database, org_id: UUID) -> ReclassifyPlan:
                 impressions=row["impressions"] or 0,
                 old_format=row["format"],
                 old_source=row["format_source"],
-                new_format=verdict.format,
-                new_source=verdict.source,
+                verdict_format=verdict.format,
+                verdict_source=verdict.source,
                 asset_url=verdict.asset_url,
+                primary_asset_kind=row["primary_asset_kind"],
             )
         )
     plan.fivetran_only = len(fivetran_by_pid) - len(matched_pids)
@@ -312,6 +335,8 @@ async def _apply_one(db: Database, org_id: UUID, row: ReclassifyRow) -> list[str
                     "creative_id": str(row.creative_id),
                     "asset_url": row.asset_url,
                     "kind": "original_video",
+                    "format": row.verdict_format,
+                    "format_source": row.verdict_source,
                 },
                 # Shares the normal sync path's dedup namespace
                 # (transform.py's meta.download_creative enqueue uses
@@ -355,7 +380,13 @@ async def _replace_with_image_download(tx, org_id: UUID, row: ReclassifyRow) -> 
         tx,
         org_id,
         "meta.download_creative",
-        {"creative_id": str(row.creative_id), "asset_url": row.asset_url, "kind": "original_image"},
+        {
+            "creative_id": str(row.creative_id),
+            "asset_url": row.asset_url,
+            "kind": "original_image",
+            "format": row.verdict_format,
+            "format_source": row.verdict_source,
+        },
         dedup_key=str(row.creative_id),
     )
     return [r["path"] for r in stale]
@@ -458,11 +489,15 @@ def _print_report(plan: ReclassifyPlan) -> None:
             (r.old_format, r.old_source, r.new_format, r.new_source) for r in downloads
         ).most_common():
             print(f"  {n:6d}  {of}/{osrc}  ->  {nf}/{nsrc}")
-    no_file = [r for r in changed if r.new_format == "image" and not r.asset_url]
+    no_file = [
+        r for r in changed
+        if r.verdict_format in ("image", "video") and r.new_format == "unresolved"
+        and not r.needs_image_download and not (r.is_image_to_video and r.asset_url)
+    ]
     if no_file:
         print(
-            f"\n*** {len(no_file)} image verdict(s) have no full-size file (feed-spec hash not in "
-            f"the image library): relabeled only, any stored file and tags are left in place. ***"
+            f"\n{len(no_file)} proven image/video creative(s) have no file we can fetch: "
+            f"stored unresolved until a sync or resolve job lands one."
         )
 
     i2u = [r for r in changed if r.is_image_to_unresolved]
