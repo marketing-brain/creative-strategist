@@ -9,6 +9,10 @@ from cs.ingest.fivetran.fixtures import (
     create_fixture_schema,
     insert_asset_feed_spec_video,
     insert_campaign_ad_creative,
+    insert_customization_rule,
+    insert_feed_spec_image,
+    insert_library_image,
+    insert_retention,
     insert_video,
 )
 from cs.jobs.registry import JobContext
@@ -398,8 +402,26 @@ async def test_impressions_loader_returns_none_when_actions_table_is_missing(db)
     assert await fivetran_transform._impressions_by_creative(db, SCHEMA) is None
 
 
-async def test_sync_stores_zero_views_boosted_post_as_image(db, blobs, settings, org_id):
-    # End to end: a boosted post that served 5,000 times with no video views is an image.
+def _no_watch(ad_id: str, p100: float = 0) -> dict:
+    return dict(ad_id=ad_id, day="2026-09-01", plays=0, p25=0, p50=0, p75=0, p95=0,
+                p100=p100, thruplay=0, avg_time_watched=0)
+
+
+async def _sync_active(db, blobs, settings, org_id) -> dict:
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    accounts = await repo.list_ad_accounts(db, org_id)
+    await repo.set_ad_account_status(db, org_id, accounts[0]["id"], "active")
+    return await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+
+
+async def test_sync_stores_served_image_url_post_without_full_watches_as_image(
+    db, blobs, settings, org_id
+):
+    # End to end: a boosted post with an image file that served 5,000 times and was never
+    # watched to the end is an image, downloaded from its image_url.
     await create_fixture_schema(db, SCHEMA)
     await insert_campaign_ad_creative(
         db, SCHEMA, campaign_id="c1", account_id="999", adset_id="as1", ad_id="9001",
@@ -413,18 +435,102 @@ async def test_sync_stores_zero_views_boosted_post_as_image(db, blobs, settings,
         f'INSERT INTO "{SCHEMA}".basic_ad_actions VALUES ($1, $2, $3, 0, 7)',
         "9001", date(2026, 9, 1), "link_click",
     )
-    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
-    connection = await repo.get_meta_connection_by_id(db, conn_id)
-    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
-    await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
-    accounts = await repo.list_ad_accounts(db, org_id)
-    await repo.set_ad_account_status(db, org_id, accounts[0]["id"], "active")
+    await insert_retention(db, SCHEMA, **_no_watch("9001"))
 
-    summary = await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
+    summary = await _sync_active(db, blobs, settings, org_id)
 
     assert summary["failed"] == 0
     row = await db.fetchrow("SELECT format, format_source FROM creative WHERE org_id=$1", org_id)
-    assert (row["format"], row["format_source"]) == ("image", "no_video_views")
+    assert (row["format"], row["format_source"]) == ("image", "image_url")
+    job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.download_creative'")
+    assert (job["payload"]["asset_url"], job["payload"]["kind"]) == (
+        "https://cdn/i.jpg", "original_image"
+    )
+
+
+async def test_sync_downloads_the_full_size_feed_spec_image(db, blobs, settings, org_id):
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db, SCHEMA, campaign_id="c1", account_id="999", adset_id="as1", ad_id="9001",
+        creative_id="cr1", name="n", headline="H", image_url=None, object_type="SHARE",
+    )
+    await insert_feed_spec_image(db, SCHEMA, creative_id="cr1", index=0, hash="h1", label_id="L1")
+    await insert_library_image(db, SCHEMA, hash="h1", url="https://cdn/full-1080.jpg")
+
+    summary = await _sync_active(db, blobs, settings, org_id)
+
+    assert summary["failed"] == 0
+    row = await db.fetchrow("SELECT format, format_source FROM creative WHERE org_id=$1", org_id)
+    assert (row["format"], row["format_source"]) == ("image", "asset_feed_spec_image")
+    job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.download_creative'")
+    assert (job["payload"]["asset_url"], job["payload"]["kind"]) == (
+        "https://cdn/full-1080.jpg", "original_image"
+    )
+
+
+async def test_feed_spec_image_loader_picks_the_feed_placement_image(db):
+    await create_fixture_schema(db, SCHEMA)
+    for index, hash_, label in ((0, "story", "Ls"), (1, "feed", "Lf")):
+        await insert_feed_spec_image(
+            db, SCHEMA, creative_id="cr1", index=index, hash=hash_, label_id=label
+        )
+    await insert_customization_rule(db, SCHEMA, creative_id="cr1", index=0, image_label_id="Ls",
+                                    facebook_positions=["story", "facebook_reels"])
+    await insert_customization_rule(db, SCHEMA, creative_id="cr1", index=1, image_label_id="Lf",
+                                    facebook_positions=["feed", "marketplace"])
+    await insert_library_image(db, SCHEMA, hash="story", url="https://cdn/story.jpg")
+    await insert_library_image(db, SCHEMA, hash="feed", url="https://cdn/feed.jpg")
+
+    assert await fivetran_transform._feed_spec_image_urls(db, SCHEMA) == {"cr1": "https://cdn/feed.jpg"}
+
+
+async def test_feed_spec_image_loader_falls_back_to_the_first_image_with_a_library_file(db):
+    await create_fixture_schema(db, SCHEMA)
+    await insert_feed_spec_image(db, SCHEMA, creative_id="cr1", index=0, hash="gone", label_id="L0")
+    await insert_feed_spec_image(db, SCHEMA, creative_id="cr1", index=1, hash="h1", label_id="L1")
+    await insert_library_image(db, SCHEMA, hash="h1", url="https://cdn/one.jpg")
+
+    assert await fivetran_transform._feed_spec_image_urls(db, SCHEMA) == {"cr1": "https://cdn/one.jpg"}
+
+
+async def test_feed_spec_image_loader_keeps_creatives_whose_hashes_are_not_in_the_library(db):
+    # Still image evidence; there is just no full-size file to download.
+    await create_fixture_schema(db, SCHEMA)
+    await insert_feed_spec_image(db, SCHEMA, creative_id="cr1", index=0, hash="gone", label_id="L0")
+
+    assert await fivetran_transform._feed_spec_image_urls(db, SCHEMA) == {"cr1": None}
+
+
+async def test_feed_spec_image_loader_is_empty_when_the_table_has_not_synced(db):
+    await create_fixture_schema(db, SCHEMA)
+    await db.execute(f'DROP TABLE "{SCHEMA}".ad_asset_feed_spec_image')
+
+    assert await fivetran_transform._feed_spec_image_urls(db, SCHEMA) == {}
+
+
+async def test_full_watch_loader_returns_creatives_watched_to_the_end(db):
+    await create_fixture_schema(db, SCHEMA)
+    for ad_id, creative_id, p100 in (("9001", "cr1", 3), ("9002", "cr2", 0)):
+        await db.execute(
+            f'INSERT INTO "{SCHEMA}".ad_history VALUES ($1, $2, $3, $4, $5, $6, $7, now())',
+            ad_id, "999", "as1", "c1", creative_id, "name", "ACTIVE",
+        )
+        await insert_retention(db, SCHEMA, **_no_watch(ad_id, p100=p100))
+
+    assert await fivetran_transform._full_watch_creative_ids(db, SCHEMA) == {"cr1"}
+
+
+async def test_full_watch_loader_returns_none_without_the_retention_report(db):
+    # No report means no veto -- an image_url creative must not become an image.
+    await create_fixture_schema(db, SCHEMA, with_retention=False)
+
+    assert await fivetran_transform._full_watch_creative_ids(db, SCHEMA) is None
+
+
+async def test_full_watch_loader_returns_none_when_the_report_is_empty(db):
+    await create_fixture_schema(db, SCHEMA)
+
+    assert await fivetran_transform._full_watch_creative_ids(db, SCHEMA) is None
 
 
 async def test_impressions_loader_returns_none_when_actions_table_is_empty(db):

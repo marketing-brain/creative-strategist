@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 from uuid import UUID
@@ -10,13 +11,18 @@ from cs.connectors.base import PlatformAd, PlatformCreative
 from cs.core import queue, repo
 from cs.ingest.fivetran.classify import classify
 from cs.ingest.fivetran.schema import (
+    AD_ASSET_CUSTOMIZATION_RULE,
+    AD_ASSET_FEED_SPEC_IMAGE,
     AD_ASSET_FEED_SPEC_VIDEO,
     AD_HISTORY,
+    AD_IMAGE_HISTORY,
     AD_VIDEO_HISTORY,
     BASIC_AD,
     BASIC_AD_ACTIONS,
     CAMPAIGN_HISTORY,
     CREATIVE_HISTORY,
+    VIDEO_FULL_WATCH_TABLE,
+    VIDEO_RETENTION_AD,
 )
 from cs.jobs.registry import JobContext
 
@@ -106,7 +112,7 @@ async def _impressions_by_creative(db, schema: str) -> dict[str, int] | None:
     """Impressions per creative; None if basic_ad_actions is missing/empty, so views are unknown."""
     try:
         if await db.fetchval(f"SELECT 1 FROM {_q(schema, BASIC_AD_ACTIONS)} LIMIT 1") is None:
-            log.warning("zero-video-views rule disabled: no action data", extra={"schema": schema})
+            log.warning("image_url rule disabled: no action data", extra={"schema": schema})
             return None
         rows = await db.fetch(f"""
             SELECT a.creative_id, sum(b.impressions) AS impressions FROM (
@@ -116,15 +122,106 @@ async def _impressions_by_creative(db, schema: str) -> dict[str, int] | None:
             WHERE a.rn = 1 GROUP BY a.creative_id
         """)
     except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
-        log.warning(
-            "zero-video-views rule disabled: insights table missing", extra={"schema": schema}
-        )
+        log.warning("image_url rule disabled: insights table missing", extra={"schema": schema})
         return None
     return {
         str(r["creative_id"]): int(r["impressions"] or 0)
         for r in rows
         if r["creative_id"] is not None
     }
+
+
+def _json(raw: object) -> object:
+    if not isinstance(raw, str):
+        return raw
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return None
+
+
+def _label_ids(raw: object) -> set[str]:
+    """adlabels (a list) or image_label (one object) -> the label ids it names."""
+    parsed = _json(raw)
+    items = parsed if isinstance(parsed, list) else [parsed]
+    return {str(i["id"]) for i in items if isinstance(i, dict) and i.get("id") is not None}
+
+
+async def _feed_spec_image_urls(db, schema: str) -> dict[str, str | None]:
+    """Creatives with feed-spec images -> the full-size library URL of their feed image.
+
+    Prefers the image a customization rule places in Facebook feed, then the first image
+    whose hash is in ad_image_history. None when no hash resolves: still image evidence,
+    just no file. A table that hasn't synced degrades to {} (unresolved, never image)."""
+    try:
+        images = await db.fetch(
+            f"SELECT creative_id, index, hash, adlabels FROM {_q(schema, AD_ASSET_FEED_SPEC_IMAGE)}"
+        )
+    except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
+        log.warning(
+            "classification signal unavailable -- coverage degraded, more creatives "
+            "will be unresolved",
+            extra={"table": AD_ASSET_FEED_SPEC_IMAGE},
+        )
+        return {}
+    try:
+        library = {
+            r["hash"]: r["url"]
+            for r in await db.fetch(f"""
+                SELECT hash, url FROM (
+                  SELECT hash, url, row_number() OVER (PARTITION BY hash
+                    ORDER BY _fivetran_synced DESC) rn FROM {_q(schema, AD_IMAGE_HISTORY)}
+                ) t WHERE rn = 1 AND url IS NOT NULL
+            """)
+        }
+    except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
+        log.warning("no full-size image files: image library missing", extra={"schema": schema})
+        library = {}
+    feed_labels: dict[str, set[str]] = {}
+    try:
+        rules = await db.fetch(
+            f"SELECT creative_id, image_label, customization_spec"
+            f" FROM {_q(schema, AD_ASSET_CUSTOMIZATION_RULE)} WHERE image_label IS NOT NULL"
+        )
+    except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
+        rules = []
+    for r in rules:
+        spec = _json(r["customization_spec"])
+        if isinstance(spec, dict) and "feed" in (spec.get("facebook_positions") or []):
+            labels = feed_labels.setdefault(str(r["creative_id"]), set())
+            labels.update(_label_ids(r["image_label"]))
+
+    by_creative: dict[str, list[asyncpg.Record]] = {}
+    for r in images:
+        if r["creative_id"] is not None:
+            by_creative.setdefault(str(r["creative_id"]), []).append(r)
+    out: dict[str, str | None] = {}
+    for creative_id, rows in by_creative.items():
+        rows.sort(key=lambda r: r["index"] if r["index"] is not None else 0)
+        feed = feed_labels.get(creative_id, set())
+        ordered = [r for r in rows if _label_ids(r["adlabels"]) & feed] + rows
+        out[creative_id] = next((library[r["hash"]] for r in ordered if r["hash"] in library), None)
+    return out
+
+
+async def _full_watch_creative_ids(db, schema: str) -> set[str] | None:
+    """Creatives with at least one ad watched to 100%; None when the retention report is
+    missing or empty, since then an unwatched image_url creative proves nothing."""
+    try:
+        if await db.fetchval(f"SELECT 1 FROM {_q(schema, VIDEO_RETENTION_AD)} LIMIT 1") is None:
+            log.warning("image_url rule disabled: no retention data", extra={"schema": schema})
+            return None
+        rows = await db.fetch(f"""
+            SELECT DISTINCT a.creative_id FROM (
+              SELECT id, creative_id, row_number() OVER (PARTITION BY id
+                ORDER BY _fivetran_synced DESC) rn FROM {_q(schema, AD_HISTORY)}
+            ) a JOIN {_q(schema, VIDEO_FULL_WATCH_TABLE)} w ON w.ad_id::text = a.id::text
+            WHERE a.rn = 1 AND w.action_type = 'video_view' AND w.value > 0
+        """)
+    except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
+        log.warning("image_url rule disabled: retention report missing", extra={"schema": schema})
+        return None
+    return {str(r["creative_id"]) for r in rows if r["creative_id"] is not None}
 
 
 async def _discover_accounts(db, org_id: UUID, connection_id: UUID, schema: str) -> dict[str, UUID]:
@@ -157,6 +254,8 @@ async def _sync_ads_and_creatives(
     afs_ids = await _afs_video_creative_ids(db, schema)
     vv_ids = await _video_view_creative_ids(db, schema)
     impressions = await _impressions_by_creative(db, schema)
+    feed_spec_images = await _feed_spec_image_urls(db, schema)
+    full_watches = await _full_watch_creative_ids(db, schema)
 
     new_creatives = 0
     synced_ads = 0
@@ -175,6 +274,8 @@ async def _sync_ads_and_creatives(
                 afs_video_creative_ids=afs_ids,
                 video_view_creative_ids=vv_ids,
                 impressions_by_creative_id=impressions,
+                feed_spec_image_urls=feed_spec_images,
+                full_watch_creative_ids=full_watches,
             )
             platform_creative = PlatformCreative(
                 platform_creative_id=_pid(cr["id"]),

@@ -36,6 +36,12 @@ async def test_zero_video_views_image_is_storable(db, org_id, ad_account_id):
     await _insert(db, org_id, ad_account_id, fmt="image", source="no_video_views")
 
 
+async def test_image_file_and_full_watch_sources_are_storable(db, org_id, ad_account_id):
+    await _insert(db, org_id, ad_account_id, fmt="image", source="asset_feed_spec_image")
+    await _insert(db, org_id, ad_account_id, fmt="image", source="image_url")
+    await _insert(db, org_id, ad_account_id, fmt="video", source="video_full_watch")
+
+
 async def test_format_source_has_no_default(db, org_id, ad_account_id):
     with pytest.raises(asyncpg.NotNullViolationError):
         await db.execute(

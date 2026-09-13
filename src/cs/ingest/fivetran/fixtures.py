@@ -4,12 +4,16 @@ fivetran/insights.py read; callers insert their own rows into them."""
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 from cs.core.db import Database
 from cs.ingest.fivetran.schema import (
+    AD_ASSET_CUSTOMIZATION_RULE,
+    AD_ASSET_FEED_SPEC_IMAGE,
     AD_ASSET_FEED_SPEC_VIDEO,
     AD_HISTORY,
+    AD_IMAGE_HISTORY,
     AD_VIDEO_HISTORY,
     BASIC_AD,
     CAMPAIGN_HISTORY,
@@ -56,6 +60,22 @@ async def create_fixture_schema(db: Database, schema: str, *, with_retention: bo
     await db.execute(f"""
         CREATE TABLE "{schema}".{AD_ASSET_FEED_SPEC_VIDEO} (
           creative_id TEXT, video_id TEXT, _fivetran_synced TIMESTAMPTZ
+        )
+    """)
+    await db.execute(f"""
+        CREATE TABLE "{schema}".{AD_ASSET_FEED_SPEC_IMAGE} (
+          creative_id TEXT, index INT, hash TEXT, adlabels TEXT, _fivetran_synced TIMESTAMPTZ
+        )
+    """)
+    await db.execute(f"""
+        CREATE TABLE "{schema}".{AD_ASSET_CUSTOMIZATION_RULE} (
+          creative_id TEXT, index INT, image_label TEXT, video_label TEXT,
+          customization_spec TEXT, _fivetran_synced TIMESTAMPTZ
+        )
+    """)
+    await db.execute(f"""
+        CREATE TABLE "{schema}".{AD_IMAGE_HISTORY} (
+          hash TEXT, id TEXT, url TEXT, _fivetran_synced TIMESTAMPTZ
         )
     """)
     await db.execute(
@@ -152,6 +172,49 @@ async def insert_asset_feed_spec_video(
         f'INSERT INTO "{schema}".{AD_ASSET_FEED_SPEC_VIDEO} VALUES ($1, $2, now())',
         creative_id,
         video_id,
+    )
+
+
+async def insert_feed_spec_image(
+    db: Database, schema: str, *, creative_id: str, index: int, hash: str, label_id: str
+) -> None:
+    await db.execute(
+        f'INSERT INTO "{schema}".{AD_ASSET_FEED_SPEC_IMAGE} VALUES ($1, $2, $3, $4, now())',
+        creative_id,
+        index,
+        hash,
+        json.dumps([{"id": label_id, "name": f"placement_asset_{label_id}"}]),
+    )
+
+
+async def insert_customization_rule(
+    db: Database,
+    schema: str,
+    *,
+    creative_id: str,
+    index: int,
+    image_label_id: str,
+    facebook_positions: list[str] | None,
+) -> None:
+    spec: dict[str, object] = {"age_min": 18}
+    if facebook_positions is not None:
+        spec["facebook_positions"] = facebook_positions
+    await db.execute(
+        f'INSERT INTO "{schema}".{AD_ASSET_CUSTOMIZATION_RULE}'
+        " VALUES ($1, $2, $3, NULL, $4, now())",
+        creative_id,
+        index,
+        json.dumps({"id": image_label_id, "name": f"placement_asset_{image_label_id}"}),
+        json.dumps(spec),
+    )
+
+
+async def insert_library_image(db: Database, schema: str, *, hash: str, url: str) -> None:
+    await db.execute(
+        f'INSERT INTO "{schema}".{AD_IMAGE_HISTORY} VALUES ($1, $2, $3, now())',
+        hash,
+        f"999:{hash}",
+        url,
     )
 
 

@@ -62,6 +62,8 @@ from cs.ingest.fivetran.classify import classify
 from cs.ingest.fivetran.schema import AD_VIDEO_HISTORY, CREATIVE_HISTORY
 from cs.ingest.fivetran.transform import (
     _afs_video_creative_ids,
+    _feed_spec_image_urls,
+    _full_watch_creative_ids,
     _impressions_by_creative,
     _latest_rows,
     _video_view_creative_ids,
@@ -98,6 +100,18 @@ class ReclassifyRow:
     @property
     def is_image_to_unresolved(self) -> bool:
         return self.old_format == "image" and self.new_format == "unresolved"
+
+    @property
+    def needs_image_download(self) -> bool:
+        """The verdict is an image with a file we don't have yet: a new image, or one
+        whose stored file came from the cropped thumbnail and now has a feed-spec image.
+        An image_url verdict already has its file -- classify() always preferred it."""
+        if self.new_format != "image" or not self.asset_url:
+            return False
+        feed_image = "asset_feed_spec_image"
+        return self.old_format != "image" or (
+            self.new_source == feed_image and self.old_source != feed_image
+        )
 
 
 @dataclass
@@ -164,6 +178,8 @@ async def build_plan(db: Database, org_id: UUID) -> ReclassifyPlan:
     afs_ids = await _afs_video_creative_ids(db, schema)
     vv_ids = await _video_view_creative_ids(db, schema)
     impressions = await _impressions_by_creative(db, schema)
+    feed_spec_images = await _feed_spec_image_urls(db, schema)
+    full_watches = await _full_watch_creative_ids(db, schema)
 
     fivetran_by_pid = {
         pid: r
@@ -211,6 +227,8 @@ async def build_plan(db: Database, org_id: UUID) -> ReclassifyPlan:
             afs_video_creative_ids=afs_ids,
             video_view_creative_ids=vv_ids,
             impressions_by_creative_id=impressions,
+            feed_spec_image_urls=feed_spec_images,
+            full_watch_creative_ids=full_watches,
         )
         plan.rows.append(
             ReclassifyRow(
@@ -242,6 +260,8 @@ async def _apply_one(db: Database, org_id: UUID, row: ReclassifyRow) -> list[str
             row.new_format,
             row.new_source,
         )
+        if row.needs_image_download:
+            return await _replace_with_image_download(tx, org_id, row)
         if not (row.is_image_to_video or row.is_image_to_unresolved):
             return orphaned
         # Every tag on this creative was produced by the image model, against the image
@@ -303,6 +323,42 @@ async def _apply_one(db: Database, org_id: UUID, row: ReclassifyRow) -> list[str
         # re-tagging and re-download (see the tagging-guard and sync-path checks
         # elsewhere in this codebase), so there is nothing safe to schedule here.
     return orphaned
+
+
+async def _replace_with_image_download(tx, org_id: UUID, row: ReclassifyRow) -> list[str]:
+    """Inside _apply_one's transaction: drop the stored file (a thumbnail crop, or a
+    video/none for a creative that just became an image) and every tag made from it,
+    then queue the full-size image. The download re-queues tagging when it lands."""
+    stale = await tx.fetch(
+        "SELECT path FROM asset WHERE org_id=$1 AND creative_id=$2"
+        " AND kind IN ('original_image', 'original_video')",
+        org_id,
+        row.creative_id,
+    )
+    await tx.execute("UPDATE creative SET primary_asset_id=NULL WHERE id=$1", row.creative_id)
+    await tx.execute(
+        "DELETE FROM asset WHERE org_id=$1 AND creative_id=$2"
+        " AND kind IN ('original_image', 'original_video')",
+        org_id,
+        row.creative_id,
+    )
+    # FK order: tag, creative_embedding and tag_batch_item all reference tag_run.
+    await tx.execute("DELETE FROM tag WHERE creative_id=$1", row.creative_id)
+    await tx.execute("DELETE FROM creative_embedding WHERE creative_id=$1", row.creative_id)
+    await tx.execute(
+        "DELETE FROM tag_batch_item WHERE tag_run_id IN"
+        " (SELECT id FROM tag_run WHERE creative_id=$1)",
+        row.creative_id,
+    )
+    await tx.execute("DELETE FROM tag_run WHERE creative_id=$1", row.creative_id)
+    await queue.enqueue(
+        tx,
+        org_id,
+        "meta.download_creative",
+        {"creative_id": str(row.creative_id), "asset_url": row.asset_url, "kind": "original_image"},
+        dedup_key=str(row.creative_id),
+    )
+    return [r["path"] for r in stale]
 
 
 async def apply_plan(db: Database, org_id: UUID, plan: ReclassifyPlan) -> ApplyResult:
@@ -390,6 +446,24 @@ def _print_report(plan: ReclassifyPlan) -> None:
                 f"They stay untagged until a separate resolution path (Apify/Instagram, or "
                 f"a future sync landing ad_video_history) gives them one. ***"
             )
+
+    downloads = [r for r in changed if r.needs_image_download]
+    if downloads:
+        print(
+            f"\n{len(downloads)} of those get a full-size image file: any stored file (a cropped "
+            f"thumbnail, or none) and its tags are deleted, and the image download is queued "
+            f"(tagging re-runs when it lands)."
+        )
+        for (of, osrc, nf, nsrc), n in Counter(
+            (r.old_format, r.old_source, r.new_format, r.new_source) for r in downloads
+        ).most_common():
+            print(f"  {n:6d}  {of}/{osrc}  ->  {nf}/{nsrc}")
+    no_file = [r for r in changed if r.new_format == "image" and not r.asset_url]
+    if no_file:
+        print(
+            f"\n*** {len(no_file)} image verdict(s) have no full-size file (feed-spec hash not in "
+            f"the image library): relabeled only, any stored file and tags are left in place. ***"
+        )
 
     i2u = [r for r in changed if r.is_image_to_unresolved]
     if i2u:

@@ -6,7 +6,9 @@ tag/tag_run/embedding deletes, job enqueue) is reviewed by reading the code and
 tracing FK order by hand, not by running it here, even against the isolated test
 database."""
 
-from scripts.reclassify_creatives import build_plan
+from uuid import uuid4
+
+from scripts.reclassify_creatives import ReclassifyRow, apply_plan, build_plan
 
 from cs.core import repo
 from cs.core.ids import new_id
@@ -15,6 +17,8 @@ from cs.ingest.fivetran.fixtures import (
     insert_asset_feed_spec_video,
     insert_campaign_ad_creative,
     insert_daily_insight,
+    insert_feed_spec_image,
+    insert_library_image,
     insert_video,
 )
 from cs.ingest.fivetran.insights import sync_insights
@@ -191,3 +195,106 @@ async def test_ordered_by_descending_impressions(db, blobs, settings, org_id):
     plan = await build_plan(db, org_id)
     assert [r.platform_creative_id for r in plan.rows] == ["cr_high", "cr_low"]
     assert [r.impressions for r in plan.rows] == [5000, 10]
+
+
+FEED_IMAGE = ("image", "asset_feed_spec_image")
+
+
+def _needs_download(old, new, asset_url="https://cdn/full.jpg"):
+    return ReclassifyRow(uuid4(), "cr1", 0, *old, *new, asset_url).needs_image_download
+
+
+def test_switching_a_thumbnail_image_to_its_feed_spec_image_needs_the_full_size_file():
+    assert _needs_download(("image", "no_video_views"), FEED_IMAGE)
+
+
+def test_an_image_url_image_already_has_its_file():
+    # classify() always preferred image_url, so the stored file is already the full image.
+    assert not _needs_download(("image", "no_video_views"), ("image", "image_url"))
+
+
+def test_a_new_image_needs_its_file_but_only_when_one_exists():
+    assert _needs_download(("unresolved", "unresolved"), FEED_IMAGE)
+    assert _needs_download(("video", "video_view_metric"), FEED_IMAGE)
+    assert not _needs_download(("unresolved", "unresolved"), FEED_IMAGE, None)
+
+
+async def _thumbnail_image_creative(db, blobs, settings, org_id):
+    """A placement creative stored the old way: an image from its cropped thumbnail, tagged."""
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db, SCHEMA, campaign_id="c1", account_id="999", adset_id="as1", ad_id="ad1",
+        creative_id="cr1", name="n", headline="H", image_url=None, object_type="SHARE",
+    )
+    await insert_feed_spec_image(db, SCHEMA, creative_id="cr1", index=0, hash="h1", label_id="L1")
+    await insert_library_image(db, SCHEMA, hash="h1", url="https://cdn/full-1080.jpg")
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+    await discover_and_sync_entities(ctx, org_id, connection)
+    accounts = await repo.list_ad_accounts(db, org_id)
+    await repo.set_ad_account_status(db, org_id, accounts[0]["id"], "active")
+    await discover_and_sync_entities(ctx, org_id, connection)
+    creative_id = await db.fetchval("SELECT id FROM creative WHERE org_id=$1", org_id)
+    await db.execute(
+        "UPDATE creative SET format='image', format_source='no_video_views' WHERE id=$1",
+        creative_id,
+    )
+    asset_id = await repo.insert_asset(
+        db, org_id, creative_id, "original_image", "crop600.jpg", "sha", "image/jpeg"
+    )
+    await repo.set_primary_asset(db, org_id, creative_id, asset_id)
+    taxonomy_id = new_id()
+    await db.execute(
+        "INSERT INTO taxonomy_version (id, version, yaml_sha256) VALUES ($1, 'v1', 'cafe')",
+        taxonomy_id,
+    )
+    run_id = new_id()
+    await db.execute(
+        "INSERT INTO tag_run (id, org_id, creative_id, taxonomy_version_id, model, status)"
+        " VALUES ($1, $2, $3, $4, 'image-model', 'done')",
+        run_id, org_id, creative_id, taxonomy_id,
+    )
+    await db.execute(
+        "INSERT INTO tag (id, org_id, tag_run_id, creative_id, dimension, value, confidence)"
+        " VALUES ($1, $2, $3, $4, 'dim', 'val', 0.9)",
+        new_id(), org_id, run_id, creative_id,
+    )
+    await db.execute("DELETE FROM job WHERE org_id=$1", org_id)
+    return creative_id
+
+
+async def test_plan_upgrades_a_thumbnail_image_to_its_full_size_feed_spec_image(
+    db, blobs, settings, org_id
+):
+    creative_id = await _thumbnail_image_creative(db, blobs, settings, org_id)
+
+    plan = await build_plan(db, org_id)
+
+    (row,) = plan.rows
+    assert row.creative_id == creative_id
+    assert (row.new_format, row.new_source, row.asset_url) == (
+        "image", "asset_feed_spec_image", "https://cdn/full-1080.jpg"
+    )
+    assert row.needs_image_download
+
+
+async def test_apply_replaces_the_thumbnail_file_and_its_tags_with_a_full_size_download(
+    db, blobs, settings, org_id
+):
+    creative_id = await _thumbnail_image_creative(db, blobs, settings, org_id)
+
+    result = await apply_plan(db, org_id, await build_plan(db, org_id))
+
+    assert result.failed == 0
+    assert result.orphaned_asset_paths == ["crop600.jpg"]
+    creative = await db.fetchrow("SELECT * FROM creative WHERE id=$1", creative_id)
+    assert (creative["format"], creative["format_source"]) == ("image", "asset_feed_spec_image")
+    assert creative["primary_asset_id"] is None
+    assert await db.fetchval("SELECT count(*) FROM asset WHERE creative_id=$1", creative_id) == 0
+    assert await db.fetchval("SELECT count(*) FROM tag WHERE creative_id=$1", creative_id) == 0
+    assert await db.fetchval("SELECT count(*) FROM tag_run WHERE creative_id=$1", creative_id) == 0
+    job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.download_creative'")
+    assert (job["payload"]["asset_url"], job["payload"]["kind"]) == (
+        "https://cdn/full-1080.jpg", "original_image"
+    )

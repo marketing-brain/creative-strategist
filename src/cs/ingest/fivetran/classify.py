@@ -4,8 +4,8 @@ import json
 from collections.abc import Container, Mapping
 from dataclasses import dataclass
 
-# Calibrated on org 2: no object_type=VIDEO creative with >=50 impressions has zero views.
-NO_VIDEO_VIEWS_MIN_IMPRESSIONS = 50
+# Delivery needed before a missing full watch can veto an image_url creative being a video.
+IMAGE_URL_MIN_IMPRESSIONS = 50
 
 
 @dataclass(frozen=True)
@@ -41,9 +41,15 @@ def classify(
     afs_video_creative_ids: Container[str],
     video_view_creative_ids: Container[str],
     impressions_by_creative_id: Mapping[str, int] | None,
+    feed_spec_image_urls: Mapping[str, str | None],
+    full_watch_creative_ids: Container[str] | None,
 ) -> Classification:
     """Ordered evidence rules. There is deliberately no default branch: anything
-    unproven returns 'unresolved' rather than falling through to 'image'."""
+    unproven returns 'unresolved' rather than falling through to 'image'.
+
+    An image verdict needs an image file (a feed-spec image or image_url), never a
+    thumbnail. feed_spec_image_urls maps a creative with feed-spec images to its
+    full-size library URL (None when the hash isn't in the library)."""
     creative_id = _pid(row["id"])
     object_type = row["object_type"]
     video_ref = _pid(row["video_video_id"] or row["video_id"])
@@ -65,15 +71,28 @@ def classify(
         return Classification("video", "meta_video_id", videos_by_id[video_ref])
     if creative_id in afs_video_creative_ids:
         return Classification("video", "asset_feed_spec_video")
-    if creative_id in video_view_creative_ids:
-        return Classification("video", "video_view_metric")
 
-    # Zero views proves "not a video" only if view data synced; None must never yield image.
+    # Uploaded placement assets outrank delivery metrics: Meta animates stills, so
+    # image-only placement creatives can carry a handful of views.
+    if creative_id is not None and creative_id in feed_spec_image_urls:
+        return Classification("image", "asset_feed_spec_image", feed_spec_image_urls[creative_id])
+
+    # A full watch never appears on an image-only creative, so it proves a video is served.
+    if full_watch_creative_ids is not None and creative_id in full_watch_creative_ids:
+        return Classification("video", "video_full_watch")
+
+    # image_url alone is not proof: link ads can promote a video post. Only enough delivery
+    # with retention data synced makes the absence of a full watch meaningful.
     if (
         object_type == "SHARE"
+        and row["image_url"]
+        and full_watch_creative_ids is not None
         and impressions_by_creative_id is not None
-        and impressions_by_creative_id.get(creative_id or "", 0) >= NO_VIDEO_VIEWS_MIN_IMPRESSIONS
+        and impressions_by_creative_id.get(creative_id or "", 0) >= IMAGE_URL_MIN_IMPRESSIONS
     ):
-        return Classification("image", "no_video_views", row["image_url"] or row["thumbnail_url"])
+        return Classification("image", "image_url", row["image_url"])
+
+    if creative_id in video_view_creative_ids:
+        return Classification("video", "video_view_metric")
 
     return Classification("unresolved", "unresolved")

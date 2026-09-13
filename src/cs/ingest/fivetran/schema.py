@@ -5,6 +5,9 @@ AD_HISTORY = "ad_history"
 CREATIVE_HISTORY = "creative_history"
 AD_VIDEO_HISTORY = "ad_video_history"
 AD_ASSET_FEED_SPEC_VIDEO = "ad_asset_feed_spec_video"
+AD_ASSET_FEED_SPEC_IMAGE = "ad_asset_feed_spec_image"
+AD_ASSET_CUSTOMIZATION_RULE = "ad_asset_feed_spec_asset_customization_rule"
+AD_IMAGE_HISTORY = "ad_image_history"
 
 ENTITY_TABLES = (CAMPAIGN_HISTORY, AD_HISTORY, CREATIVE_HISTORY, AD_VIDEO_HISTORY)
 
@@ -30,3 +33,5 @@ VIDEO_RETENTION_CHILD_COLUMNS = {
     "video_thruplay_watched_actions": "video_thruplay",
     "video_avg_time_watched_actions": "video_avg_time_watched",  # seconds, per-day average
 }
+
+VIDEO_FULL_WATCH_TABLE = f"{VIDEO_RETENTION_AD}_video_p_100_watched_actions"
