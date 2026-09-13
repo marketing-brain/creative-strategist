@@ -49,3 +49,19 @@ class MetricRow:
     video_p50: int
     video_p100: int
     raw: dict = field(default_factory=dict)
+    # Diagnosis-panel columns (spec 2026-09-12). Appended after `raw` so positional
+    # constructors in older code and tests keep working.
+    reach: int = 0
+    video_plays: int = 0
+    video_p25: int = 0
+    video_p75: int = 0
+    video_p95: int = 0
+    video_watch_seconds: Decimal = Decimal(0)
+    landing_page_views: int = 0
+    content_views: int = 0
+    add_to_carts: int = 0
+    checkouts: int = 0
+    purchases: int = 0
+    post_reactions: int = 0
+    comments: int = 0
+    saves: int = 0

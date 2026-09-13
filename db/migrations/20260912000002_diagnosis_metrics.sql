@@ -1,0 +1,23 @@
+-- migrate:up
+ALTER TABLE metric_daily
+  ADD COLUMN reach BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN video_plays BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN video_p25 BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN video_p75 BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN video_p95 BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN video_watch_seconds NUMERIC(14,4) NOT NULL DEFAULT 0,
+  ADD COLUMN landing_page_views BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN content_views BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN add_to_carts BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN checkouts BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN purchases BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN post_reactions BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN comments BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN saves BIGINT NOT NULL DEFAULT 0;
+
+-- migrate:down
+ALTER TABLE metric_daily
+  DROP COLUMN reach, DROP COLUMN video_plays, DROP COLUMN video_p25, DROP COLUMN video_p75,
+  DROP COLUMN video_p95, DROP COLUMN video_watch_seconds, DROP COLUMN landing_page_views,
+  DROP COLUMN content_views, DROP COLUMN add_to_carts, DROP COLUMN checkouts,
+  DROP COLUMN purchases, DROP COLUMN post_reactions, DROP COLUMN comments, DROP COLUMN saves;

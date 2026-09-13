@@ -233,3 +233,51 @@ async def test_meta_connection_upsert_is_idempotent_per_org(db, org_id):
     assert first == second
     row = await repo.get_meta_connection(db, org_id)
     assert row["fivetran_connector_id"] == "conn_2"
+
+
+async def test_upsert_metrics_persists_diagnosis_columns(db, org_id):
+    acct = await repo.upsert_ad_account(db, org_id, "77", "Main", "USD")
+    cid, _ = await repo.upsert_creative(
+        db,
+        org_id,
+        acct,
+        PlatformCreative("cr", "video", "H", "P", None, None, "u", None, None, {}),
+        "raw",
+    )
+    await repo.upsert_ad(db, org_id, acct, PlatformAd("ad77", "A", "ACTIVE", None, None, "cr"), cid)
+    row = MetricRow(
+        "ad77", date(2026, 9, 1), "all", Decimal("10"), 1000, 20, 20, Decimal("2"),
+        Decimal("100"), 300, 90, 50, 30, {},
+        reach=700, video_plays=400, video_p25=280, video_p75=60, video_p95=40,
+        video_watch_seconds=Decimal("2840.5"), landing_page_views=15, content_views=9,
+        add_to_carts=4, checkouts=3, purchases=2, post_reactions=12, comments=3, saves=5,
+    )  # fmt: skip
+    written, skipped = await repo.upsert_metrics(db, org_id, acct, [row])
+    assert (written, skipped) == (1, 0)
+    r = await db.fetchrow("SELECT * FROM metric_daily WHERE creative_id=$1", cid)
+    assert r["reach"] == 700 and r["video_plays"] == 400
+    assert (r["video_p25"], r["video_p50"], r["video_p75"], r["video_p95"], r["video_p100"]) == (
+        280, 50, 60, 40, 30,
+    )  # fmt: skip
+    assert r["video_watch_seconds"] == Decimal("2840.5")
+    steps = ("landing_page_views", "content_views", "add_to_carts", "checkouts", "purchases")
+    assert tuple(r[k] for k in steps) == (15, 9, 4, 3, 2)
+    assert (r["post_reactions"], r["comments"], r["saves"]) == (12, 3, 5)
+
+    # Re-upsert with changed values must overwrite, not keep the old row.
+    row2 = MetricRow(
+        "ad77", date(2026, 9, 1), "all", Decimal("10"), 1000, 20, 20, Decimal("2"),
+        Decimal("100"), 300, 90, 50, 30, {}, reach=900, purchases=6,
+    )  # fmt: skip
+    await repo.upsert_metrics(db, org_id, acct, [row2])
+    r = await db.fetchrow(
+        "SELECT reach, purchases, video_plays FROM metric_daily WHERE creative_id=$1", cid
+    )
+    assert (r["reach"], r["purchases"], r["video_plays"]) == (900, 6, 0)
+
+
+async def test_metric_row_positional_construction_still_works():
+    r = MetricRow(
+        "a", date(2026, 9, 1), "all", Decimal(1), 1, 1, 1, Decimal(0), Decimal(0), 0, 0, 0, 0, {}
+    )
+    assert r.reach == 0 and r.purchases == 0 and r.video_watch_seconds == 0

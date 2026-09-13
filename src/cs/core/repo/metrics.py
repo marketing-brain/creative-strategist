@@ -11,14 +11,25 @@ METRIC_CHUNK_SIZE = 1000
 _UPSERT_METRIC_SQL = """
     INSERT INTO metric_daily (org_id, ad_account_id, creative_id, ad_id, day, placement,
         spend, impressions, clicks, link_clicks, conversions, conversion_value,
-        video_3s_views, video_thruplay, video_p50, video_p100, raw)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+        video_3s_views, video_thruplay, video_p50, video_p100, raw,
+        reach, video_plays, video_p25, video_p75, video_p95, video_watch_seconds,
+        landing_page_views, content_views, add_to_carts, checkouts, purchases,
+        post_reactions, comments, saves)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
+            $18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
     ON CONFLICT (creative_id, ad_id, day, placement) DO UPDATE SET
         spend=EXCLUDED.spend, impressions=EXCLUDED.impressions, clicks=EXCLUDED.clicks,
         link_clicks=EXCLUDED.link_clicks, conversions=EXCLUDED.conversions,
         conversion_value=EXCLUDED.conversion_value,
         video_3s_views=EXCLUDED.video_3s_views, video_thruplay=EXCLUDED.video_thruplay,
-        video_p50=EXCLUDED.video_p50, video_p100=EXCLUDED.video_p100, raw=EXCLUDED.raw
+        video_p50=EXCLUDED.video_p50, video_p100=EXCLUDED.video_p100, raw=EXCLUDED.raw,
+        reach=EXCLUDED.reach, video_plays=EXCLUDED.video_plays, video_p25=EXCLUDED.video_p25,
+        video_p75=EXCLUDED.video_p75, video_p95=EXCLUDED.video_p95,
+        video_watch_seconds=EXCLUDED.video_watch_seconds,
+        landing_page_views=EXCLUDED.landing_page_views, content_views=EXCLUDED.content_views,
+        add_to_carts=EXCLUDED.add_to_carts, checkouts=EXCLUDED.checkouts,
+        purchases=EXCLUDED.purchases, post_reactions=EXCLUDED.post_reactions,
+        comments=EXCLUDED.comments, saves=EXCLUDED.saves
 """
 
 
@@ -64,6 +75,20 @@ async def upsert_metrics(
                 r.video_p50,
                 r.video_p100,
                 r.raw,
+                r.reach,
+                r.video_plays,
+                r.video_p25,
+                r.video_p75,
+                r.video_p95,
+                r.video_watch_seconds,
+                r.landing_page_views,
+                r.content_views,
+                r.add_to_carts,
+                r.checkouts,
+                r.purchases,
+                r.post_reactions,
+                r.comments,
+                r.saves,
             )
         )
     if not params:
