@@ -18,14 +18,20 @@ async def upsert_creative(
     raw_path: str,
     *,
     format_source: str,
+    evidence_format: str | None = None,
+    evidence_source: str | None = None,
 ) -> tuple[UUID, bool]:
+    """format/format_source are what analysis uses (image/video only once the file is
+    stored); evidence_format/evidence_source are what the platform data proves, file or not.
+    The evidence defaults to the stored verdict for callers that store a checked format."""
     row = await db.fetchrow(
         """
         INSERT INTO creative (id, org_id, ad_account_id, platform_creative_id, format, headline,
                               primary_text, description, cta_type, link_url, raw_path,
-                              format_source, format_verified_at)
+                              format_source, format_verified_at, evidence_format,
+                              evidence_source)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                CASE WHEN $12 = 'unresolved' THEN NULL ELSE now() END)
+                CASE WHEN $12 = 'unresolved' THEN NULL ELSE now() END, $13, $14)
         ON CONFLICT (ad_account_id, platform_creative_id) DO UPDATE SET
           format = EXCLUDED.format,
           headline = EXCLUDED.headline,
@@ -35,6 +41,8 @@ async def upsert_creative(
           link_url = EXCLUDED.link_url,
           format_source = EXCLUDED.format_source,
           format_verified_at = EXCLUDED.format_verified_at,
+          evidence_format = EXCLUDED.evidence_format,
+          evidence_source = EXCLUDED.evidence_source,
           last_seen_at = now()
         RETURNING id, (xmax = 0) AS created
         """,
@@ -50,6 +58,8 @@ async def upsert_creative(
         c.link_url,
         raw_path,
         format_source,
+        evidence_format or c.format,
+        evidence_source or format_source,
     )
     return row["id"], row["created"]
 
@@ -102,10 +112,13 @@ async def list_creatives(
     offset: int = 0,
     dimension: str | None = None,
     value: str | None = None,
+    sort: str = "spend",
 ) -> list[asyncpg.Record]:
+    """sort='spend' puts the most 30-day spend first; 'recent' the newest creatives first."""
     return await db.fetch(
         f"""
-        SELECT c.id, c.ad_account_id, c.platform_creative_id, c.format, c.headline, c.primary_text,
+        SELECT c.id, c.ad_account_id, c.platform_creative_id, c.format, c.evidence_format,
+               c.evidence_source, c.headline, c.primary_text,
                c.cta_type, c.link_url, c.first_seen_at, c.last_seen_at,
                a.path AS primary_asset_path, a.mime AS primary_asset_mime,
                COALESCE(m.spend, 0) AS spend_30d, m.impressions AS impressions_30d,
@@ -124,7 +137,9 @@ async def list_creatives(
         WHERE c.org_id = $1 AND ($2::uuid IS NULL OR c.ad_account_id = $2)
           AND ($3::text IS NULL OR c.format = $3)
           {_tag_filter_sql("$6", "$7")}
-        ORDER BY c.first_seen_at DESC LIMIT $4 OFFSET $5
+        ORDER BY CASE WHEN $8 = 'spend' THEN COALESCE(m.spend, 0) END DESC NULLS LAST,
+                 c.first_seen_at DESC, c.id
+        LIMIT $4 OFFSET $5
         """,
         org_id,
         ad_account_id,
@@ -133,6 +148,7 @@ async def list_creatives(
         offset,
         dimension,
         value,
+        sort,
     )
 
 

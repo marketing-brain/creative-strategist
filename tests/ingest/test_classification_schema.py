@@ -4,12 +4,37 @@ import pytest
 from cs.core.ids import new_id
 
 
-async def _insert(db, org_id, account_id, *, fmt, source):
+async def _insert(
+    db, org_id, account_id, *, fmt, source, evidence="unresolved", evidence_source="unresolved"
+):
     await db.execute(
         "INSERT INTO creative (id, org_id, ad_account_id, platform_creative_id,"
-        " format, format_source, raw_path) VALUES ($1, $2, $3, $4, $5, $6, '')",
-        new_id(), org_id, account_id, new_id().hex, fmt, source,
+        " format, format_source, evidence_format, evidence_source, raw_path)"
+        " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '')",
+        new_id(), org_id, account_id, new_id().hex, fmt, source, evidence, evidence_source,
     )
+
+
+async def test_proven_video_without_a_file_is_storable(db, org_id, ad_account_id):
+    await _insert(
+        db, org_id, ad_account_id, fmt="unresolved", source="unresolved",
+        evidence="video", evidence_source="asset_feed_spec_video",
+    )
+
+
+async def test_evidence_must_name_a_known_source_consistent_with_its_format(
+    db, org_id, ad_account_id
+):
+    with pytest.raises(asyncpg.CheckViolationError):
+        await _insert(
+            db, org_id, ad_account_id, fmt="unresolved", source="unresolved",
+            evidence="video", evidence_source="unresolved",
+        )
+    with pytest.raises(asyncpg.CheckViolationError):
+        await _insert(
+            db, org_id, ad_account_id, fmt="unresolved", source="unresolved",
+            evidence="video", evidence_source="vibes",
+        )
 
 
 async def test_unresolved_requires_unresolved_source(db, org_id, ad_account_id):

@@ -271,3 +271,73 @@ async def test_creative_metrics_counts_are_integers(client, db, settings):
         assert isinstance(row[field], int), field
     assert row["impressions"] == 1000 and row["clicks"] == 20
     assert row["spend"] == 10.0
+
+
+async def _creative_with_spend(db, org_id, acct, pid, spend, **kwargs):
+    fmt = kwargs.pop("format", "image")
+    cid, _ = await repo.upsert_creative(
+        db,
+        org_id,
+        acct,
+        PlatformCreative(pid, fmt, "H", "P", None, "SHOP_NOW", "https://x", None, None, {}),
+        "raw",
+        format_source=kwargs.pop("format_source", "manual_review"),
+        **kwargs,
+    )
+    if spend:
+        await repo.upsert_ad(
+            db, org_id, acct, PlatformAd(f"ad_{pid}", "A", "ACTIVE", None, None, pid), cid
+        )
+        await repo.upsert_metrics(
+            db,
+            org_id,
+            acct,
+            [
+                MetricRow(
+                    f"ad_{pid}", date.today() - timedelta(days=2), "facebook:feed",
+                    Decimal(spend), 100, 1, 1, Decimal("0"), Decimal("0"), 0, 0, 0, 0, {},
+                )
+            ],
+        )
+    return cid
+
+
+async def test_creatives_sort_by_30d_spend_by_default_and_by_recency_on_request(
+    client, db, settings
+):
+    org_id, acct, seeded, _ = await _seed(db, settings, client)  # $10 of 30-day spend
+    big = await _creative_with_spend(db, org_id, acct, "c_big", "50")
+    idle = await _creative_with_spend(db, org_id, acct, "c_idle", None)
+
+    by_spend = (await client.get("/creatives", headers=H)).json()["items"]
+    assert [i["id"] for i in by_spend] == [str(big), str(seeded), str(idle)]
+
+    recent = (await client.get("/creatives?sort=recent", headers=H)).json()["items"]
+    assert [i["id"] for i in recent] == [str(idle), str(big), str(seeded)]
+
+    assert (await client.get("/creatives?sort=bogus", headers=H)).status_code == 422
+
+
+async def test_creatives_expose_the_proven_format_of_a_creative_without_a_file(
+    client, db, settings
+):
+    org_id, acct, seeded, _ = await _seed(db, settings, client)
+    no_file = await _creative_with_spend(
+        db, org_id, acct, "c_nofile", None,
+        format="unresolved", format_source="unresolved",
+        evidence_format="video", evidence_source="asset_feed_spec_video",
+    )
+
+    items = {i["id"]: i for i in (await client.get("/creatives", headers=H)).json()["items"]}
+    item = items[str(no_file)]
+    assert (item["format"], item["evidence_format"], item["evidence_source"]) == (
+        "unresolved", "video", "asset_feed_spec_video"
+    )
+    assert item["primary_asset_url"] is None
+    # A creative stored with its file carries the same format as its evidence.
+    assert (items[str(seeded)]["evidence_format"], items[str(seeded)]["evidence_source"]) == (
+        "image", "manual_review"
+    )
+
+    detail = (await client.get(f"/creatives/{no_file}", headers=H)).json()
+    assert (detail["format"], detail["evidence_format"]) == ("unresolved", "video")

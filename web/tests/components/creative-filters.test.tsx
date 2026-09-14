@@ -47,6 +47,22 @@ describe('CreativeFilters', () => {
     expect(push).toHaveBeenCalledWith('/creatives?dimension=hook_type&value=question');
   });
 
+  it('offers creatives without a file as "No file", not "Unresolved"', async () => {
+    render(<CreativeFilters accounts={[]} dimensions={[]} />);
+    await userEvent.click(screen.getByLabelText(/format/i));
+    await userEvent.click(await screen.findByRole('option', { name: 'No file' }));
+    expect(push).toHaveBeenCalledWith('/creatives?format=unresolved');
+    expect(screen.queryByRole('option', { name: /unresolved/i })).not.toBeInTheDocument();
+  });
+
+  it('sorts by 30-day spend by default and pushes sort=recent for newest first', async () => {
+    render(<CreativeFilters accounts={[]} dimensions={[]} />);
+    expect(screen.getByLabelText(/sort/i)).toHaveTextContent('Top spend (30d)');
+    await userEvent.click(screen.getByLabelText(/sort/i));
+    await userEvent.click(await screen.findByRole('option', { name: 'Newest' }));
+    expect(push).toHaveBeenCalledWith('/creatives?sort=recent');
+  });
+
   it('clears a stale value when the dimension changes', async () => {
     params = new URLSearchParams('dimension=hook_type&value=question');
     render(<CreativeFilters accounts={[]} dimensions={dimensions} />);

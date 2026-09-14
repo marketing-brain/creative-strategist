@@ -7,7 +7,12 @@ const formats = [
   { value: 'image', label: 'Image' },
   { value: 'video', label: 'Video' },
   { value: 'carousel', label: 'Carousel' },
-  { value: 'unresolved', label: 'Unresolved' },
+  { value: 'unresolved', label: 'No file' },
+];
+
+const sorts = [
+  { value: '', label: 'Top spend (30d)' },
+  { value: 'recent', label: 'Newest' },
 ];
 
 export function CreativeFilters({ accounts, dimensions }: { accounts: { id: string; name: string }[]; dimensions: Dimension[] }) {
@@ -53,6 +58,18 @@ export function CreativeFilters({ accounts, dimensions }: { accounts: { id: stri
           {formats.map((f) => (
             <SelectItem key={f.value} value={f.value}>
               {f.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select value={params.get('sort') ?? ''} onValueChange={(v) => update({ sort: v || null })}>
+        <SelectTrigger aria-label="Sort creatives" className="w-40">
+          <SelectValue placeholder="Top spend (30d)">{(v: string) => sorts.find((o) => o.value === v)?.label ?? 'Top spend (30d)'}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {sorts.map((o) => (
+            <SelectItem key={o.value || 'spend'} value={o.value}>
+              {o.label}
             </SelectItem>
           ))}
         </SelectContent>

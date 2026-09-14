@@ -2,18 +2,21 @@ import Link from 'next/link';
 import { HelpCircle, Layers, PlayCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { blobUrl } from '@/lib/blob-url';
+import { formatStatus } from '@/lib/creative-format';
 import type { Creative } from '@/lib/types';
 
-const formatIcon = { video: PlayCircle, carousel: Layers, image: null, unresolved: HelpCircle } as const;
+const formatIcon = { video: PlayCircle, carousel: Layers, image: null, unknown: HelpCircle } as const;
 
 export function CreativeCard({ creative }: { creative: Creative }) {
   const src = blobUrl(creative.primary_asset_url);
-  const Icon = formatIcon[creative.format];
+  const status = formatStatus(creative);
+  const Icon = formatIcon[status.kind];
   const caption = creative.headline ?? creative.primary_text ?? creative.platform_creative_id;
   const metrics =
     creative.spend_30d > 0
       ? `$${Math.round(creative.spend_30d).toLocaleString('en-US')} · ${((creative.ctr_30d ?? 0) * 100).toFixed(1)}% CTR`
       : 'No spend in last 30 days';
+  const placeholder = status.kind === 'unknown' ? 'Unknown format' : status.hasFile ? 'No preview' : 'File unavailable';
   return (
     <Link
       href={`/creatives/${creative.id}`}
@@ -31,7 +34,7 @@ export function CreativeCard({ creative }: { creative: Creative }) {
             />
           )
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">No preview</div>
+          <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">{placeholder}</div>
         )}
         {Icon && (
           <span className="absolute top-2 right-2 rounded-full bg-black/55 p-1 text-white">
@@ -40,8 +43,8 @@ export function CreativeCard({ creative }: { creative: Creative }) {
         )}
       </div>
       <div className="space-y-1.5 p-2.5 text-sm">
-        <Badge variant="outline" className="capitalize">
-          {creative.format}
+        <Badge variant="outline" className={status.hasFile ? undefined : 'border-dashed text-muted-foreground'}>
+          {status.label}
         </Badge>
         <div className="line-clamp-2 leading-snug text-foreground">{caption}</div>
         <div className="text-xs text-muted-foreground">{metrics}</div>

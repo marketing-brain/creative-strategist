@@ -336,6 +336,8 @@ async def _sync_ads_and_creatives(
                 platform_creative,
                 raw_path="",
                 format_source=stored_source,
+                evidence_format=verdict.format,
+                evidence_source=verdict.source,
             )
             new_creatives += int(created)
 

@@ -21,6 +21,7 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
     if (sp.format) q.set('format', sp.format);
     if (sp.dimension) q.set('dimension', sp.dimension);
     if (sp.value) q.set('value', sp.value);
+    if (sp.sort === 'recent') q.set('sort', 'recent');
     q.set('limit', String(PAGE_SIZE));
     q.set('offset', String((p - 1) * PAGE_SIZE));
     return q;
@@ -31,6 +32,7 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
     if (sp.format) q.set('format', sp.format);
     if (sp.dimension) q.set('dimension', sp.dimension);
     if (sp.value) q.set('value', sp.value);
+    if (sp.sort === 'recent') q.set('sort', 'recent');
     if (p > 1) q.set('page', String(p));
     const s = q.toString();
     return `/creatives${s ? `?${s}` : ''}`;

@@ -63,8 +63,10 @@ async def test_discover_and_sync_entities(db, blobs, settings, org_id):
     assert len(creatives) == 1
     c = creatives[0]
     assert c["platform_creative_id"] == "cr1"
-    # No file yet, so the image label waits for the download that carries it.
+    # No file yet, so the image label waits for the download that carries it, while the
+    # evidence the classifier found is kept for display.
     assert (c["format"], c["format_source"]) == ("unresolved", "unresolved")
+    assert (c["evidence_format"], c["evidence_source"]) == ("image", "meta_object_type")
     job = await db.fetchrow("SELECT payload FROM job WHERE job_type='meta.download_creative'")
     assert (job["payload"]["format"], job["payload"]["format_source"]) == (
         "image", "meta_object_type"
@@ -223,13 +225,11 @@ async def test_one_malformed_ad_does_not_abort_the_whole_sync(
 
     original_upsert_creative = repo.upsert_creative
 
-    async def flaky_upsert_creative(
-        db_, org_id_, acct_id_, platform_creative, raw_path, *, format_source
-    ):
+    async def flaky_upsert_creative(db_, org_id_, acct_id_, platform_creative, raw_path, **kw):
         if platform_creative.platform_creative_id == "bad":
             raise ValueError("boom: malformed row")
         return await original_upsert_creative(
-            db_, org_id_, acct_id_, platform_creative, raw_path, format_source=format_source
+            db_, org_id_, acct_id_, platform_creative, raw_path, **kw
         )
 
     monkeypatch.setattr(fivetran_transform.repo, "upsert_creative", flaky_upsert_creative)
@@ -791,6 +791,26 @@ async def test_dead_facebook_video_resolve_is_not_re_enqueued(db, blobs, setting
 
     statuses = await db.fetch("SELECT status FROM job WHERE job_type='meta.resolve_facebook_video'")
     assert [r["status"] for r in statuses] == ["dead"]
+
+
+async def test_sync_keeps_the_proven_video_format_for_a_creative_without_a_file(
+    db, blobs, settings, org_id
+):
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db, SCHEMA, campaign_id="c1", account_id="999", adset_id="as1", ad_id="ad1",
+        creative_id="cr1", name="n", headline="H", image_url=None, object_type="SHARE",
+    )
+    await insert_asset_feed_spec_video(db, SCHEMA, creative_id="cr1", video_id="v1")
+
+    await _sync_active(db, blobs, settings, org_id)
+
+    row = await db.fetchrow(
+        "SELECT format, format_source, evidence_format, evidence_source FROM creative"
+        " WHERE org_id=$1",
+        org_id,
+    )
+    assert tuple(row) == ("unresolved", "unresolved", "video", "asset_feed_spec_video")
 
 
 async def test_answered_facebook_video_resolve_is_not_re_enqueued(db, blobs, settings, org_id):

@@ -1,9 +1,11 @@
 import { DiagnosisPanel } from '@/components/diagnosis-panel';
 import { MetricChart } from '@/components/metric-chart';
+import { MissingFileNotice } from '@/components/missing-file-notice';
 import { TagList } from '@/components/tag-list';
 import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { blobUrl } from '@/lib/blob-url';
+import { formatStatus } from '@/lib/creative-format';
 import { requireAuth } from '@/lib/require-auth.server';
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -21,19 +23,23 @@ export default async function CreativeDetail({ params }: { params: Promise<{ id:
     api.creativeDiagnosis(id),
   ]);
   const assetSrc = blobUrl(creative.primary_asset_url);
+  const status = formatStatus(creative);
   return (
     <div className="grid gap-8 lg:grid-cols-3">
       <div className="space-y-3">
         <div className="overflow-hidden rounded-xl border border-border bg-muted">
-          {assetSrc &&
-            (creative.format === 'video' ? (
+          {assetSrc ? (
+            creative.format === 'video' ? (
               <video src={assetSrc} controls className="w-full" />
             ) : (
               <img src={assetSrc} alt={creative.headline ?? ''} className="w-full" />
-            ))}
+            )
+          ) : (
+            <MissingFileNotice status={status} />
+          )}
         </div>
-        <Badge variant="outline" className="capitalize">
-          {creative.format}
+        <Badge variant="outline" className={status.hasFile ? undefined : 'border-dashed text-muted-foreground'}>
+          {status.label}
         </Badge>
         <h1 className="text-lg font-semibold text-balance">{creative.headline}</h1>
         <p className="text-sm text-muted-foreground">{creative.primary_text}</p>
