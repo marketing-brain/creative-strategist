@@ -11,7 +11,7 @@ Today each creative gets taxonomy tags and, since `202a2d9`, one free-text insig
 - **Tags are subjective and not generative.** `tone=warm` or `hook_type=question` cannot be executed by a generator and cannot be checked against the ad. The tagging model disagreed with a stronger model on 3 of 24 dimensions, all subjective visual ones.
 - **The paragraph is not machine-usable.** Its "next test" is prose. Generation cannot execute "recut 00:00–00:03 to open on the gummy"; it has no shot boundaries, text layers or asset references.
 - **Single-ad explanations are guesses.** Video 2 ("The magnesium that actually absorbs…") got "conversion is the weakest layer… a trust gap" when the data shows a trade-off: +14% CTR sending more, less-qualified clicks, the same purchases as its variant (465 vs 464) and a 14% better CPA.
-- **Near-duplicates go unnoticed.** Videos 1 and 2 share footage (a natural experiment) and nothing links them.
+- **Near-duplicates go unnoticed.** Videos 1 and 2 share footage (a natural experiment) and nothing links them. Many "different" creatives are even the same file: in org 3's top 16 videos, six creatives share one 111 s file and two more pairs are byte-identical.
 - **Model timestamps are coarse by default.** Gemini samples video at 1 fps; cut positions can be off by about ±1 s. Sampling at 4 fps brings that to about ±250 ms, which is enough to read and brief from; frame-exact cuts are a generator's job at render time.
 
 ## Decisions taken
@@ -24,7 +24,7 @@ Today each creative gets taxonomy tags and, since `202a2d9`, one free-text insig
 | Model coverage | Stay capped (`creative_insight_limit_per_format`, 2 per format per org) while record quality is validated |
 | Approach | A: record (multimodal, once) → claims (text-only, refreshable) → paragraph (rendered from claims) |
 | Division of labour | **Model-first.** Gemini produces the whole record (shots, text, speech, timings at 4 fps). Code does arithmetic, evidence strength, validation, near-duplicate hashing and history. No Whisper, no PySceneDetect; precision tooling is added only when a generator needs frame-exact cuts |
-| Deterministic steps | ffprobe media facts and frame hashes (ffmpeg + PDQ) run on **all** creatives (no model cost) |
+| Similarity and variants | All creatives: exact duplicates by file SHA-256; **similar ads** by `google/gemini-embedding-2` video/image embeddings (cosine ≥ 0.90). **Same footage** only when a Gemini call comparing both videos confirms it, run for candidate pairs of capped creatives. Validated on 38 hand-labelled org 3 pairs: embeddings alone reached 62% precision above 0.92, and every same-footage pair scored ≥ 0.92 |
 | Refresh | Record once per extractor version. Claims and paragraph regenerate on a material diagnosis change, at most once per day per creative |
 | Funnel panel | **Untouched.** `diagnosis.py` and `diagnosis-panel.tsx` are not modified by this project. The same-length retention baseline shipped in `202a2d9` stays |
 | Trade-off reading | Lives in the claims layer, not in the diagnosis. Where they differ, the Insights section says so explicitly |
@@ -42,20 +42,21 @@ Four layers, each independently useful:
 4. **Test briefs** (code): each claim test rendered as a validated JSON contract for generators.
 
 ```
-asset download ──► media.hash (all) ──► variants.link (all)
+asset download ──► media.facts + media.embed (all) ──► variants.link (all) ──(capped pairs)─► variants.confirm
                          │
                          ├─(capped)─► record.extract ──► claims.derive ──► insight.render
                          │                                     ▲                ▲
 nightly sweeps ──────────┘                diagnosis (existing) ┘  variant evidence ┘
 ```
 
-## 1. Media facts and frame hashes (code, all creatives)
+## 1. Media facts and embeddings (all creatives)
 
-Job `media.hash`, per creative with a stored primary asset, all formats. No model calls.
-
-- **ffprobe:** `duration_ms`, `fps` (stored as float), `width`, `height`, `aspect_ratio`. Updates `asset.duration_ms` if null.
-- **Frame hashes (video):** ffmpeg samples one frame per second (`fps=1`); each frame gets a PDQ hash (`pdqhash`) with its `t_ms`. This is the vPDQ approach and needs no shot detection.
-- **Images:** one PDQ hash. **Carousels:** one per card, with `card_index`.
+- **`media.facts`** (code, no model): ffprobe `duration_ms`, `fps` (stored as float), `width`, `height`, `aspect_ratio`; updates `asset.duration_ms` if null. The file SHA-256 is already stored on `asset.sha256`.
+- **`media.embed`** (model, cheap): `google/gemini-embedding-2`, 3072 dimensions.
+  - **Video input:** the first 60 s, scaled to 480p (H.264, AAC 64 kbps), as one inline video part. Videos over 120 s cannot be embedded whole; 60 s keeps requests small and matches the validated setup.
+  - **Image input:** the image (JPEG, longest side 1568 px). **Carousel:** one embedding per card, plus the mean of the cards.
+  - **Transport:** AI Gateway's native embedding endpoint (`POST /v3/ai/embedding-model`, headers `ai-model-id`, `ai-gateway-protocol-version: 0.0.1`, `ai-embedding-model-specification-version: 3`) with the media in `providerOptions.google.content`. The OpenAI-compatible `/v1/embeddings` rejects media. This shape is not in the gateway's public docs; a contract test pins it (§13).
+  - **Cost:** about 290 tokens per video second at $0.20 per 1M tokens: roughly $0.0007 for an 11 s ad and $0.004 for 60 s.
 
 ## 2. Creative record (model, capped)
 
@@ -77,7 +78,7 @@ Job `record.extract`. Inputs to Gemini, media first and text last: the video fil
 
 ### Video
 
-- `shots`: `[{id, in_ms, out_ms, keyframe_ref, pdq_hash, description, camera: selfie_handheld\|tripod\|screen_recording\|pov\|b_roll\|other, camera_note, setting, subject_bbox, transition_in: cut\|jump_cut\|dissolve\|other, speech_crosses_out: bool}]`. `in_ms`/`out_ms` come from the model (normalized by code, see Validation); `keyframe_ref` and `pdq_hash` are added by code after extraction; `speech_crosses_out` is computed by code from `words`.
+- `shots`: `[{id, in_ms, out_ms, keyframe_ref, description, camera: selfie_handheld\|tripod\|screen_recording\|pov\|b_roll\|other, camera_note, setting, subject_bbox, transition_in: cut\|jump_cut\|dissolve\|other, speech_crosses_out: bool}]`. `in_ms`/`out_ms` come from the model (normalized by code, see Validation); `keyframe_ref` is added by code after extraction; `speech_crosses_out` is computed by code from `words`.
 - `beats`: `[{id, role: hook\|problem\|demo\|proof\|offer\|cta\|other, shot_ids}]`, contiguous, covering every shot exactly once.
 - `text_layers`: `[{id, shot_ids, start_ms, end_ms, timing_source: shot\|model, verbatim, kind: caption\|super\|sticker\|ui, bbox, style: {weight: regular\|bold\|black, case: upper\|lower\|title\|mixed, color_hex, stroke_hex, background: none\|box\|highlight, background_hex, alignment: left\|center\|right}, animation: static\|word_by_word\|pop\|scroll\|unknown}]`. `timing_source = shot` when the text spans whole shots, `model` when it appears or disappears mid-shot.
 - `words`: the model's transcript as `[{w, start_ms, end_ms, speaker: voiceover\|on_camera\|unknown}]`. Timings share `timing_precision_ms`.
@@ -105,20 +106,32 @@ Job `record.extract`. Inputs to Gemini, media first and text last: the video fil
 - Enum values valid.
 - **Internal consistency:** caption text layers must match the transcript words over the same time range (normalized: case, punctuation, whitespace, ±`timing_precision_ms`); offer/CTA/promise sources of kind `copy` must appear verbatim in the Meta copy. Violations are listed as problems; a record with more than 20% of captions mismatched is rejected. Accuracy against the ad itself is covered by the gold-set review (§11).
 
-## 3. Variants (deterministic, all creatives)
+## 3. Similar ads and variants
 
-Job `variants.link`, after `media.hash`, scoped to the ad account.
+Scoped to the ad account. Three relations, strongest first:
 
-- Two frames match when their PDQ Hamming distance is ≤ 31.
-- **Shared footage:** for creatives A and B, `shared_ms` = 1000 × the number of A's sampled frames that match any frame of B.
-- **Video variant pair:** `shared_ms` ≥ 50% of the shorter video's duration (checked in both directions, the larger share kept).
-- **Image / carousel variant pair:** image (or any card) hash distance ≤ 31.
-- Stored as `creative_variant(creative_a, creative_b, shared_ms, shared_share)` with `creative_a < creative_b`.
-- The variant diff available without records: the order in which matched frames appear in each ad. With both records: shot order, text layer and presence differences, by mapping matched frames to shots.
+| Relation | How it is found | Scope | Use |
+|---|---|---|---|
+| `identical` | Same `asset.sha256` | All | Shown as "same file"; never a claim basis (no creative difference to explain) |
+| `similar` | Embedding cosine ≥ 0.90 (`variants.link`) | All | "Similar ads" in the UI and as references for concept briefs. Means same template, style, creator or genre, **not** shared footage |
+| `same_footage` | `variants.confirm` returns `shares_footage = true` | Candidate pairs where at least one creative is in the capped record set, up to its 5 nearest `similar` neighbours | The only relation that supports `variant_pair` claims |
+
+**`variants.confirm`** (Gemini 3 Flash, one call per pair): both videos (or images) plus both creatives' Meta copy. Strict JSON output:
+
+```
+{ shares_footage: bool,
+  shared_segments: [{a_start_ms, a_end_ms, b_start_ms, b_end_ms, description}],
+  differences: [{kind: order|length|captions|voiceover|b_roll|offer|cta|crop|other, description}],
+  confidence: low|medium|high }
+```
+
+Code validates the times against both durations; `shares_footage = true` with no `shared_segments`, or `confidence = low`, is stored as `unconfirmed`. The `differences` list is the variant diff that claims cite.
+
+**Cutoff evidence** (`tests/evals/variants/org3_labeled_pairs.json`, 38 pairs from 40 distinct org 3 videos): same-footage pairs scored 0.923–0.986; look-alike different footage reached 0.953 (two different AI-animated ads) and 0.942 (two different creators holding a gummy); one creator's two different shoots scored 0.936. At ≥ 0.90, 17 of 780 pairs qualify (2%). Recall below 0.885 was spot-checked on 8 pairs only.
 
 ## 4. Claims (text-only model call, capped)
 
-Job `claims.derive`. Inputs: the record; the existing `Diagnosis` plus `DiagnosedCreative` sums (from `diagnose_creative`); for each variant pair, the variant's diagnosis metrics and the variant diff; the efficiency facts below. Output: up to 3 claims.
+Job `claims.derive`. Inputs: the record; the existing `Diagnosis` plus `DiagnosedCreative` sums (from `diagnose_creative`); for each `same_footage` relation, the other creative's diagnosis metrics and the relation's `differences`; the efficiency facts below. Output: up to 3 claims.
 
 ### Efficiency facts (code, added to the input; the diagnosis is not changed)
 
@@ -165,11 +178,11 @@ Evidence tier uses the existing `evidence_tier()` in `creative_insight.py`.
 
 ### Rules (code; violating claims are dropped, and a set with zero valid claims is `rejected`)
 
-- `kind` must be consistent with the layer's diagnosis status: `strength` needs `strong`; `weakness` needs `weak`; `tradeoff` needs `tradeoff_candidate`, or a variant pair where this creative's lift over the variant is ≥ +15% on one metric of the layer and ≤ −15% on another. Layers with an unmeasured status get no claims.
+- `kind` must be consistent with the layer's diagnosis status: `strength` needs `strong`; `weakness` needs `weak`; `tradeoff` needs `tradeoff_candidate`, or a `same_footage` pair where this creative's lift over the variant is ≥ +15% on one metric of the layer and ≤ −15% on another. Layers with an unmeasured status get no claims.
 - When `tradeoff_candidate` is true, a `weakness` claim on conversion is rejected.
 - Every claim has at least one `keep`; test edit ops never target a `keep` element.
 - `primary_metric` and `guardrail_metric` resolve; the guardrail differs from the primary.
-- `variant_pair` basis requires a stored variant and at least one metric cited from both creatives.
+- `variant_pair` basis requires a `same_footage` relation and at least one metric cited from both creatives; claims about the pair's metric gap must cite at least one entry from the relation's `differences`.
 - The set contains at most 3 claims.
 
 ## 5. Paragraph (text-only model call)
@@ -236,8 +249,8 @@ New migration `db/migrations/20260915000001_creative_insights_v2.sql`.
 | Table | Columns |
 |---|---|
 | `creative_media` | `creative_id` PK, `org_id`, `status` (`done`/`failed`), `duration_ms`, `fps`, `width`, `height`, `error`, `created_at` |
-| `creative_frame` | `creative_id`, `org_id`, `t_ms` (`card_index` × 1000 for carousels, 0 for images), `pdq_hash` BIT(256), PK (`creative_id`, `t_ms`) |
-| `creative_variant` | `org_id`, `creative_a`, `creative_b`, `shared_ms`, `shared_share`, PK (`creative_a`, `creative_b`) |
+| `creative_media_embedding` | `creative_id`, `org_id`, `model`, `part` (`whole`, or `card_<n>`), `input_spec` (e.g. `first60s_480p`), `embedding` vector(3072), `created_at`; PK (`creative_id`, `model`, `part`). No ANN index: similarity is computed per ad account, at most a few thousand vectors |
+| `creative_relation` | `org_id`, `creative_a`, `creative_b` (`creative_a < creative_b`), `relation` (`identical`/`similar`/`same_footage`/`not_same_footage`/`unconfirmed`), `cosine`, `confirm` JSONB (the `variants.confirm` output), `model`, `created_at`; PK (`creative_a`, `creative_b`) |
 | `creative_record` | `id` PK, `creative_id`, `org_id`, `extractor_version`, `status` (`done`/`rejected`), `record` JSONB, `problems` JSONB, `model`, `input_tokens`, `output_tokens`, `created_at`; unique (`creative_id`, `extractor_version`) |
 | `creative_claim_set` | `id` PK, `creative_id`, `org_id`, `record_id`, `diagnosis_signature`, `status` (`done`/`rejected`), `claims` JSONB, `problems` JSONB, `model`, tokens, `created_at` |
 | `creative_facet` | `creative_id`, `record_id`, `facet`, `value`, `element_ids` JSONB, PK (`creative_id`, `record_id`, `facet`) |
@@ -249,15 +262,17 @@ New migration `db/migrations/20260915000001_creative_insights_v2.sql`.
 
 | Job | Trigger | Scope |
 |---|---|---|
-| `media.hash` | Chained after asset download; nightly sweep for creatives with an asset and no `creative_media` row (limit 500/night) | All |
-| `variants.link` | Chained after `media.hash` | All |
+| `media.facts` | Chained after asset download; nightly sweep for creatives with an asset and no `creative_media` row (limit 500/night) | All |
+| `media.embed` | Chained after `media.facts`; same nightly sweep for missing embeddings | All |
+| `variants.link` | Chained after `media.embed`; recomputes `identical` and `similar` for that creative against its ad account | All |
+| `variants.confirm` | Chained after `record.extract` for that creative's up to 5 nearest `similar` neighbours without a confirmed relation | Capped |
 | `record.extract` | Nightly sweep: highest 30-day spend first, readable diagnosis, media done, within `creative_insight_limit_per_format` counted on `creative_record` rows | Capped |
 | `claims.derive` | Chained after `record.extract`; nightly when `diagnosis_signature` changed and the last claim set is ≥ 24 h old | Creatives with a done record |
 | `insight.render` | Chained after `claims.derive` | Same |
 
 - All run on the single designed worker; max 3 attempts; dead jobs are not re-enqueued by sweeps (`queue.is_dead`).
 - Once `insight.render` ships, the current `insights.creative_insight` job and its nightly sweep are retired. Existing `creative_insight` rows without `claim_set_id` stay visible until a claim-based paragraph replaces them.
-- The video-length gate in the current runner is no longer needed: `media.hash` provides duration for every creative. The existing `assets.probe_video_duration` job stays until `media.hash` has run on every video, then is retired.
+- The video-length gate in the current runner is no longer needed: `media.facts` provides duration for every creative. The existing `assets.probe_video_duration` job stays until `media.facts` has run on every video, then is retired.
 
 ## 10. UI (Option D)
 
@@ -266,7 +281,7 @@ New component `web/src/components/creative-insights.tsx`, placed at the top of t
 - **Summary:** the paragraph, with the divergence note (amber) when present.
 - **Claim cards:** kind badge, title from `mechanism`, layer label, basis and strength, cited metric values, `keep` elements, and for the test: human-readable edit ops (e.g. "Move shot 3 (hand + beadlet, 00:06–00:09) to the start"), primary metric, guardrail, and "Copy test brief".
 - **Timeline** (video): rows for beats, shots, text layers, speech, brand/packaging, product; clicking a block seeks the player; hovering a claim highlights its elements. Images: the image with region boxes; carousels: cards in order.
-- **Variants:** ads sharing footage, with shared share, shot order, hook rate, link CTR, CPA, purchases (from each creative's diagnosis window).
+- **Same footage** (confirmed) and **same file** rows first, with the confirmed differences, hook rate, link CTR, CPA and purchases from each creative's diagnosis window; then **similar ads** (unconfirmed, labelled as similar, not as variants).
 
 States: media only → variants shown, "Insights not available yet"; record without claims → timeline shown; rejected record or claim set → section hidden except variants.
 
@@ -292,16 +307,17 @@ States: media only → variants shown, "Insights not available yet"; record with
 
 ## 13. Testing
 
-- **Variant fixture:** an ffmpeg-built video from three test clips, and a second video with the same clips reordered and one replaced; `variants.link` must pair them with the expected `shared_ms`, and must not pair either with an unrelated clip.
-- **Unit:** record validator (each rule, including boundary normalization), bbox conversion, facet derivation, claim rules and strength table, divergence note, edit-op validation, brief assembly, PDQ matching thresholds.
+- **Embedding contract test** (live, opt-in like the preview renderer): one small image and one 3 s video through the v3 endpoint return 3072-dimension vectors, and two different images do not return the same vector.
+- **Variants eval** (`scripts/eval_variants.py`, live, opt-in): recompute embeddings for the labelled pairs; report precision/recall of `similar` at the cutoff, and of `variants.confirm` on every pair ≥ 0.90.
+- **Unit:** record validator (each rule, including boundary normalization), bbox conversion, facet derivation, claim rules and strength table, divergence note, edit-op validation, brief assembly, relation assignment (identical by SHA-256, similar by cutoff, confirm validation).
 - **Fakes:** Gemini record extractor, claims writer, paragraph writer.
-- **DB:** job chain from asset to insight (`media.hash` → `variants.link`; `record.extract` → `claims.derive` → `insight.render`); sweeps respect caps, `is_dead`, and the 24 h claim refresh; variants link across an account.
+- **DB:** job chain from asset to insight (`media.facts` → `media.embed` → `variants.link`, `record.extract` → `variants.confirm`; `record.extract` → `claims.derive` → `insight.render`); sweeps respect caps, `is_dead`, and the 24 h claim refresh; variants link across an account.
 - **API:** `/insights` states and cross-org 404; `/brief` validation.
 - **Web:** `creative-insights.tsx` states (media only, record only, full, rejected), claim hover highlighting, copy brief. `diagnosis-panel` tests unchanged.
 
 ## 14. Rollout
 
-1. Media facts, frame hashes and variants for all creatives (no model cost). The Insights section ships in its "media only" state, showing the variants table.
+1. Media facts, embeddings, identical and similar relations for all creatives (about $1–2 for org 3's 573 videos). The Insights section ships in its "media only" state, showing the variants table.
 2. Records for the capped set, seeded with the four creatives that already have paragraphs (they count toward the cap); the sweep fills any remaining slots.
 3. Hand review of those records; gold labels saved; targets checked.
 4. Claims, paragraph, briefs and the full Insights section; retire the current `insights.creative_insight` job.
@@ -309,7 +325,7 @@ States: media only → variants shown, "Insights not available yet"; record with
 ## Verify before implementation planning
 
 - Gemini 3 Flash through AI Gateway's OpenAI-compatible `file` part accepts a sampling rate (4 fps). If it cannot be set, the record is extracted at the default 1 fps with `timing_precision_ms = 1000`, and the shot-boundary target in §11 is re-checked on the gold set before claims ship.
-- `pdqhash` builds and runs on Amazon Linux 2023.
+- `variants.confirm` separates same footage from look-alikes on the labelled set: all 8 same-footage pairs and the 5 look-alikes ≥ 0.92 (13 calls). If it misclassifies any look-alike, `variant_pair` claims stay disabled until the prompt passes.
 
 ## Out of scope
 

@@ -1,0 +1,313 @@
+{
+ "org": "01a089c9-231e-7000-bdaa-39277b4cc94b",
+ "labeled_on": "2026-09-14",
+ "definition": "same_footage = at least one identical take appears in both ads, regardless of crop, captions, order or length",
+ "embedding_input": "first 60s, scaled to 480p, H.264, AAC 64k; one video part via AI Gateway v3 embedding-model providerOptions.google.content",
+ "method": "top 30 pairs by cosine among 40 distinct (by sha256) top-spend videos, plus 6 random pairs in [0.85, 0.88) and 2 below 0.75; labeled by eye from 4 frames per ad",
+ "pairs": [
+  {
+   "pair": "P00",
+   "creative_a": "01a0986e-daa1-7000-8809-022f928b9d69",
+   "creative_b": "01a0986e-cae0-7000-85f3-259c4d49f0eb",
+   "cosine_gemini_embedding_2_3072": 0.9861,
+   "label": "same_footage",
+   "note": ""
+  },
+  {
+   "pair": "P01",
+   "creative_a": "01a0986e-75dc-7000-b851-38b9e1ac1e5b",
+   "creative_b": "01a0986e-7bd7-7000-9836-671fd3c1679d",
+   "cosine_gemini_embedding_2_3072": 0.9733,
+   "label": "same_footage",
+   "note": ""
+  },
+  {
+   "pair": "P02",
+   "creative_a": "01a0986e-ba1d-7000-b483-c2954b247d40",
+   "creative_b": "01a0986e-c6e4-7000-877b-3b5d3f6775f6",
+   "cosine_gemini_embedding_2_3072": 0.9528,
+   "label": "different",
+   "note": "two different AI-animated ads (same style family)"
+  },
+  {
+   "pair": "P03",
+   "creative_a": "01a0986e-8478-7000-86d9-9ac9b3095fd3",
+   "creative_b": "01a0986e-7bd7-7000-9836-671fd3c1679d",
+   "cosine_gemini_embedding_2_3072": 0.9422,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P04",
+   "creative_a": "01a0986e-916a-7000-9b2c-93275d41e2d1",
+   "creative_b": "01a0986e-99ac-7000-8f92-47756166ae17",
+   "cosine_gemini_embedding_2_3072": 0.9393,
+   "label": "same_footage",
+   "note": ""
+  },
+  {
+   "pair": "P05",
+   "creative_a": "01a0986e-b471-7000-a87d-ea923dbaa248",
+   "creative_b": "01a0986e-b3db-7000-85cf-b396143b7219",
+   "cosine_gemini_embedding_2_3072": 0.9364,
+   "label": "different",
+   "note": "same creator, different shoot"
+  },
+  {
+   "pair": "P06",
+   "creative_a": "01a0986e-75dc-7000-b851-38b9e1ac1e5b",
+   "creative_b": "01a0986e-8478-7000-86d9-9ac9b3095fd3",
+   "cosine_gemini_embedding_2_3072": 0.9364,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P07",
+   "creative_a": "01a0986e-7aab-7000-99f0-51f2f7e8b5fd",
+   "creative_b": "01a0986e-d3f0-7000-a589-7b79fe183c96",
+   "cosine_gemini_embedding_2_3072": 0.9359,
+   "label": "same_footage",
+   "note": ""
+  },
+  {
+   "pair": "P08",
+   "creative_a": "01a0986e-9501-7000-9a76-fed9bbcdc301",
+   "creative_b": "01a0986e-c6e4-7000-877b-3b5d3f6775f6",
+   "cosine_gemini_embedding_2_3072": 0.9308,
+   "label": "different",
+   "note": "two different AI-animated ads"
+  },
+  {
+   "pair": "P09",
+   "creative_a": "01a0986e-c21e-7000-9256-d054f008fbd1",
+   "creative_b": "01a0986e-c2fa-7000-90a7-fac3b0b9a472",
+   "cosine_gemini_embedding_2_3072": 0.9278,
+   "label": "same_footage",
+   "note": "same doctor, same shoot, recut with different b-roll"
+  },
+  {
+   "pair": "P10",
+   "creative_a": "01a0986e-c17c-7000-ad3d-89649aa47886",
+   "creative_b": "01a0986e-c2bd-7000-80ca-86187ba9e5cf",
+   "cosine_gemini_embedding_2_3072": 0.9259,
+   "label": "same_footage",
+   "note": ""
+  },
+  {
+   "pair": "P11",
+   "creative_a": "01a0986e-7b5a-7000-b6a2-bb296b2bdb43",
+   "creative_b": "01a0986e-c2bd-7000-80ca-86187ba9e5cf",
+   "cosine_gemini_embedding_2_3072": 0.9252,
+   "label": "same_footage",
+   "note": "different creators sharing third-party podcast b-roll"
+  },
+  {
+   "pair": "P12",
+   "creative_a": "01a0986e-7b5a-7000-b6a2-bb296b2bdb43",
+   "creative_b": "01a0986e-c17c-7000-ad3d-89649aa47886",
+   "cosine_gemini_embedding_2_3072": 0.9229,
+   "label": "same_footage",
+   "note": "shared third-party b-roll (partial)"
+  },
+  {
+   "pair": "P13",
+   "creative_a": "01a0986e-8478-7000-86d9-9ac9b3095fd3",
+   "creative_b": "01a0986e-d49c-7000-b0e1-6a3b79b99e37",
+   "cosine_gemini_embedding_2_3072": 0.9157,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P14",
+   "creative_a": "01a0986e-9501-7000-9a76-fed9bbcdc301",
+   "creative_b": "01a0986e-ba1d-7000-b483-c2954b247d40",
+   "cosine_gemini_embedding_2_3072": 0.9134,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P15",
+   "creative_a": "01a0986e-91e9-7000-b85d-be5b984c7ae8",
+   "creative_b": "01a0986e-90c3-7000-913e-1c4f1a626fc6",
+   "cosine_gemini_embedding_2_3072": 0.9123,
+   "label": "unsure",
+   "note": "same man and setting; unclear whether the same takes"
+  },
+  {
+   "pair": "P16",
+   "creative_a": "01a0986e-c477-7000-9f92-86cc18bd5be9",
+   "creative_b": "01a0986e-85c0-7000-b861-b819de175ad9",
+   "cosine_gemini_embedding_2_3072": 0.9119,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P17",
+   "creative_a": "01a0986e-da27-7000-95bc-824e2215714a",
+   "creative_b": "01a0986e-d49c-7000-b0e1-6a3b79b99e37",
+   "cosine_gemini_embedding_2_3072": 0.8984,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P18",
+   "creative_a": "01a0986e-8478-7000-86d9-9ac9b3095fd3",
+   "creative_b": "01a0986e-85c0-7000-b861-b819de175ad9",
+   "cosine_gemini_embedding_2_3072": 0.8974,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P19",
+   "creative_a": "01a0986e-7bd7-7000-9836-671fd3c1679d",
+   "creative_b": "01a0986e-d49c-7000-b0e1-6a3b79b99e37",
+   "cosine_gemini_embedding_2_3072": 0.8969,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P20",
+   "creative_a": "01a0986e-da27-7000-95bc-824e2215714a",
+   "creative_b": "01a0986e-c6e4-7000-877b-3b5d3f6775f6",
+   "cosine_gemini_embedding_2_3072": 0.8963,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P21",
+   "creative_a": "01a0986e-75dc-7000-b851-38b9e1ac1e5b",
+   "creative_b": "01a0986e-7aab-7000-99f0-51f2f7e8b5fd",
+   "cosine_gemini_embedding_2_3072": 0.8953,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P22",
+   "creative_a": "01a0986e-977e-7000-b090-9119c2fbb7d5",
+   "creative_b": "01a0986e-9291-7000-a327-4e197870bc71",
+   "cosine_gemini_embedding_2_3072": 0.8937,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P23",
+   "creative_a": "01a0986e-916a-7000-9b2c-93275d41e2d1",
+   "creative_b": "01a0986e-9291-7000-a327-4e197870bc71",
+   "cosine_gemini_embedding_2_3072": 0.8922,
+   "label": "different",
+   "note": "same 'text over night footage' template, different footage"
+  },
+  {
+   "pair": "P24",
+   "creative_a": "01a0986e-8478-7000-86d9-9ac9b3095fd3",
+   "creative_b": "01a0986e-c477-7000-9f92-86cc18bd5be9",
+   "cosine_gemini_embedding_2_3072": 0.892,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P25",
+   "creative_a": "01a0986e-8478-7000-86d9-9ac9b3095fd3",
+   "creative_b": "01a0986e-7aab-7000-99f0-51f2f7e8b5fd",
+   "cosine_gemini_embedding_2_3072": 0.8896,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P26",
+   "creative_a": "01a0986e-a005-7000-b778-86df452e9522",
+   "creative_b": "01a0986e-da27-7000-95bc-824e2215714a",
+   "cosine_gemini_embedding_2_3072": 0.8895,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P27",
+   "creative_a": "01a0986e-da27-7000-95bc-824e2215714a",
+   "creative_b": "01a0986e-d4c3-7000-b313-46589a635571",
+   "cosine_gemini_embedding_2_3072": 0.8874,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P28",
+   "creative_a": "01a0986e-9291-7000-a327-4e197870bc71",
+   "creative_b": "01a0986e-c6e4-7000-877b-3b5d3f6775f6",
+   "cosine_gemini_embedding_2_3072": 0.8863,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P29",
+   "creative_a": "01a0986e-7bd7-7000-9836-671fd3c1679d",
+   "creative_b": "01a0986e-85c0-7000-b861-b819de175ad9",
+   "cosine_gemini_embedding_2_3072": 0.8848,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P30",
+   "creative_a": "01a0986e-a4b5-7000-a5ec-778c7f239c57",
+   "creative_b": "01a0986e-d4c3-7000-b313-46589a635571",
+   "cosine_gemini_embedding_2_3072": 0.8676,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P31",
+   "creative_a": "01a0986e-9291-7000-a327-4e197870bc71",
+   "creative_b": "01a0986e-d49c-7000-b0e1-6a3b79b99e37",
+   "cosine_gemini_embedding_2_3072": 0.8754,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P32",
+   "creative_a": "01a0986e-c477-7000-9f92-86cc18bd5be9",
+   "creative_b": "01a0986e-da27-7000-95bc-824e2215714a",
+   "cosine_gemini_embedding_2_3072": 0.8652,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P33",
+   "creative_a": "01a0986e-99ac-7000-8f92-47756166ae17",
+   "creative_b": "01a0986e-977e-7000-b090-9119c2fbb7d5",
+   "cosine_gemini_embedding_2_3072": 0.8557,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P34",
+   "creative_a": "01a0986e-84f9-7000-b8dd-08bf4997b8fa",
+   "creative_b": "01a0986e-d4c3-7000-b313-46589a635571",
+   "cosine_gemini_embedding_2_3072": 0.8766,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P35",
+   "creative_a": "01a0986e-85c0-7000-b861-b819de175ad9",
+   "creative_b": "01a0986e-d49c-7000-b0e1-6a3b79b99e37",
+   "cosine_gemini_embedding_2_3072": 0.8766,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P36",
+   "creative_a": "01a0986e-91e9-7000-b85d-be5b984c7ae8",
+   "creative_b": "01a0986e-c17c-7000-ad3d-89649aa47886",
+   "cosine_gemini_embedding_2_3072": 0.7054,
+   "label": "different",
+   "note": ""
+  },
+  {
+   "pair": "P37",
+   "creative_a": "01a0986e-c477-7000-9f92-86cc18bd5be9",
+   "creative_b": "01a0986e-daa1-7000-8809-022f928b9d69",
+   "cosine_gemini_embedding_2_3072": 0.7253,
+   "label": "different",
+   "note": ""
+  }
+ ]
+}
