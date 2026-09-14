@@ -35,15 +35,15 @@
    "creative_b": "01a0986e-7bd7-7000-9836-671fd3c1679d",
    "cosine_gemini_embedding_2_3072": 0.9422,
    "label": "different",
-   "note": ""
+   "note": "same creator and session (elephant shirt, pink nails); dense frames at the model's claimed shared take show different takes"
   },
   {
    "pair": "P04",
    "creative_a": "01a0986e-916a-7000-9b2c-93275d41e2d1",
    "creative_b": "01a0986e-99ac-7000-8f92-47756166ae17",
    "cosine_gemini_embedding_2_3072": 0.9393,
-   "label": "same_footage",
-   "note": ""
+   "label": "different",
+   "note": "same script template over different recordings: warm-lit walkway vs palm-lined road at dusk; gummy shot on a porch vs over sand"
   },
   {
    "pair": "P05",
@@ -82,8 +82,8 @@
    "creative_a": "01a0986e-c21e-7000-9256-d054f008fbd1",
    "creative_b": "01a0986e-c2fa-7000-90a7-fac3b0b9a472",
    "cosine_gemini_embedding_2_3072": 0.9278,
-   "label": "same_footage",
-   "note": "same doctor, same shoot, recut with different b-roll"
+   "label": "unsure",
+   "note": "same speaker and setting; captions and shots differ at the same timestamps, shared take unverified"
   },
   {
    "pair": "P10",
@@ -130,8 +130,8 @@
    "creative_a": "01a0986e-91e9-7000-b85d-be5b984c7ae8",
    "creative_b": "01a0986e-90c3-7000-913e-1c4f1a626fc6",
    "cosine_gemini_embedding_2_3072": 0.9123,
-   "label": "unsure",
-   "note": "same man and setting; unclear whether the same takes"
+   "label": "different",
+   "note": "same man and setting; the claimed shared bag shot differs in framing and position"
   },
   {
    "pair": "P16",
@@ -309,5 +309,7 @@
    "label": "different",
    "note": ""
   }
- ]
+ ],
+ "corrections": "2026-09-14: P03, P04, P09, P15 re-labelled after dense-frame review of the full videos; four sampled frames per ad were not enough.",
+ "status": "Deferred from v1; kept for when cross-creative similarity work starts. Labels judged from frames, not full playback."
 }
