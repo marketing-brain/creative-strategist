@@ -297,10 +297,19 @@ async def test_resolve_instagram_video_retries_on_transient_apify_failure(
     assert await db.fetchval("SELECT status FROM job") == "pending"  # retried, not dead yet
 
 
-FB_VIDEO_URL = (
-    "https://api.apify.com/v2/acts/automation-lab~facebook-public-video-downloader/"
-    "run-sync-get-dataset-items"
+FB_VIDEO_START_URL = (
+    "https://api.apify.com/v2/acts/automation-lab~facebook-public-video-downloader/runs"
 )
+FB_VIDEO_ITEMS_URL = "https://api.apify.com/v2/datasets/ds1/items"
+
+
+def _mock_fb_run(status, items):
+    respx.post(FB_VIDEO_START_URL).mock(
+        return_value=httpx.Response(
+            201, json={"data": {"id": "run1", "status": status, "defaultDatasetId": "ds1"}}
+        )
+    )
+    respx.get(FB_VIDEO_ITEMS_URL).mock(return_value=httpx.Response(200, json=items))
 
 
 def _fb_item(video_id, media_url=None):
@@ -334,11 +343,14 @@ async def test_resolve_facebook_video_downloads_the_first_playable_id_in_order(
     db, blobs, settings, org_id
 ):
     settings.apify_api_key = "test-token"
-    respx.post(FB_VIDEO_URL).mock(return_value=httpx.Response(200, json=[
-        _fb_item("v_feed"),
-        _fb_item("v_story", "https://video.fbcdn/story.mp4"),
-        _fb_item("v_reels", "https://video.fbcdn/reels.mp4"),
-    ]))
+    _mock_fb_run(
+        "SUCCEEDED",
+        [
+            _fb_item("v_feed"),
+            _fb_item("v_story", "https://video.fbcdn/story.mp4"),
+            _fb_item("v_reels", "https://video.fbcdn/reels.mp4"),
+        ],
+    )
     respx.get("https://video.fbcdn/story.mp4").mock(
         return_value=httpx.Response(200, content=b"vid", headers={"content-type": "video/mp4"})
     )
@@ -360,9 +372,8 @@ async def test_resolve_facebook_video_downloads_the_first_playable_id_in_order(
 async def test_resolve_facebook_video_gives_up_when_no_id_plays(db, blobs, settings, org_id):
     # Unpublished ad-only videos are never publicly served; retrying learns nothing.
     settings.apify_api_key = "test-token"
-    respx.post(FB_VIDEO_URL).mock(return_value=httpx.Response(200, json=[
-        _fb_item("v1"),
-    ]))
+    # The actor ends the run FAILED when nothing resolved, yet still answers every URL.
+    _mock_fb_run("FAILED", [_fb_item("v1")])
     cid = await _creative(db, org_id)
     await _enqueue_facebook_resolve(db, org_id, cid, ["v1"])
 
@@ -377,7 +388,7 @@ async def test_resolve_facebook_video_retries_on_transient_apify_failure(
     db, blobs, settings, org_id
 ):
     settings.apify_api_key = "test-token"
-    respx.post(FB_VIDEO_URL).mock(return_value=httpx.Response(503, text="rate limited"))
+    respx.post(FB_VIDEO_START_URL).mock(return_value=httpx.Response(503, text="rate limited"))
     cid = await _creative(db, org_id)
     await _enqueue_facebook_resolve(db, org_id, cid, ["v1"])
 
