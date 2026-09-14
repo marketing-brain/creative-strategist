@@ -298,9 +298,18 @@ async def test_resolve_instagram_video_retries_on_transient_apify_failure(
 
 
 FB_VIDEO_URL = (
-    "https://api.apify.com/v2/acts/convertfleetdotonline~facebook-downloader/"
+    "https://api.apify.com/v2/acts/automation-lab~facebook-public-video-downloader/"
     "run-sync-get-dataset-items"
 )
+
+
+def _fb_item(video_id, media_url=None):
+    return {
+        "sourceUrl": f"https://www.facebook.com/watch/?v={video_id}",
+        "sourceMediaUrl": media_url,
+        "retrievalStatus": "resolved" if media_url else "failed",
+        "error": None if media_url else f"ERROR: [facebook] {video_id}: Cannot parse data",
+    }
 
 
 async def _enqueue_facebook_resolve(db, org_id, cid, video_ids):
@@ -326,11 +335,9 @@ async def test_resolve_facebook_video_downloads_the_first_playable_id_in_order(
 ):
     settings.apify_api_key = "test-token"
     respx.post(FB_VIDEO_URL).mock(return_value=httpx.Response(200, json=[
-        {"input_url": "https://www.facebook.com/watch/?v=v_feed", "error": "Cannot parse data"},
-        {"input_url": "https://www.facebook.com/watch/?v=v_story",
-         "best_combined_url": "https://video.fbcdn/story.mp4"},
-        {"input_url": "https://www.facebook.com/watch/?v=v_reels",
-         "best_combined_url": "https://video.fbcdn/reels.mp4"},
+        _fb_item("v_feed"),
+        _fb_item("v_story", "https://video.fbcdn/story.mp4"),
+        _fb_item("v_reels", "https://video.fbcdn/reels.mp4"),
     ]))
     respx.get("https://video.fbcdn/story.mp4").mock(
         return_value=httpx.Response(200, content=b"vid", headers={"content-type": "video/mp4"})
@@ -354,7 +361,7 @@ async def test_resolve_facebook_video_gives_up_when_no_id_plays(db, blobs, setti
     # Unpublished ad-only videos are never publicly served; retrying learns nothing.
     settings.apify_api_key = "test-token"
     respx.post(FB_VIDEO_URL).mock(return_value=httpx.Response(200, json=[
-        {"input_url": "https://www.facebook.com/watch/?v=v1", "error": "Cannot parse data"},
+        _fb_item("v1"),
     ]))
     cid = await _creative(db, org_id)
     await _enqueue_facebook_resolve(db, org_id, cid, ["v1"])
