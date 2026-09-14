@@ -51,6 +51,7 @@ const broken: Diagnosis = {
         drop_segment: [25, 50],
         avg_watch_s: 7.1,
         duration_s: 24,
+        baseline_label: '12 other videos 15–30s long',
       },
     }),
     tier({
@@ -116,6 +117,7 @@ describe('DiagnosisPanel', () => {
     expect(screen.getByText('50%')).toBeInTheDocument();
     expect(screen.getByText('29%')).toBeInTheDocument();
     expect(screen.getByText(/Average watch 7.1s of 24s/)).toBeInTheDocument();
+    expect(screen.getByText(/dashed line is the 12 other videos 15–30s long/)).toBeInTheDocument();
     expect(screen.getByText('42 · below floor')).toBeInTheDocument();
   });
 

@@ -15,6 +15,7 @@ from cs.core.repo.assets import (
     get_asset_by_seq,
     insert_asset,
     list_assets_by_kind,
+    set_asset_duration,
     set_primary_asset,
 )
 from cs.core.repo.connections import (
@@ -64,6 +65,7 @@ __all__ = [
     "set_ad_account_status",
     "set_creative_format",
     "set_meta_connection_status",
+    "set_asset_duration",
     "set_primary_asset",
     "upsert_ad",
     "upsert_ad_account",

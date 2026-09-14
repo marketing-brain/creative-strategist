@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from uuid import UUID
 
 import httpx
@@ -7,6 +9,9 @@ import httpx
 from cs.core import queue, repo
 from cs.core.blobs import sha256_hex
 from cs.jobs.registry import JobContext
+from cs.tagging.video import probe_duration_ms
+
+log = logging.getLogger("cs.ingest.assets")
 
 _EXT_BY_MIME = {"image/png": "png", "image/jpeg": "jpg", "video/mp4": "mp4"}
 
@@ -33,8 +38,16 @@ async def download_creative(
     ext = _EXT_BY_MIME.get(mime, "bin")
     key = f"{org_id}/creatives/{creative_id}/original.{ext}"
     await ctx.blobs.put(key, data, mime)
+    duration_ms = None
+    if kind == "original_video":
+        # Maps retention-curve percentages to seconds (diagnosis panel, insight brief).
+        # Unprobeable files still store; the insight job retries the probe.
+        try:
+            duration_ms = await asyncio.to_thread(probe_duration_ms, data)
+        except Exception as exc:
+            log.warning("could not probe duration for creative %s: %s", creative_id, exc)
     asset_id = await repo.insert_asset(
-        ctx.db, org_id, creative_id, kind, key, sha256_hex(data), mime
+        ctx.db, org_id, creative_id, kind, key, sha256_hex(data), mime, duration_ms=duration_ms
     )
     await repo.set_primary_asset(ctx.db, org_id, creative_id, asset_id)
     if verdict is not None:

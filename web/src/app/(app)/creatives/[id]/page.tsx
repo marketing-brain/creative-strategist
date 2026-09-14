@@ -1,3 +1,4 @@
+import { CreativeInsightCard } from '@/components/creative-insight';
 import { DiagnosisPanel } from '@/components/diagnosis-panel';
 import { MetricChart } from '@/components/metric-chart';
 import { TagList } from '@/components/tag-list';
@@ -13,12 +14,13 @@ export default async function CreativeDetail({ params }: { params: Promise<{ id:
   const { id } = await params;
   const until = new Date();
   const since = new Date(until.getTime() - 89 * 86400000);
-  const [creative, tags, metrics, dims, diagnosis] = await Promise.all([
+  const [creative, tags, metrics, dims, diagnosis, insight] = await Promise.all([
     api.creative(id),
     api.creativeTags(id),
     api.creativeMetrics(id, iso(since), iso(until)),
     api.dimensions(),
     api.creativeDiagnosis(id),
+    api.creativeInsight(id),
   ]);
   const assetSrc = blobUrl(creative.primary_asset_url);
   return (
@@ -46,6 +48,7 @@ export default async function CreativeDetail({ params }: { params: Promise<{ id:
         )}
       </div>
       <div className="space-y-8 lg:col-span-2">
+        <CreativeInsightCard insight={insight} />
         <DiagnosisPanel diagnosis={diagnosis} />
         <section>
           <h2 className="mb-3 text-sm font-semibold">Performance (90 days)</h2>

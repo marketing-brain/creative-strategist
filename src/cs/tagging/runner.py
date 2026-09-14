@@ -11,7 +11,12 @@ from cs.tagging.tagger import Tagger
 from cs.tagging.taxonomy import load_taxonomy
 
 
-async def _prepare_inputs(ctx: JobContext, creative):
+async def load_media(
+    ctx: JobContext, creative
+) -> tuple[list[tuple[bytes, str]], tuple[bytes, str] | None]:
+    """The creative's media as model input: card JPEGs for carousels, one JPEG for images,
+    the raw MP4 for video (frames + audio are processed natively in one call, verified
+    against a real AI Gateway request)."""
     org_id = ctx.job.org_id
     if creative["format"] == "carousel":
         cards = await ingest_repo.list_assets_by_kind(
@@ -25,16 +30,20 @@ async def _prepare_inputs(ctx: JobContext, creative):
         return images, None
     data = await ctx.blobs.get(creative["primary_asset_path"])
     if creative["format"] == "video":
-        # Sent to the model as-is (frames + audio processed natively in one call,
-        # verified against a real AI Gateway request) -- no keyframe extraction or
-        # separate transcription needed. Old keyframe/transcript assets from a creative
-        # tagged before this switch are cleaned up rather than left as orphaned rows.
-        await ingest_repo.delete_assets_by_kind(
-            ctx.db, org_id, creative["id"], ("keyframe", "transcript")
-        )
         return [], (data, "video/mp4")
     jpeg, _, _ = prepare_image(data)
     return [(jpeg, "image/jpeg")], None
+
+
+async def _prepare_inputs(ctx: JobContext, creative):
+    if creative["format"] == "video":
+        # No keyframe extraction or separate transcription any more. Old keyframe/transcript
+        # assets from a creative tagged before the switch are cleaned up rather than left as
+        # orphaned rows.
+        await ingest_repo.delete_assets_by_kind(
+            ctx.db, ctx.job.org_id, creative["id"], ("keyframe", "transcript")
+        )
+    return await load_media(ctx, creative)
 
 
 async def tag_creative(ctx: JobContext, creative_id: UUID, tagger: Tagger) -> UUID | None:

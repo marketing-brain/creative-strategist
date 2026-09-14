@@ -49,6 +49,15 @@ async def set_primary_asset(db: Database, org_id: UUID, creative_id: UUID, asset
     )
 
 
+async def set_asset_duration(db: Database, org_id: UUID, asset_id: UUID, duration_ms: int) -> None:
+    await db.execute(
+        "UPDATE asset SET duration_ms = $3 WHERE org_id = $1 AND id = $2",
+        org_id,
+        asset_id,
+        duration_ms,
+    )
+
+
 async def delete_assets_by_kind(
     db: Database, org_id: UUID, creative_id: UUID, kinds: tuple[str, ...]
 ) -> None:

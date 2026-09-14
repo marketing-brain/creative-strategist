@@ -226,19 +226,28 @@ async def baseline_window_sums(
     exclude_creative_id: UUID,
     since: date,
     until: date,
+    duration_range_ms: tuple[int, int | None] | None = None,
 ) -> asyncpg.Record:
-    """Pooled sums over every *other* creative of the same format in the account."""
+    """Pooled sums over every *other* creative of the same format in the account. With
+    `duration_range_ms` (low exclusive, high inclusive, None = open), only creatives whose
+    primary asset length falls in that range; creatives of unknown length are left out."""
+    lo, hi = duration_range_ms if duration_range_ms is not None else (None, None)
     return await db.fetchrow(
         f"SELECT {_SUMS_SQL}, count(DISTINCT m.creative_id) AS creatives "
         "FROM metric_daily m JOIN creative c ON c.id = m.creative_id "
+        "LEFT JOIN asset a ON a.id = c.primary_asset_id "
         "WHERE m.org_id=$1 AND m.ad_account_id=$2 AND c.format=$3 AND m.creative_id <> $4 "
-        "AND m.day BETWEEN $5 AND $6",
+        "AND m.day BETWEEN $5 AND $6 "
+        "AND ($7::bigint IS NULL OR a.duration_ms > $7) "
+        "AND ($8::bigint IS NULL OR a.duration_ms <= $8)",
         org_id,
         ad_account_id,
         fmt,
         exclude_creative_id,
         since,
         until,
+        lo,
+        hi,
     )
 
 

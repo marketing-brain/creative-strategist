@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
 from cs.core import queue
@@ -8,6 +8,9 @@ from cs.core.config import Settings
 from cs.core.db import Database
 from cs.insights import repo
 from cs.insights.brief import render_brief
+from cs.insights.creative_insight import GeminiGatewayInsightWriter, InsightWriter
+from cs.insights.creative_insight_runner import FORMATS, write_creative_insight
+from cs.insights.diagnosis import ATTENTION_FLOOR
 from cs.insights.explain import Explainer, GeminiGatewayExplainer
 from cs.insights.fatigue import compute_fatigue
 from cs.insights.patterns import compute_pattern_insights
@@ -24,6 +27,19 @@ def default_explainer_factory(settings: Settings) -> Explainer:
 
 
 EXPLAINER_FACTORY = default_explainer_factory
+
+
+def default_insight_writer_factory(settings: Settings) -> InsightWriter:
+    return GeminiGatewayInsightWriter(settings)
+
+
+INSIGHT_WRITER_FACTORY = default_insight_writer_factory
+CREATIVE_INSIGHT_JOB = "insights.creative_insight"
+CREATIVE_INSIGHT_MAX_ATTEMPTS = 3
+
+
+def creative_insight_dedup_key(creative_id: UUID) -> str:
+    return f"creative_insight:{creative_id}"
 
 
 async def _persist(ctx: JobContext, drafts: list[InsightDraft], account_name: str) -> int:
@@ -134,4 +150,48 @@ async def weekly_brief_schedule(db: Database, settings: Settings) -> None:
     for o in await db.fetch("SELECT id FROM org"):
         await queue.enqueue(
             db, o["id"], "insights.weekly_brief", {}, dedup_key=f"brief:{o['id']}:{week_start}"
+        )
+
+
+@handler(CREATIVE_INSIGHT_JOB)
+async def creative_insight(ctx: JobContext) -> None:
+    creative_id = UUID(ctx.job.payload["creative_id"])
+    await write_creative_insight(ctx, creative_id, INSIGHT_WRITER_FACTORY(ctx.settings))
+
+
+@register_schedule("insights.nightly_creative_insights", every_seconds=86400)
+async def nightly_creative_insights(db: Database, settings: Settings) -> None:
+    """Pick up creatives that were too new to read when they were tagged, and videos, which
+    are not tagged while video tagging is off. Each still gets one insight at most;
+    creatives whose job already exhausted its retries are left alone."""
+    until = datetime.now(UTC).date()
+    rows = await repo.creative_insight_candidates(
+        db,
+        until - timedelta(days=WINDOW_DAYS - 1),
+        until,
+        FORMATS,
+        ATTENTION_FLOOR,
+        settings.creative_insight_nightly_limit,
+        settings.creative_insight_limit_per_format,
+    )
+    # Queue no more per org and format than the cap still allows; the job re-checks.
+    room: dict[tuple[UUID, str], int] = {}
+    for r in rows:
+        slot = (r["org_id"], r["format"])
+        if slot not in room:
+            written = await repo.count_creative_insights(db, r["org_id"], r["format"])
+            room[slot] = settings.creative_insight_limit_per_format - written
+        if room[slot] <= 0:
+            continue
+        key = creative_insight_dedup_key(r["id"])
+        if await queue.is_dead(db, r["org_id"], CREATIVE_INSIGHT_JOB, key):
+            continue
+        room[slot] -= 1
+        await queue.enqueue(
+            db,
+            r["org_id"],
+            CREATIVE_INSIGHT_JOB,
+            {"creative_id": str(r["id"])},
+            dedup_key=key,
+            max_attempts=CREATIVE_INSIGHT_MAX_ATTEMPTS,
         )

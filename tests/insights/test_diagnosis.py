@@ -7,10 +7,12 @@ import pytest
 from cs.insights.diagnosis import (
     Sums,
     attention_tier,
+    bucket_label,
     context_tier,
     conversion_tier,
     diagnose,
     fatigue_tier,
+    length_bucket,
     lift,
     retention_tier,
     status_from_lift,
@@ -92,9 +94,11 @@ def _retention_pair():
 
 def test_retention_curve_hold_rate_and_drop_segment():
     w, b = _retention_pair()
-    t = retention_tier("video", w, b, 24_000)
+    t = retention_tier("video", w, b, 24_000, 12)
     assert t.status == "weak"
+    assert t.curve.baseline_label == "12 other videos 15–30s long"
     hold = t.metrics[0]
+    assert hold.note.endswith("vs videos 15–30s long")
     assert hold.key == "hold_rate"
     assert hold.value == pytest.approx(0.21) and hold.baseline == pytest.approx(0.34)
     assert [p.p for p in t.curve.points] == [0, 25, 50, 75, 95, 100]
@@ -112,12 +116,34 @@ def test_retention_strong_has_no_drop_segment_and_floor_applies():
         video_3s_views=1_000, video_thruplay=500, video_plays=1_000, video_p25=900,
         video_p50=700, video_p75=600, video_p95=550, video_p100=500,
     )  # fmt: skip
-    t = retention_tier("video", w, b, None)
+    t = retention_tier("video", w, b, 24_000, 12)
     assert t.status == "strong" and t.curve.drop_segment is None and t.decision is None
-    assert t.curve.duration_s is None
+    assert "other videos 15–30s long" in t.reason
     few = sums(video_plays=50, video_3s_views=60, video_thruplay=10)
-    t = retention_tier("video", few, b, None)
-    assert t.status == "not_enough_data" and "100" in t.reason
+    t = retention_tier("video", few, b, 24_000, 12)
+    assert t.status == "not_enough_data" and "Only 50 plays" in t.reason
+    t = retention_tier("video", w, sums(video_plays=40, video_3s_views=40), 8_000, 1)
+    assert t.status == "not_enough_data"
+    assert t.reason == (
+        "The same-length baseline (1 other video up to 15s long) has only 40 plays; it needs 100."
+    )
+
+
+def test_retention_needs_a_known_length():
+    w, b = _retention_pair()
+    t = retention_tier("video", w, b, None, 12)
+    assert t.status == "not_enough_data" and t.curve is None and t.metrics == []
+    assert "length is not known" in t.reason
+
+
+def test_length_buckets_split_at_the_thruplay_rule():
+    assert length_bucket(None) is None and length_bucket(0) is None
+    assert length_bucket(11_000) == (0, 15) and length_bucket(15_000) == (0, 15)
+    assert length_bucket(15_001) == (15, 30) and length_bucket(60_000) == (30, 60)
+    assert length_bucket(61_000) == (60, None)
+    assert bucket_label((0, 15)) == "up to 15s long"
+    assert bucket_label((30, 60)) == "30–60s long"
+    assert bucket_label((60, None)) == "over 60s long"
 
 
 def test_conversion_steps_readable_chain_and_on_par():
@@ -239,7 +265,7 @@ def _diagnose(**over):
     kw = dict(
         fmt="video", window=w, baseline=b, baseline_creatives=41, first14=None, trailing7=None,
         days_live=12, duration_ms=24_000, window_start=date(2026, 8, 14),
-        window_end=date(2026, 9, 12),
+        window_end=date(2026, 9, 12), retention_baseline=b, retention_baseline_creatives=9,
     )  # fmt: skip
     kw.update(over)
     return diagnose(**kw)
@@ -259,6 +285,7 @@ def test_diagnose_broken_layer_is_first_weak_tier():
     assert out["window_start"] == "2026-08-14" and out["format"] == "video"
     assert out["baseline_creatives"] == 41
     assert out["tiers"][1]["curve"]["drop_segment"] == [25, 50]
+    assert out["tiers"][1]["curve"]["baseline_label"] == "9 other videos 15–30s long"
     assert out["verdict"]["kind"] == "broken"
     json.dumps(out)  # every value must be JSON-native
 
@@ -267,8 +294,12 @@ def test_diagnose_healthy_and_too_early():
     w, _ = _video_window_weak_retention()
     better = {"video_thruplay": 60_000, "video_p50": 90_000, "video_p75": 70_000}
     strong = Sums(**{**w.__dict__, **better})
-    d = _diagnose(window=strong, duration_ms=None)
+    d = _diagnose(window=strong)
+    assert d.tiers[1].status == "on_par"  # hold 38.5% vs 34.0%: +13%
     assert d.broken_tier is None and d.verdict.kind == "healthy"
+    # Without a same-length baseline retention is not read at all, never compared unlike.
+    d = _diagnose(retention_baseline=None)
+    assert d.tiers[1].status == "not_enough_data" and d.broken_tier is None
     d = _diagnose(fmt="image", window=sums(impressions=640), days_live=3, duration_ms=None)
     assert d.verdict.kind == "too_early" and "640" in d.verdict.detail
     assert d.broken_tier is None

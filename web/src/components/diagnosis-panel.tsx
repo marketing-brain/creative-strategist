@@ -101,7 +101,9 @@ function RetentionCurve({ curve }: { curve: DiagnosisCurve }) {
   const segIdx = seg ? [curve.points.findIndex((p) => p.p === seg[0]), curve.points.findIndex((p) => p.p === seg[1])] : null;
   return (
     <div className="flex w-full flex-col gap-2">
-      <span className="text-sm text-muted-foreground">Share of plays still watching</span>
+      <span className="text-sm text-muted-foreground">
+        Share of plays still watching{curve.baseline_label ? ` · dashed line is the ${curve.baseline_label}` : ''}
+      </span>
       <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="block" role="img" aria-label="Watch-through curve">
         {segIdx && segIdx[0] >= 0 && segIdx[1] >= 0 && (
           <rect x={x(segIdx[0])} y={0} width={x(segIdx[1]) - x(segIdx[0])} height={bottom} className="fill-destructive/10" />

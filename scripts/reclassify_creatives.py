@@ -320,6 +320,8 @@ async def _apply_one(db: Database, org_id: UUID, row: ReclassifyRow) -> list[str
         # see module docstring), so all three must go before tag_run.
         await tx.execute("DELETE FROM tag WHERE creative_id=$1", row.creative_id)
         await tx.execute("DELETE FROM creative_embedding WHERE creative_id=$1", row.creative_id)
+        # The insight paragraph was written against the wrong format too.
+        await tx.execute("DELETE FROM creative_insight WHERE creative_id=$1", row.creative_id)
         await tx.execute(
             "DELETE FROM tag_batch_item WHERE tag_run_id IN"
             " (SELECT id FROM tag_run WHERE creative_id=$1)",
@@ -370,6 +372,7 @@ async def _replace_with_image_download(tx, org_id: UUID, row: ReclassifyRow) -> 
     # FK order: tag, creative_embedding and tag_batch_item all reference tag_run.
     await tx.execute("DELETE FROM tag WHERE creative_id=$1", row.creative_id)
     await tx.execute("DELETE FROM creative_embedding WHERE creative_id=$1", row.creative_id)
+    await tx.execute("DELETE FROM creative_insight WHERE creative_id=$1", row.creative_id)
     await tx.execute(
         "DELETE FROM tag_batch_item WHERE tag_run_id IN"
         " (SELECT id FROM tag_run WHERE creative_id=$1)",
@@ -490,9 +493,12 @@ def _print_report(plan: ReclassifyPlan) -> None:
         ).most_common():
             print(f"  {n:6d}  {of}/{osrc}  ->  {nf}/{nsrc}")
     no_file = [
-        r for r in changed
-        if r.verdict_format in ("image", "video") and r.new_format == "unresolved"
-        and not r.needs_image_download and not (r.is_image_to_video and r.asset_url)
+        r
+        for r in changed
+        if r.verdict_format in ("image", "video")
+        and r.new_format == "unresolved"
+        and not r.needs_image_download
+        and not (r.is_image_to_video and r.asset_url)
     ]
     if no_file:
         print(

@@ -71,6 +71,19 @@ async def _seed(db, client, *, today: date):
     )
     await repo.set_primary_asset(db, org_id, target, aid)
     peer_video = await creative("pv", "video")
+    pv_asset = await repo.insert_asset(
+        db, org_id, peer_video, "original_video", "o/pv.mp4", "sha", "video/mp4",
+        duration_ms=28_000,
+    )  # fmt: skip
+    await repo.set_primary_asset(db, org_id, peer_video, pv_asset)
+    # A 90s video in the same account: same hook, far lower hold. It must count toward the
+    # attention baseline but never toward retention, which compares like-length videos only.
+    long_video = await creative("lv", "video")
+    lv_asset = await repo.insert_asset(
+        db, org_id, long_video, "original_video", "o/lv.mp4", "sha", "video/mp4",
+        duration_ms=90_000,
+    )  # fmt: skip
+    await repo.set_primary_asset(db, org_id, long_video, lv_asset)
     peer_image = await creative("pi", "image")
 
     rows: list[MetricRow] = []
@@ -88,6 +101,10 @@ async def _seed(db, client, *, today: date):
         rows.append(
             _row("ad_pi", d, imp=20_000, views3=0, plays=0, thru=0, p25=0, p50=0, reach=9_000)
         )  # fmt: skip
+        rows.append(
+            _row("ad_lv", d, imp=20_000, views3=6_200, plays=6_200, thru=200, p25=1_000,
+                 p50=500, reach=9_000)
+        )  # fmt: skip
     # a row outside the window must not count
     old = today - timedelta(days=40)
     rows.append(
@@ -103,7 +120,7 @@ async def test_diagnosis_endpoint_uses_same_format_baseline_and_excludes_self(cl
     r = await client.get(f"/creatives/{target}/diagnosis", headers=H)
     assert r.status_code == 200, r.text
     d = r.json()
-    assert d["format"] == "video" and d["baseline_creatives"] == 1  # only the video peer
+    assert d["format"] == "video" and d["baseline_creatives"] == 2  # both video peers
     assert d["window_end"] == today.isoformat()
     assert d["window_start"] == (today - timedelta(days=29)).isoformat()
     tiers = {t["key"]: t for t in d["tiers"]}
@@ -111,6 +128,9 @@ async def test_diagnosis_endpoint_uses_same_format_baseline_and_excludes_self(cl
     assert tiers["retention"]["status"] == "weak"
     assert tiers["retention"]["curve"]["duration_s"] == 24.0
     assert tiers["retention"]["curve"]["drop_segment"] == [25, 50]
+    # Only the 28s peer is in the retention baseline; with the 90s one pooled in, hold rate
+    # would read on par instead of weak.
+    assert tiers["retention"]["curve"]["baseline_label"] == "1 other video 15–30s long"
     assert tiers["context"]["status"] == "not_measured"
     assert d["broken_tier"] == 2 and d["verdict"]["kind"] == "broken"
     # 41 live days >= 21 -> fatigue is computed, not too_young

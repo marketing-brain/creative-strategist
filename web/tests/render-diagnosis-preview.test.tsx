@@ -40,7 +40,7 @@ const real: Diagnosis = {
           { p: 0, share: 1, baseline_share: 1 }, { p: 25, share: 0.71, baseline_share: 0.75 }, { p: 50, share: 0.29, baseline_share: 0.54 },
           { p: 75, share: 0.18, baseline_share: 0.42 }, { p: 95, share: 0.14, baseline_share: 0.35 }, { p: 100, share: 0.13, baseline_share: 0.32 },
         ],
-        drop_segment: [25, 50], avg_watch_s: 7.3, duration_s: 24,
+        drop_segment: [25, 50], avg_watch_s: 7.3, duration_s: 24, baseline_label: '12 other videos 15–30s long',
       },
       steps: null,
     },

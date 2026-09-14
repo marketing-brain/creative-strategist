@@ -34,6 +34,7 @@ So the work is: widen ingest, model the tiers deterministically, serve one endpo
 | Compute location | Widen `metric_daily`, compute on read (Approach 1). No snapshot table, no new job |
 | Window | Trailing 30 days ending today (server UTC date) |
 | Baseline | Pooled sums of every *other* creative in the same ad account with the same `format`, same window |
+| Retention baseline (revised 2026-09-14) | Only other videos in the same length bucket: (0,15], (15,30], (30,60], >60s, from the probed file length (`asset.duration_ms`). ThruPlay is 15s or the full video when shorter, so hold rates across buckets measure different things; a real 11s ad read "weak" on hold rate while beating the pooled curve at every point. Unknown length → retention `not_enough_data`, never an unlike comparison. `assets.probe_video_duration` backfills lengths nightly |
 | Thresholds | Lift ±15% (reuses `patterns.py` `lift_threshold`) with per-tier volume floors |
 | Verdict text | Deterministic templates. No LLM call (standing rule: no new Claude calls; nothing here needs generation) |
 | Images/carousels | Retention = `not_applicable`; Attention uses link CTR |

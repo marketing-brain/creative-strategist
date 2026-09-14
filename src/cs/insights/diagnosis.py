@@ -20,6 +20,11 @@ STEP_FLOOR = 100
 FATIGUE_FLOOR = 1_000
 FATIGUE_MIN_DAYS = 21
 CURVE_POINTS = (0, 25, 50, 75, 95, 100)
+# Retention compares a video only with videos of similar length. ThruPlay is 15s, or the
+# whole video when it is shorter, so a short and a long video's hold rates measure different
+# things, and a curve at "50% of runtime" is 5s into one ad and 30s into another. Buckets
+# are (low, high] seconds; the first boundary is the ThruPlay rule.
+LENGTH_BUCKETS_S: tuple[tuple[int, int | None], ...] = ((0, 15), (15, 30), (30, 60), (60, None))
 
 Status = Literal[
     "strong", "on_par", "weak", "not_applicable", "not_enough_data", "too_young", "not_measured"
@@ -88,6 +93,7 @@ class Curve:
     drop_segment: tuple[int, int] | None
     avg_watch_s: float | None
     duration_s: float | None
+    baseline_label: str | None = None
 
 
 @dataclass
@@ -239,7 +245,30 @@ def _drop_segment(points: list[CurvePoint]) -> tuple[int, int] | None:
     return best[1] if best else None
 
 
-def retention_tier(fmt: str, w: Sums, b: Sums, duration_ms: int | None) -> Tier:
+def length_bucket(duration_ms: int | None) -> tuple[int, int | None] | None:
+    if not duration_ms:
+        return None
+    seconds = duration_ms / 1000
+    for lo, hi in LENGTH_BUCKETS_S:
+        if hi is None or seconds <= hi:
+            return lo, hi
+    return None
+
+
+def bucket_label(bucket: tuple[int, int | None]) -> str:
+    lo, hi = bucket
+    if lo == 0:
+        return f"up to {hi}s long"
+    if hi is None:
+        return f"over {lo}s long"
+    return f"{lo}–{hi}s long"
+
+
+def retention_tier(
+    fmt: str, w: Sums, b: Sums, duration_ms: int | None, baseline_creatives: int = 0
+) -> Tier:
+    """`b` must be the same-length baseline: other videos in the account whose length falls
+    in this video's LENGTH_BUCKETS_S bucket."""
     tier = Tier(
         2, "retention", "Retention", "Where in the video does attention drop?", "not_applicable"
     )
@@ -255,23 +284,42 @@ def retention_tier(fmt: str, w: Sums, b: Sums, duration_ms: int | None) -> Tier:
                 "curve to read."
             )
         return tier
+    bucket = length_bucket(duration_ms)
+    if bucket is None:
+        tier.status = "not_enough_data"
+        tier.reason = (
+            "This video's length is not known yet. Hold rate and the watch curve are only "
+            "compared with videos of similar length."
+        )
+        return tier
+    label = bucket_label(bucket)
+    others = f"{baseline_creatives} other {'video' if baseline_creatives == 1 else 'videos'}"
     enough = w.video_plays >= RETENTION_FLOOR and b.video_plays >= RETENTION_FLOOR
     hold = _metric(
         "hold_rate",
         "Hold rate",
         ratio(w.video_thruplay, w.video_3s_views),
         ratio(b.video_thruplay, b.video_3s_views),
-        f"ThruPlay ÷ 3s views · {w.video_plays:,} plays",
+        f"ThruPlay ÷ 3s views · {w.video_plays:,} plays · vs videos {label}",
         enough=enough,
     )
     points = _curve_points(w, b)
     duration_s = duration_ms / 1000 if duration_ms else None
     tier.metrics = [hold]
-    tier.curve = Curve(points, None, ratio(w.video_watch_seconds, w.video_plays), duration_s)
+    tier.curve = Curve(
+        points,
+        None,
+        ratio(w.video_watch_seconds, w.video_plays),
+        duration_s,
+        f"{others} {label}",
+    )
     tier.status = status_from_lift(hold.lift)
     if not enough:
         tier.reason = (
             f"Only {w.video_plays:,} plays in the window; retention needs {RETENTION_FLOOR:,}."
+            if w.video_plays < RETENTION_FLOOR
+            else f"The same-length baseline ({others} {label}) has only {b.video_plays:,} "
+            f"plays; it needs {RETENTION_FLOOR:,}."
         )
         return tier
     if tier.status == "weak":
@@ -288,11 +336,11 @@ def retention_tier(fmt: str, w: Sums, b: Sums, duration_ms: int | None) -> Tier:
             )
         else:
             tier.decision = (
-                "Viewers leave earlier than the account average. "
+                f"Viewers leave earlier than on other videos {label}. "
                 "Tighten the middle section or move the CTA earlier."
             )
     else:
-        tier.reason = "Viewers stay with this video at least as long as the account average."
+        tier.reason = f"Viewers stay with this video at least as long as other videos {label}."
     return tier
 
 
@@ -563,10 +611,21 @@ def diagnose(
     duration_ms: int | None,
     window_start: date,
     window_end: date,
+    retention_baseline: Sums | None = None,
+    retention_baseline_creatives: int = 0,
 ) -> Diagnosis:
+    """`baseline` is every other creative of the same format; `retention_baseline` narrows it
+    to videos of the same length bucket (see retention_tier). Without it, retention reads as
+    not enough data rather than comparing unlike videos."""
     tiers = [
         attention_tier(fmt, window, baseline),
-        retention_tier(fmt, window, baseline, duration_ms),
+        retention_tier(
+            fmt,
+            window,
+            retention_baseline if retention_baseline is not None else Sums(),
+            duration_ms if retention_baseline is not None else None,
+            retention_baseline_creatives,
+        ),
         conversion_tier(window, baseline),
         fatigue_tier(fmt, first14, trailing7, days_live),
         context_tier(),

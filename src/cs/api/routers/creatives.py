@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -10,12 +10,10 @@ from cs.core import repo
 from cs.core.blobs import BlobStore
 from cs.core.db import Database
 from cs.core.metrics import derived_metrics
-from cs.insights.diagnosis import FATIGUE_MIN_DAYS, Sums, diagnose
+from cs.insights import repo as insights_repo
+from cs.insights.diagnose_creative import diagnose_creative
 
 router = APIRouter(prefix="/creatives")
-
-# Diagnosis window: trailing 30 days ending today (UTC), matching the library's 30d columns.
-WINDOW_DAYS = 30
 
 
 # Postgres sums bigint columns into numeric; these are counts and must stay integers.
@@ -122,37 +120,26 @@ async def creative_diagnosis(
     c = await repo.get_creative(db, auth.org_id, creative_id)
     if not c:
         raise HTTPException(404)
-    until = datetime.now(UTC).date()
-    since = until - timedelta(days=WINDOW_DAYS - 1)
-    window = Sums.from_record(
-        await repo.creative_window_sums(db, auth.org_id, creative_id, since, until)
-    )
-    base = await repo.baseline_window_sums(
-        db, auth.org_id, c["ad_account_id"], c["format"], creative_id, since, until
-    )
-    first_day = await repo.creative_first_metric_day(db, auth.org_id, creative_id)
-    days_live = (until - first_day).days + 1 if first_day else None
-    first14 = trailing7 = None
-    if first_day is not None and days_live is not None and days_live >= FATIGUE_MIN_DAYS:
-        first14 = Sums.from_record(
-            await repo.creative_window_sums(
-                db, auth.org_id, creative_id, first_day, first_day + timedelta(days=13)
-            )
-        )
-        trailing7 = Sums.from_record(
-            await repo.creative_window_sums(
-                db, auth.org_id, creative_id, until - timedelta(days=6), until
-            )
-        )
-    return diagnose(
-        fmt=c["format"],
-        window=window,
-        baseline=Sums.from_record(base),
-        baseline_creatives=int(base["creatives"] or 0),
-        first14=first14,
-        trailing7=trailing7,
-        days_live=days_live,
-        duration_ms=c["primary_asset_duration_ms"],
-        window_start=since,
-        window_end=until,
-    ).to_dict()
+    diagnosed = await diagnose_creative(db, auth.org_id, c, datetime.now(UTC).date())
+    return diagnosed.diagnosis.to_dict()
+
+
+@router.get("/{creative_id}/insight")
+async def creative_insight(
+    creative_id: UUID,
+    auth: AuthContext = Depends(current_auth),
+    db: Database = Depends(get_db),
+) -> dict:
+    """The creative's written insight, or {"paragraph": null} until one exists. Rejected
+    drafts (numbers or timestamps not in the brief) are never served."""
+    if not await repo.get_creative(db, auth.org_id, creative_id):
+        raise HTTPException(404)
+    row = await insights_repo.get_creative_insight(db, auth.org_id, creative_id)
+    if row is None or row["status"] != "done":
+        return {"paragraph": None}
+    return {
+        "paragraph": row["paragraph"],
+        "window_start": row["window_start"].isoformat(),
+        "window_end": row["window_end"].isoformat(),
+        "created_at": row["created_at"].isoformat(),
+    }
