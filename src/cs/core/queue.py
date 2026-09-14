@@ -51,15 +51,16 @@ async def enqueue(
     return row["id"] if row else None
 
 
-async def is_dead(db: Database, org_id: UUID, job_type: str, dedup_key: str) -> bool:
-    """True once a job with this identity already exhausted its retries. dedup_key alone
-    only blocks re-enqueue while a job is pending/running (see job_pending_dedup_idx) --
-    a caller that re-runs periodically (e.g. a nightly sync) needs this to stop retrying
-    something that has already been given up on, rather than re-enqueueing it forever."""
+async def has_finished(db: Database, org_id: UUID, job_type: str, dedup_key: str) -> bool:
+    """True once a job with this identity has finished, whether it succeeded ('done') or
+    exhausted its retries ('dead'). dedup_key alone only blocks re-enqueue while a job is
+    pending/running (see job_pending_dedup_idx) -- a caller that re-runs periodically (e.g.
+    a nightly sync) needs this so a question already answered, including "nothing found",
+    isn't asked (and paid for) again every run."""
     return bool(
         await db.fetchval(
-            "SELECT 1 FROM job WHERE org_id=$1 AND job_type=$2 AND dedup_key=$3 AND status='dead'"
-            " LIMIT 1",
+            "SELECT 1 FROM job WHERE org_id=$1 AND job_type=$2 AND dedup_key=$3"
+            " AND status IN ('done', 'dead') LIMIT 1",
             org_id,
             job_type,
             dedup_key,

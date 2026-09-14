@@ -383,7 +383,7 @@ async def _sync_ads_and_creatives(
                 and not verdict.asset_url
                 and cr["instagram_permalink_url"]
                 and not await repo.creative_has_asset(db, org_id, creative_id, kind)
-                and not await queue.is_dead(
+                and not await queue.has_finished(
                     db, org_id, "meta.resolve_instagram_video", str(creative_id)
                 )
             ):
@@ -392,8 +392,8 @@ async def _sync_ads_and_creatives(
                 # not the ad account's video library. Apify can still fetch it from the
                 # permalink. max_attempts=3 (not the default 5): a failure here is either
                 # transient (retry is cheap) or the post is gone/private (retrying learns
-                # nothing and just spends Apify credits) -- is_dead above stops it from
-                # being re-enqueued on every future sync once those attempts are spent.
+                # nothing and just spends Apify credits) -- has_finished above stops it
+                # from being re-enqueued on every future sync once it has an answer.
                 await queue.enqueue(
                     db,
                     org_id,
@@ -414,7 +414,7 @@ async def _sync_ads_and_creatives(
                 and not cr["instagram_permalink_url"]
                 and (video_ids := _video_ids_to_resolve(cr, feed_spec_videos))
                 and not await repo.creative_has_asset(db, org_id, creative_id, kind)
-                and not await queue.is_dead(
+                and not await queue.has_finished(
                     db, org_id, "meta.resolve_facebook_video", str(creative_id)
                 )
             ):

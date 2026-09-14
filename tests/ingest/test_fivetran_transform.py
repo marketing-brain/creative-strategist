@@ -793,6 +793,47 @@ async def test_dead_facebook_video_resolve_is_not_re_enqueued(db, blobs, setting
     assert [r["status"] for r in statuses] == ["dead"]
 
 
+async def test_answered_facebook_video_resolve_is_not_re_enqueued(db, blobs, settings, org_id):
+    """A resolve job that finished without a file got a definitive "no public video"
+    answer. Each nightly sync re-asking would pay Apify again for the same answer."""
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db, SCHEMA, campaign_id="c1", account_id="999", adset_id="as1", ad_id="ad1",
+        creative_id="cr1", name="n", headline="H", image_url=None, object_type="SHARE",
+    )
+    await insert_asset_feed_spec_video(db, SCHEMA, creative_id="cr1", video_id="v1")
+    await _sync_active(db, blobs, settings, org_id)
+    await db.execute("UPDATE job SET status='done' WHERE job_type='meta.resolve_facebook_video'")
+    conn = await repo.get_meta_connection(db, org_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, conn)
+
+    statuses = await db.fetch("SELECT status FROM job WHERE job_type='meta.resolve_facebook_video'")
+    assert [r["status"] for r in statuses] == ["done"]
+
+
+async def test_answered_instagram_video_resolve_is_not_re_enqueued(db, blobs, settings, org_id):
+    await create_fixture_schema(db, SCHEMA)
+    await insert_campaign_ad_creative(
+        db, SCHEMA, campaign_id="c1", account_id="999", adset_id="as1", ad_id="ad1",
+        creative_id="cr1", name="n", headline="H", image_url="https://img/orig.jpg",
+        video_id="vid_not_in_video_history",
+        instagram_permalink_url="https://www.instagram.com/p/abc123/", object_type="VIDEO",
+    )
+    await _sync_active(db, blobs, settings, org_id)
+    await db.execute("UPDATE job SET status='done' WHERE job_type='meta.resolve_instagram_video'")
+    conn = await repo.get_meta_connection(db, org_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    await fivetran_transform.discover_and_sync_entities(ctx, org_id, conn)
+
+    statuses = await db.fetch(
+        "SELECT status FROM job WHERE job_type='meta.resolve_instagram_video'"
+    )
+    assert [r["status"] for r in statuses] == ["done"]
+
+
 async def test_dead_resolve_job_is_not_re_enqueued_on_next_sync(db, blobs, settings, org_id):
     """Once meta.resolve_instagram_video has exhausted its retries for a creative (post
     permanently gone/private), the next nightly sync must not re-enqueue it -- otherwise
