@@ -1,7 +1,7 @@
 # Creative Insights: Record, Claims, Test Briefs
 
 **Date:** 2026-09-14
-**Status:** Design — approved in brainstorming, pending spec review
+**Status:** Design — approved in brainstorming, pending spec review (revised to the model-first version)
 **Scope:** A per-creative insights system that is useful both to read and to feed AI generation: an objective, timestamped *creative record* of each ad; *claims* that tie record elements to diagnosis metrics; *test briefs* a generator can execute; and a new Insights section on the creative page. Builds on the diagnosis panel (`2026-09-12-creative-diagnosis-panel-design.md`) without changing it.
 
 ## Problem
@@ -12,7 +12,7 @@ Today each creative gets taxonomy tags and, since `202a2d9`, one free-text insig
 - **The paragraph is not machine-usable.** Its "next test" is prose. Generation cannot execute "recut 00:00–00:03 to open on the gummy"; it has no shot boundaries, text layers or asset references.
 - **Single-ad explanations are guesses.** Video 2 ("The magnesium that actually absorbs…") got "conversion is the weakest layer… a trust gap" when the data shows a trade-off: +14% CTR sending more, less-qualified clicks, the same purchases as its variant (465 vs 464) and a 14% better CPA.
 - **Near-duplicates go unnoticed.** Videos 1 and 2 share footage (a natural experiment) and nothing links them.
-- **Model timestamps are imprecise.** Gemini samples video at 1 fps by default; cut positions are off by up to about ±1 s and sub-second cuts are missed, which would put flash frames or clipped words into any recut.
+- **Model timestamps are coarse by default.** Gemini samples video at 1 fps; cut positions can be off by about ±1 s. Sampling at 4 fps brings that to about ±250 ms, which is enough to read and brief from; frame-exact cuts are a generator's job at render time.
 
 ## Decisions taken
 
@@ -23,53 +23,49 @@ Today each creative gets taxonomy tags and, since `202a2d9`, one free-text insig
 | Learning loop | Not now. Claims carry `status = untested`; the slot exists for later |
 | Model coverage | Stay capped (`creative_insight_limit_per_format`, 2 per format per org) while record quality is validated |
 | Approach | A: record (multimodal, once) → claims (text-only, refreshable) → paragraph (rendered from claims) |
-| Time grid | Lightweight, deterministic: ffprobe, PySceneDetect, ffmpeg keyframes, PDQ hashes, Whisper word timestamps via AI Gateway. Gemini labels; it never invents timestamps |
-| Deterministic steps | Grid and variant hashing run on **all** creatives (no model cost) |
+| Division of labour | **Model-first.** Gemini produces the whole record (shots, text, speech, timings at 4 fps). Code does arithmetic, evidence strength, validation, near-duplicate hashing and history. No Whisper, no PySceneDetect; precision tooling is added only when a generator needs frame-exact cuts |
+| Deterministic steps | ffprobe media facts and frame hashes (ffmpeg + PDQ) run on **all** creatives (no model cost) |
 | Refresh | Record once per extractor version. Claims and paragraph regenerate on a material diagnosis change, at most once per day per creative |
 | Funnel panel | **Untouched.** `diagnosis.py` and `diagnosis-panel.tsx` are not modified by this project. The same-length retention baseline shipped in `202a2d9` stays |
 | Trade-off reading | Lives in the claims layer, not in the diagnosis. Where they differ, the Insights section says so explicitly |
 | UI | Option D: a separate Insights section above the unchanged diagnosis panel |
 | Tags | Taxonomy tagging, pattern insights and tag filters stay as they are. Derived facets are stored but do not replace tags until coverage expands and facets are validated |
-| Models | `google/gemini-3-flash` for record extraction, claims and paragraph; Whisper via AI Gateway for words. No Claude calls (standing rule) |
+| Models | `google/gemini-3-flash` for record extraction, claims and paragraph. No Claude calls (standing rule) |
 
 ## Architecture
 
 Four layers, each independently useful:
 
 1. **Facts** (code): metrics, baselines, the existing diagnosis. Read-only here.
-2. **Record** (tools + model): what is in the ad, with exact times and positions.
+2. **Record** (model): what is in the ad, with times (±250 ms) and positions.
 3. **Claims** (model proposes, code validates and grades): element ↔ metric links with evidence basis, strength, confounds and a test.
 4. **Test briefs** (code): each claim test rendered as a validated JSON contract for generators.
 
 ```
-asset download ──► grid.build (all) ──► variants.link (all)
+asset download ──► media.hash (all) ──► variants.link (all)
                          │
-                         ├─(capped)─► grid.words ──► record.extract ──► claims.derive ──► insight.render
-                         │                                   ▲                ▲
-nightly sweeps ──────────┘              diagnosis (existing) ┘  variant evidence ┘
+                         ├─(capped)─► record.extract ──► claims.derive ──► insight.render
+                         │                                     ▲                ▲
+nightly sweeps ──────────┘                diagnosis (existing) ┘  variant evidence ┘
 ```
 
-## 1. Time grid (deterministic)
+## 1. Media facts and frame hashes (code, all creatives)
 
-Job `grid.build`, per creative with a stored primary asset, all formats.
+Job `media.hash`, per creative with a stored primary asset, all formats. No model calls.
 
-- **ffprobe:** `duration_ms`, `fps` (rational, stored as float), `width`, `height`, `aspect_ratio`. Updates `asset.duration_ms` if null.
-- **Shots (video):** PySceneDetect `AdaptiveDetector`, minimum shot length 250 ms. Boundaries in ms, snapped to frame times. A video with no detected cut is one shot.
-- **Keyframes:** the middle frame of each shot, extracted with ffmpeg, stored as JPEG blobs `{org}/creatives/{creative}/shots/{shot_id}.jpg`.
-- **Hashes:** PDQ hash (`pdqhash`) of each keyframe. Images: one hash of the image. Carousels: one per card.
-- **Words** (`grid.words`, capped set only, video with audio): Whisper via AI Gateway transcription with word-level timestamps → `[{w, start_ms, end_ms}]`. If the gateway returns only segment-level timestamps, words inherit their segment's range and the record marks `words_precision = "segment"`.
-
-Shot IDs are stable per grid version: `s1`, `s2`, … in time order.
+- **ffprobe:** `duration_ms`, `fps` (stored as float), `width`, `height`, `aspect_ratio`. Updates `asset.duration_ms` if null.
+- **Frame hashes (video):** ffmpeg samples one frame per second (`fps=1`); each frame gets a PDQ hash (`pdqhash`) with its `t_ms`. This is the vPDQ approach and needs no shot detection.
+- **Images:** one PDQ hash. **Carousels:** one per card, with `card_index`.
 
 ## 2. Creative record (model, capped)
 
-Job `record.extract`. Inputs to Gemini, media first and text last: the video file (or image / card images); every shot keyframe labelled with its shot ID and in/out times; the word list; the Meta copy (headline, primary text, CTA, link). The model labels the given grid. Output is one JSON document validated against a strict schema.
+Job `record.extract`. Inputs to Gemini, media first and text last: the video file sampled at 4 fps (or the image / card images); ffprobe facts (duration, size); the Meta copy (headline, primary text, CTA, link). The model produces the whole record, including shot boundaries, transcript timings and text boxes. Output is one JSON document validated against a strict schema. After extraction, code extracts a keyframe at each shot's midpoint (`{org}/creatives/{creative}/shots/{shot_id}.jpg`) for the UI and test briefs.
 
 ### Common fields
 
 | Field | Content |
 |---|---|
-| `extractor_version`, `sampling_fps`, `words_precision` | Provenance |
+| `extractor_version`, `sampling_fps`, `timing_precision_ms` | Provenance; `timing_precision_ms = 1000 ÷ sampling_fps` (250 at 4 fps) |
 | `format`, `duration_ms`, `fps`, `width`, `height`, `aspect_ratio` | From ffprobe, not the model |
 | `summary` | One objective sentence |
 | `offer` | `[{id, verbatim, type: discount_percent\|discount_amount\|guarantee\|free_shipping\|bundle\|free_trial\|gift\|other, source: {kind: text_layer\|words\|copy, ref}}]` |
@@ -81,10 +77,10 @@ Job `record.extract`. Inputs to Gemini, media first and text last: the video fil
 
 ### Video
 
-- `shots`: `[{id, in_ms, out_ms, keyframe_ref, pdq_hash, description, camera: selfie_handheld\|tripod\|screen_recording\|pov\|b_roll\|other, camera_note, setting, subject_bbox, transition_in: cut\|jump_cut\|dissolve\|other, speech_crosses_out: bool}]`. `in_ms`, `out_ms`, `keyframe_ref`, `pdq_hash` and `speech_crosses_out` come from code.
+- `shots`: `[{id, in_ms, out_ms, keyframe_ref, pdq_hash, description, camera: selfie_handheld\|tripod\|screen_recording\|pov\|b_roll\|other, camera_note, setting, subject_bbox, transition_in: cut\|jump_cut\|dissolve\|other, speech_crosses_out: bool}]`. `in_ms`/`out_ms` come from the model (normalized by code, see Validation); `keyframe_ref` and `pdq_hash` are added by code after extraction; `speech_crosses_out` is computed by code from `words`.
 - `beats`: `[{id, role: hook\|problem\|demo\|proof\|offer\|cta\|other, shot_ids}]`, contiguous, covering every shot exactly once.
-- `text_layers`: `[{id, shot_ids, start_ms, end_ms, timing_source: shot\|model, verbatim, kind: caption\|super\|sticker\|ui, bbox, style: {weight: regular\|bold\|black, case: upper\|lower\|title\|mixed, color_hex, stroke_hex, background: none\|box\|highlight, background_hex, alignment: left\|center\|right}, animation: static\|word_by_word\|pop\|scroll\|unknown, agreement: agree\|disagree\|unchecked}]`. Times default to the bounds of the shots where the text is visible on the keyframe (`timing_source = shot`); a model estimate inside a shot is marked `model`.
-- `words`: the grid's word list, each word tagged `speaker: voiceover\|on_camera\|unknown`.
+- `text_layers`: `[{id, shot_ids, start_ms, end_ms, timing_source: shot\|model, verbatim, kind: caption\|super\|sticker\|ui, bbox, style: {weight: regular\|bold\|black, case: upper\|lower\|title\|mixed, color_hex, stroke_hex, background: none\|box\|highlight, background_hex, alignment: left\|center\|right}, animation: static\|word_by_word\|pop\|scroll\|unknown}]`. `timing_source = shot` when the text spans whole shots, `model` when it appears or disappears mid-shot.
+- `words`: the model's transcript as `[{w, start_ms, end_ms, speaker: voiceover\|on_camera\|unknown}]`. Timings share `timing_precision_ms`.
 
 ### Image
 
@@ -103,20 +99,22 @@ Job `record.extract`. Inputs to Gemini, media first and text last: the video fil
 ### Validation (code; failure → record `rejected` with problems listed)
 
 - IDs unique; every reference (`shot_ids`, `source.ref`, `focal_region_id`) resolves.
+- Shots are ordered; code normalizes boundaries: the first shot starts at 0, the last ends at `duration_ms`, and gaps or overlaps between neighbours of up to `timing_precision_ms` are closed at the midpoint. Larger gaps or overlaps reject the record.
 - Beats cover every shot exactly once, in order.
 - All times within `[0, duration_ms]`; `start_ms < end_ms`; bboxes within 0–1 with positive area.
 - Enum values valid.
-- **Agreement (flag, not failure):** text layers of kind `caption`, and offer/CTA/promise sources of kind `words`, are compared with the Whisper words over the same time range (normalized: case, punctuation, whitespace). Mismatches set `agreement = disagree`. Other text layers have no independent source in v1 and stay `unchecked`; the gold-set review covers them.
+- **Internal consistency:** caption text layers must match the transcript words over the same time range (normalized: case, punctuation, whitespace, ±`timing_precision_ms`); offer/CTA/promise sources of kind `copy` must appear verbatim in the Meta copy. Violations are listed as problems; a record with more than 20% of captions mismatched is rejected. Accuracy against the ad itself is covered by the gold-set review (§11).
 
 ## 3. Variants (deterministic, all creatives)
 
-Job `variants.link`, after `grid.build`, scoped to the ad account.
+Job `variants.link`, after `media.hash`, scoped to the ad account.
 
-- Two shots match when their keyframe PDQ Hamming distance is ≤ 31.
-- **Video variant pair:** matched shots cover ≥ 50% of the shorter video's duration.
+- Two frames match when their PDQ Hamming distance is ≤ 31.
+- **Shared footage:** for creatives A and B, `shared_ms` = 1000 × the number of A's sampled frames that match any frame of B.
+- **Video variant pair:** `shared_ms` ≥ 50% of the shorter video's duration (checked in both directions, the larger share kept).
 - **Image / carousel variant pair:** image (or any card) hash distance ≤ 31.
-- Stored as `creative_shot_match(shot_a, shot_b, distance)` and `creative_variant(creative_a, creative_b, shared_ms, shared_share)` with `creative_a < creative_b`.
-- The variant diff available without records: shot order and shot durations. With both records: text layer and presence differences by matched shot.
+- Stored as `creative_variant(creative_a, creative_b, shared_ms, shared_share)` with `creative_a < creative_b`.
+- The variant diff available without records: the order in which matched frames appear in each ad. With both records: shot order, text layer and presence differences, by mapping matched frames to shots.
 
 ## 4. Claims (text-only model call, capped)
 
@@ -187,7 +185,7 @@ Job `insight.render`. Input: the validated claims plus the metric values they ci
 ```
 {
   brief_version, creative_id, claim_id, type: edit | concept,
-  source: {format, duration_ms, fps, width, height, asset_ref,
+  source: {format, duration_ms, fps, width, height, asset_ref, timing_precision_ms,
            shots: [{id, in_ms, out_ms, keyframe_ref}], text_layers: [...], regions: [...], words: [...]},
   hypothesis, primary_metric, guardrail_metric,
   keep: [{id, kind, verbatim_or_description}],
@@ -212,7 +210,7 @@ Job `insight.render`. Input: the validated claims plus the metric values they ci
 | `remove_region` | image | `target` region |
 | `restyle_region` | image | `target` region, `instruction` (one sentence), `preserve` flags inherited |
 
-Validation at brief build: targets resolve; no op touches `keep` elements or `preserve`-flagged regions; times within duration; `insert_shot` sources exist in the same org; new `verbatim` text passes the brand kit's prohibited-claims check.
+Cut points in a brief carry `timing_precision_ms`; a generator refines them to exact frames at render time (out of scope). Validation at brief build: targets resolve; no op touches `keep` elements or `preserve`-flagged regions; times within duration; `insert_shot` sources exist in the same org; new `verbatim` text passes the brand kit's prohibited-claims check.
 
 ## 7. Facets (derived, stored, not yet replacing tags)
 
@@ -237,9 +235,8 @@ New migration `db/migrations/20260915000001_creative_insights_v2.sql`.
 
 | Table | Columns |
 |---|---|
-| `creative_grid` | `creative_id` PK, `org_id`, `grid_version`, `status` (`done`/`failed`), `duration_ms`, `fps`, `width`, `height`, `words` JSONB, `words_precision`, `error`, `created_at` |
-| `creative_shot` | `creative_id`, `shot_id`, `org_id`, `in_ms`, `out_ms`, `keyframe_path`, `pdq_hash` BIT(256), PK (`creative_id`, `shot_id`) |
-| `creative_shot_match` | `org_id`, `creative_a`, `shot_a`, `creative_b`, `shot_b`, `distance` |
+| `creative_media` | `creative_id` PK, `org_id`, `status` (`done`/`failed`), `duration_ms`, `fps`, `width`, `height`, `error`, `created_at` |
+| `creative_frame` | `creative_id`, `org_id`, `t_ms` (`card_index` × 1000 for carousels, 0 for images), `pdq_hash` BIT(256), PK (`creative_id`, `t_ms`) |
 | `creative_variant` | `org_id`, `creative_a`, `creative_b`, `shared_ms`, `shared_share`, PK (`creative_a`, `creative_b`) |
 | `creative_record` | `id` PK, `creative_id`, `org_id`, `extractor_version`, `status` (`done`/`rejected`), `record` JSONB, `problems` JSONB, `model`, `input_tokens`, `output_tokens`, `created_at`; unique (`creative_id`, `extractor_version`) |
 | `creative_claim_set` | `id` PK, `creative_id`, `org_id`, `record_id`, `diagnosis_signature`, `status` (`done`/`rejected`), `claims` JSONB, `problems` JSONB, `model`, tokens, `created_at` |
@@ -252,16 +249,15 @@ New migration `db/migrations/20260915000001_creative_insights_v2.sql`.
 
 | Job | Trigger | Scope |
 |---|---|---|
-| `grid.build` | Chained after asset download; nightly sweep for creatives with an asset and no `creative_grid` row (limit 500/night) | All |
-| `variants.link` | Chained after `grid.build` | All |
-| `grid.words` | Chained before `record.extract` | Capped set, video |
-| `record.extract` | Nightly sweep: highest 30-day spend first, readable diagnosis, grid done, within `creative_insight_limit_per_format` counted on `creative_record` rows | Capped |
+| `media.hash` | Chained after asset download; nightly sweep for creatives with an asset and no `creative_media` row (limit 500/night) | All |
+| `variants.link` | Chained after `media.hash` | All |
+| `record.extract` | Nightly sweep: highest 30-day spend first, readable diagnosis, media done, within `creative_insight_limit_per_format` counted on `creative_record` rows | Capped |
 | `claims.derive` | Chained after `record.extract`; nightly when `diagnosis_signature` changed and the last claim set is ≥ 24 h old | Creatives with a done record |
 | `insight.render` | Chained after `claims.derive` | Same |
 
 - All run on the single designed worker; max 3 attempts; dead jobs are not re-enqueued by sweeps (`queue.is_dead`).
 - Once `insight.render` ships, the current `insights.creative_insight` job and its nightly sweep are retired. Existing `creative_insight` rows without `claim_set_id` stay visible until a claim-based paragraph replaces them.
-- The video-length gate in the current runner is no longer needed: the grid provides duration for every creative.
+- The video-length gate in the current runner is no longer needed: `media.hash` provides duration for every creative. The existing `assets.probe_video_duration` job stays until `media.hash` has run on every video, then is retired.
 
 ## 10. UI (Option D)
 
@@ -272,16 +268,17 @@ New component `web/src/components/creative-insights.tsx`, placed at the top of t
 - **Timeline** (video): rows for beats, shots, text layers, speech, brand/packaging, product; clicking a block seeks the player; hovering a claim highlights its elements. Images: the image with region boxes; carousels: cards in order.
 - **Variants:** ads sharing footage, with shared share, shot order, hook rate, link CTR, CPA, purchases (from each creative's diagnosis window).
 
-States: grid only → variants shown, "Insights not available yet"; record without claims → timeline shown; rejected record or claim set → section hidden except variants.
+States: media only → variants shown, "Insights not available yet"; record without claims → timeline shown; rejected record or claim set → section hidden except variants.
 
 ## 11. Quality and evaluation
 
-**Gold set:** the capped records, starting with the four creatives that already have paragraphs. `scripts/review_record.py <creative_id>` writes a local HTML review page (keyframes with bboxes drawn, timeline, transcript beside the video) and a JSON file of editable fields; corrections are saved to `tests/evals/records/<creative_id>.json`. `scripts/eval_records.py` scores an extractor version against the gold set.
+**Gold set:** the capped records, starting with the four creatives that already have paragraphs. `scripts/review_record.py <creative_id>` writes a local HTML review page (shot keyframes with bboxes drawn, timeline, transcript beside the video) and a JSON file of editable fields; corrections are saved to `tests/evals/records/<creative_id>.json`. `scripts/eval_records.py` scores an extractor version against the gold set.
 
 **Targets (on the gold set):**
 
-- Shot boundaries within ±1 frame of a real cut: ≥ 90% of cuts.
-- Text layers: exact normalized verbatim match ≥ 90%; bbox IoU ≥ 0.5 with the gold box ≥ 90%.
+- Shot boundaries within ±500 ms of a real cut: ≥ 90% of cuts; no missed cut longer than 1 s.
+- Text layers: exact normalized verbatim match ≥ 90%; bbox IoU ≥ 0.5 with the gold box ≥ 80%.
+- Transcript: exact normalized match for every offer, CTA and promise sourced from `words`.
 - Presence intervals: start and end within ±500 ms.
 - Claims: 0 citing a missing ID or metric; 100% of test briefs validate.
 - Human rubric per claim: mechanism plausible (yes/no); test executable and not contradicting its own `keep` (yes/no).
@@ -290,36 +287,34 @@ States: grid only → variants shown, "Insights not available yet"; record witho
 ## 12. Errors
 
 - Each job fails independently; a dead job never blocks other creatives.
-- Unreadable media (ffprobe or PySceneDetect error) → `creative_grid.status = failed` with the error; no further steps for that creative.
+- Unreadable media (ffprobe or ffmpeg error) → `creative_media.status = failed` with the error; no further steps for that creative.
 - Record or claim-set validation failure → stored `rejected` with problems; never shown; not retried automatically (a new extractor version or a manual re-run can supersede it).
-- Whisper failure → the record proceeds without words (`words_precision = "none"`); spoken sources and `speech_crosses_out` are then unavailable.
 
 ## 13. Testing
 
-- **Shot detection fixture:** an ffmpeg-built video of solid-colour clips concatenated at known ms cut points; `grid.build` must detect every cut within ±1 frame.
-- **Unit:** record validator (each rule), bbox conversion, facet derivation, claim rules and strength table, divergence note, edit-op validation, brief assembly, PDQ matching thresholds.
-- **Fakes:** Gemini record extractor, claims writer, paragraph writer, Whisper transcriber.
-- **DB:** job chain from asset to insight; sweeps respect caps, `is_dead`, and the 24 h claim refresh; variants link across an account.
+- **Variant fixture:** an ffmpeg-built video from three test clips, and a second video with the same clips reordered and one replaced; `variants.link` must pair them with the expected `shared_ms`, and must not pair either with an unrelated clip.
+- **Unit:** record validator (each rule, including boundary normalization), bbox conversion, facet derivation, claim rules and strength table, divergence note, edit-op validation, brief assembly, PDQ matching thresholds.
+- **Fakes:** Gemini record extractor, claims writer, paragraph writer.
+- **DB:** job chain from asset to insight (`media.hash` → `variants.link`; `record.extract` → `claims.derive` → `insight.render`); sweeps respect caps, `is_dead`, and the 24 h claim refresh; variants link across an account.
 - **API:** `/insights` states and cross-org 404; `/brief` validation.
-- **Web:** `creative-insights.tsx` states (grid only, record only, full, rejected), claim hover highlighting, copy brief. `diagnosis-panel` tests unchanged.
+- **Web:** `creative-insights.tsx` states (media only, record only, full, rejected), claim hover highlighting, copy brief. `diagnosis-panel` tests unchanged.
 
 ## 14. Rollout
 
-1. Grid + variants for all creatives (no model cost). The Insights section ships in its "grid only" state, showing the variants table.
-2. Words + records for the capped set, seeded with the four creatives that already have paragraphs (they count toward the cap); the sweep fills any remaining slots.
+1. Media facts, frame hashes and variants for all creatives (no model cost). The Insights section ships in its "media only" state, showing the variants table.
+2. Records for the capped set, seeded with the four creatives that already have paragraphs (they count toward the cap); the sweep fills any remaining slots.
 3. Hand review of those records; gold labels saved; targets checked.
 4. Claims, paragraph, briefs and the full Insights section; retire the current `insights.creative_insight` job.
 
 ## Verify before implementation planning
 
-- AI Gateway's Whisper transcription returns word-level timestamps (otherwise `words_precision = "segment"` as specified).
+- Gemini 3 Flash through AI Gateway's OpenAI-compatible `file` part accepts a sampling rate (4 fps). If it cannot be set, the record is extracted at the default 1 fps with `timing_precision_ms = 1000`, and the shot-boundary target in §11 is re-checked on the gold set before claims ship.
 - `pdqhash` builds and runs on Amazon Linux 2023.
-- PySceneDetect (with `opencv-python-headless`) memory use on the 2 GB EC2 worker for the longest ad in org 3.
-- Gemini 3 Flash through AI Gateway accepts a video file plus multiple labelled keyframe images in one request.
 
 ## Out of scope
 
-- Generators (timeline rendering, image editing) and any publish step.
+- Generators (timeline rendering, image editing), frame-exact cut refinement, and any publish step.
+- Deterministic extraction tooling (Whisper word alignment, PySceneDetect/TransNetV2 shot detection, OCR). Added only when a generator needs precision the model does not give.
 - The learning loop (matching launched generated ads, claim status updates).
 - Replacing taxonomy tags, pattern insights or tag filters with facets.
 - `account_pattern` claims and model extraction beyond the cap.
