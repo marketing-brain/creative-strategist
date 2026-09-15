@@ -286,7 +286,7 @@ States: no record → "Insights not available yet"; record without claims → ti
 
 ## Deferred: similarity and variants
 
-Cut from v1 on 2026-09-14. Nothing in v1 needs to know which ads resemble each other: the record, claims and briefs are built from one creative and its own diagnosis. Findings from the spike, for when cross-creative work starts:
+Cut from v1 on 2026-09-14. Nothing in v1 needs to know which ads resemble each other: the record, claims and briefs are built from one creative and its own diagnosis. Cross-creative facet patterns (dedupe by file hash, per-account statistics, embedding clusters as a facet and confound) are specified separately in `2026-09-14-creative-insights-aggregation-design.md`. Findings from the spike, for when cross-creative work starts:
 
 - **Identical files are common.** In org 3's top 16 videos, six creatives share one 111 s file and two more pairs are byte-identical. `asset.sha256` already detects this exactly; any cross-creative statistic (e.g. pattern insights) must count such copies once.
 - **PDQ perceptual hashes failed** to match re-captioned or cropped copies of the same footage (0% shared frames).
