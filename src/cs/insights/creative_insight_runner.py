@@ -10,7 +10,6 @@ from cs.core import repo as ingest_repo
 from cs.ingest.durations import unprobed_video_creatives
 from cs.insights import repo
 from cs.insights.creative_insight import (
-    SCHEMA,
     SYSTEM,
     InsightWriter,
     grounding_problems,
@@ -106,13 +105,14 @@ async def write_creative_insight(
         creative_id,
         status=status,
         paragraph=result.paragraph,
+        creative_profile=result.creative_profile,
         moments=result.moments,
         problems=feedback or [],
         brief=brief,
         window_start=dx.window_start,
         window_end=dx.window_end,
         model=result.model or writer.model,
-        prompt_sha256=prompt_sha(SYSTEM, user_text(brief), SCHEMA),
+        prompt_sha256=prompt_sha(SYSTEM, user_text(brief), {}),
         input_tokens=input_tokens,
         output_tokens=output_tokens,
     )

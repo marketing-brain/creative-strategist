@@ -41,7 +41,8 @@ class FakeInsightWriter:
         paragraph = self.paragraphs.pop(0) if len(self.paragraphs) > 1 else self.paragraphs[0]
         return WrittenInsight(
             paragraph=paragraph,
-            moments=[{"layer": "attention", "at": "00:00-00:03", "observed": "a face"}],
+            creative_profile={"concept_and_message": "a product close-up", "editing": None},
+            moments=[{"at": "00:00-00:03", "observed": "a face"}],
             input_tokens=100,
             output_tokens=50,
             model="fake",

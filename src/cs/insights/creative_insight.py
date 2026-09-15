@@ -32,61 +32,126 @@ RELIABLE_STEP_EVENTS = 30
 MAX_WORDS = 220
 
 SYSTEM = """\
-You are a senior performance-creative strategist reviewing one paid-social ad for the team that made it. You have the ad itself (a video with its audio, or the image/carousel cards) and a metrics brief our system computed. Your job is to connect the two: say what in this creative most plausibly accounts for its numbers, what to keep, and what to change.
+You are a senior performance-creative strategist reviewing one paid-social ad for the team that made it. You have the ad itself—a video with audio, an image, or carousel cards—and a metrics brief our system computed.
 
-HOW TO READ THE BRIEF
-- Every number is precomputed. Do not recalculate, re-round, or introduce any number that is not in the brief. Any number you write must appear in the brief exactly as written there.
-- Performance is relative. Each metric is compared with the pooled result of the other ads of the same format in the same account over the same window. Retention compares only with videos of similar length; fatigue compares the ad's last 7 days with its own first 14. Ignore industry benchmarks.
-- Each funnel layer has a status: strong, on_par, weak, or not_measured. Explain weak and strong layers. Mention on_par only if it matters to the verdict. Never speculate about a not_measured layer.
-- Each measured layer has an evidence tier (reliable, directional) set by delivery volume. It controls how firmly you may speak (see LANGUAGE).
+Analyze it as a human strategist would: experience the creative first, understand what it is trying to do, then examine the numbers and develop evidence-grounded insights. This analysis feeds a later comparison across creatives. Do not recommend changes, tests, or actions.
 
-HOW TO READ THE CREATIVE
-Look before you explain. For each layer you discuss, first find the exact moment in the ad that bears on it, note what is seen, heard, and written on screen there, then connect it to the metric.
-- Attention (hook rate, link CTR): 00:00-00:03 for video. The first frame as a thumbnail, first motion, first spoken words, text overlay, and whether the opening works with sound off. For images: what the eye lands on first, and whether the offer or product reads at a glance.
-- Retention: the drop window given in the brief. What happens just before and inside it: a cut, a pause, a switch from hook to explanation, a logo, a change of pace, the product or price appearing, the CTA arriving early.
-- Conversion: the promise, offer, price, or proof the ad sets up, and what the CTA asks for. You cannot see the landing page. You can only point to where the ad may over-promise or fail to pre-qualify, relative to the step where people drop.
-- Fatigue: the creative did not change over time, so do not invent a flaw to explain a decline. If fatigue is weak, say only what about this ad is likely to wear out (a single joke, a dated offer, a hook seen too often).
-- Carousels have no per-card metrics. Do not attribute results to a specific card with confidence.
-Cite moments as MM:SS for video and "card N" for carousels. Quote short on-screen text or spoken lines verbatim when they matter.
+FIRST: WATCH AND UNDERSTAND THE CREATIVE
+
+Watch the complete video before using the metrics to interpret it. For carousels, inspect every supplied card in sequence; for images, examine the full composition. Include accompanying ad copy when available.
+
+Start with the overall experience:
+- What is the central idea, and who does the ad appear to address?
+- What attracts attention, and what reason does it give someone to continue?
+- What does it want the viewer to understand, believe, or want?
+- How does it introduce the product, support its promise, and ask for action?
+- Does the ending follow naturally from the opening?
+
+Then identify the specific elements that create that experience:
+- Message and persuasion: hook, problem or desire, benefit, demonstration, proof, offer, price, qualifications, and CTA.
+- Creator and cast: who appears or speaks, their role as presented, delivery style, and product interaction.
+- Visual style: format, setting, production style, lighting, framing, and branding.
+- Editing: pacing, cuts, transitions, and changes in rhythm.
+- Music and sound: style, mood, energy, effects, changes, and balance with speech.
+- Speech and text: tone, clarity, captions, overlays, readability, and sound-off comprehension.
+
+Build this creative read without deciding whether the ad performed well. Describe intended persuasion separately from observed facts. Do not infer creator identity or credentials from appearance.
+
+Cite meaningful moments as MM:SS or MM:SS-MM:SS for video, "card N" for carousels, and "image" for static ads. Quote short lines verbatim only when clear. Mark unavailable or unclear material rather than inventing it.
+
+SECOND: READ THE PERFORMANCE
+
+Read the full metrics brief and establish the overall pattern before explaining individual numbers.
+
+- All performance numbers and comparisons are precomputed. Do not calculate, re-round, or invent them. Reproduce numbers exactly as supplied. Timestamps and numbers present in the creative are also allowed.
+- Use the supplied metric definitions, account-relative comparisons, and time windows. Ignore industry benchmarks.
+- Each layer has a status: strong, on_par, weak, or not_measured. Discuss meaningful strengths and weaknesses. Never speculate about unmeasured results.
+- Evidence tiers—reliable or directional—describe support for the measured result, not certainty about its explanation.
+- Consider the metrics together, using the supplied campaign objective when available. The weakest metric is not automatically the main issue, and strong engagement does not automatically mean strong business performance.
+
+THIRD: RECONCILE THE TWO
+
+Return to your initial creative read and ask:
+- Which results fit what the creative appears designed to do?
+- Which results challenge that interpretation?
+- Which specific elements or relationships offer a plausible explanation?
+- What remains unexplained?
+
+Revise your interpretation when the evidence warrants it. Do not retrofit every creative feature into a story that matches the numbers.
+
+For each main insight, connect:
+specific creative evidence → plausible viewer response → relevant measured behavior.
+
+Consider the whole ad. A relationship between the opening promise and later proof may matter more than an isolated cut, line, or shot.
+
+- Attention: distinguish attracting attention from giving someone a reason to click.
+- Retention: inspect the supplied drop window and what precedes it. Do not imply more timing precision than the data supports.
+- Conversion: examine the expectations, proof, offer, and qualifications the ad establishes. Do not invent landing-page or checkout problems.
+- Fatigue: a performance decline alone does not establish wear-out or repeated exposure.
+- Carousels: without per-card metrics, do not confidently attribute results to individual cards.
+
+If no defensible creative explanation exists, say so.
 
 LANGUAGE
-A single ad cannot prove cause. Use this ladder and nothing stronger:
-- reliable: "most plausibly", "likely because"
-- directional: "coincides with", "is consistent with"
-Never write "caused", "proves", or "because of" as fact. Hedge once, through that verb; do not stack qualifiers.
-Do not blame targeting, budget, placement, the algorithm, or seasonality; you have no data on them. If a number could plausibly come from outside the creative, say so in one clause.
-If nothing in the creative explains a metric, say that plainly instead of inventing a reason.
-No generic advice ("use a stronger hook", "try UGC"). Every recommendation must name a specific moment or element of THIS ad.
+
+Keep observations, performance findings, and hypotheses distinct. Use language such as "one plausible explanation is" or "is consistent with." Do not present causation or viewer reactions as established facts.
+
+Do not blame targeting, budget, placement, the algorithm, or seasonality without evidence. Briefly acknowledge outside influences when they materially limit the interpretation.
 
 OUTPUT (JSON)
-- moments: first, one entry per layer you will discuss: `at` is the MM:SS or MM:SS-MM:SS range for video, "card N" for carousels, "image" for a single image; `observed` is what is seen, heard, and written there, described without interpretation.
-- paragraph: then one paragraph, 90-150 words, plain prose: no headings, bullets, or markdown. Order: (1) the verdict: which layer is weakest or what is working, with its key number; (2) the evidence: what happens in the ad at the moment that matters, tied to the metric; (3) what to keep; (4) one next test, written as a change to this ad with everything else held constant (e.g. "recut 00:00-00:03 to open on the result shot; keep the rest").
+
+- creative_profile: a compact object with these fields: concept_and_message, product_and_persuasion, creator_and_cast, visual_style, editing, music_and_sound, speech_and_text, structure. Use concise descriptions and consistent labels across ads. Describe the creative without performance judgments; use null for unavailable information.
+- moments: key observations spanning the complete creative. Each entry contains at and observed. Keep observations factual.
+- paragraph: one paragraph, 90–150 words, plain prose. Start with the overall performance pattern and its key supplied numbers, then explain the strongest creative connections and any material contradiction or uncertainty. Prioritize a coherent interpretation over listing metrics. Do not force explanations or pad sparse evidence.
+
+Do not include recommendations, what to keep, or what to change. Return valid JSON only.
 """  # noqa: E501
 
-SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["moments", "paragraph"],
-    "properties": {
-        "moments": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["layer", "at", "observed"],
-                "properties": {
-                    "layer": {
-                        "type": "string",
-                        "enum": ["attention", "retention", "conversion", "fatigue"],
-                    },
-                    "at": {"type": "string"},
-                    "observed": {"type": "string"},
-                },
-            },
-        },
-        "paragraph": {"type": "string"},
-    },
-}
+PROFILE_FIELDS = (
+    "concept_and_message",
+    "product_and_persuasion",
+    "creator_and_cast",
+    "visual_style",
+    "editing",
+    "music_and_sound",
+    "speech_and_text",
+    "structure",
+)
+
+_FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.S)
+
+
+def parse_body(text: str) -> dict[str, Any]:
+    """The model's reply as a dict. The prompt asks for JSON and the request pins JSON mode,
+    but nothing enforces the shape: a fenced block is unwrapped, and anything that is not a
+    JSON object becomes an empty one, which the grounding check then rejects as an empty
+    paragraph and retries."""
+    if not text:
+        return {}
+    m = _FENCE.match(text)
+    if m:
+        text = m.group(1)
+    try:
+        body = json.loads(text)
+    except ValueError:
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
+def parse_insight(body: dict[str, Any]) -> tuple[str, dict[str, str | None], list[dict]]:
+    paragraph = body.get("paragraph")
+    paragraph = paragraph.strip() if isinstance(paragraph, str) else ""
+    raw = body.get("creative_profile")
+    raw = raw if isinstance(raw, dict) else {}
+    profile = {
+        f: (v if isinstance(v := raw.get(f), str) and v.strip() else None) for f in PROFILE_FIELDS
+    }
+    moments = [
+        {"at": str(m.get("at", "")), "observed": str(m.get("observed", ""))}
+        for m in body.get("moments") or []
+        if isinstance(m, dict)
+    ]
+    return paragraph, profile, moments
 
 
 # ---------------------------------------------------------------- evidence tiers
@@ -253,7 +318,8 @@ def render_brief(creative: Mapping[str, Any], d: DiagnosedCreative, duration_ms:
 
 def user_text(brief: str, feedback: list[str] | None = None) -> str:
     text = (
-        f"{brief}\n\nBased on the ad and the brief above, fill moments, then write the paragraph."
+        f"{brief}\n\nBased on the ad and the brief above, fill creative_profile and moments, "
+        "then write the paragraph."
     )
     if feedback:
         text += (
@@ -266,6 +332,8 @@ def user_text(brief: str, feedback: list[str] | None = None) -> str:
 
 # ---------------------------------------------------------------- grounding check
 
+# MM:SS, but not a clock time the ad itself shows ("3:17 am"), which is not a video position.
+_CLOCK = re.compile(r"(?<![\d:])\d{1,2}:[0-5]\d\s?(?:am|pm|AM|PM|a\.m\.|p\.m\.)\b")
 _TIMESTAMP = re.compile(r"(?<![\d:])(\d{1,2}):([0-5]\d)(?![\d:])")
 _NUMBER = re.compile(r"(?<![\w.])\$?[+\-−]?\d[\d,]*(?:\.\d+)?%?")
 
@@ -297,7 +365,10 @@ def grounding_problems(paragraph: str, brief: str, fmt: str, duration_ms: int | 
     invented = [tok for v, tok in _numbers(paragraph).items() if v not in allowed]
     if invented:
         problems.append("numbers not in the brief: " + ", ".join(invented))
-    stamps = [(int(a) * 60 + int(b), f"{a}:{b}") for a, b in _TIMESTAMP.findall(paragraph)]
+    stamps = [
+        (int(a) * 60 + int(b), f"{a}:{b}")
+        for a, b in _TIMESTAMP.findall(_CLOCK.sub(" ", paragraph))
+    ]
     if stamps and fmt != "video":
         problems.append("timestamps cited for a non-video ad")
     elif stamps and duration_ms:
@@ -313,6 +384,7 @@ def grounding_problems(paragraph: str, brief: str, fmt: str, duration_ms: int | 
 @dataclass
 class WrittenInsight:
     paragraph: str = ""
+    creative_profile: dict[str, str | None] = field(default_factory=dict)
     moments: list[dict] = field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0
@@ -350,10 +422,9 @@ class GeminiGatewayInsightWriter:
                 {"role": "system", "content": SYSTEM},
                 {"role": "user", "content": build_content(images, user_text, video)},
             ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {"name": "creative_insight", "schema": SCHEMA, "strict": True},
-            },
+            # JSON mode only: parseable JSON, no enforced shape. The prompt is the single
+            # source of truth for the fields; parse_insight tolerates whatever is missing.
+            response_format={"type": "json_object"},
         )
         choice = resp.choices[0]
         usage = getattr(resp, "usage", None)
@@ -365,7 +436,7 @@ class GeminiGatewayInsightWriter:
         if choice.finish_reason == "content_filter" or getattr(choice.message, "refusal", None):
             out.refused = True
             return out
-        body = json.loads(choice.message.content or "{}")
-        out.paragraph = str(body.get("paragraph", "")).strip()
-        out.moments = list(body.get("moments", []))
+        out.paragraph, out.creative_profile, out.moments = parse_insight(
+            parse_body(choice.message.content or "")
+        )
         return out

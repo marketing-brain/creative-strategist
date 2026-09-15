@@ -22,8 +22,8 @@ from cs.tagging.fakes import FakeTagger
 
 TODAY = datetime.now(UTC).date()
 CLEAN = (
-    "Attention is the strong layer: the product close-up reads at a glance. "
-    "Keep it; test a new headline."
+    "Attention is the strong layer, which is consistent with the product close-up "
+    "reading at a glance."
 )
 
 
@@ -114,7 +114,8 @@ async def test_writes_one_insight_for_a_readable_creative(db, blobs, settings, o
     assert await write_creative_insight(ctx, target, writer) == "done"
     row = await repo.get_creative_insight(db, org_id, target)
     assert row["status"] == "done" and row["paragraph"] == CLEAN
-    assert row["moments"][0]["layer"] == "attention"
+    assert row["moments"][0] == {"at": "00:00-00:03", "observed": "a face"}
+    assert row["creative_profile"]["concept_and_message"] == "a product close-up"
     assert '<layer name="attention" status="strong" tier="reliable">' in row["brief"]
     assert row["window_end"] == TODAY and row["input_tokens"] == 100
     assert writer.calls[0]["n_images"] == 1 and not writer.calls[0]["has_video"]

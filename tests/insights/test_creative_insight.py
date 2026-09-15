@@ -144,6 +144,11 @@ def test_grounding_flags_timestamps_past_the_end_or_on_images():
         "timestamps cited for a non-video ad"
     ]
     assert grounding_problems("   ", brief, "video", 24_000) == ["the paragraph is empty"]
+    # A clock time quoted from the ad is not a video position.
+    assert grounding_problems("The '3:17 am' wake-up line lands.", brief, "video", 24_000) == []
+    assert grounding_problems("Text says 3:17 AM; then 00:31.", brief, "video", 24_000) == [
+        "timestamps past the end of the video: 00:31"
+    ]
 
 
 def test_user_text_names_prior_problems_on_retry():
@@ -156,3 +161,30 @@ def test_mmss():
     assert mmss(0) == "00:00"
     assert mmss(6.4) == "00:06"
     assert mmss(83) == "01:23"
+
+
+def test_parse_body_unwraps_fences_and_tolerates_garbage():
+    from cs.insights.creative_insight import parse_body
+
+    assert parse_body('```json\n{"paragraph": "x"}\n```') == {"paragraph": "x"}
+    assert parse_body('{"paragraph": "x"}') == {"paragraph": "x"}
+    assert parse_body("not json") == {}
+    assert parse_body("[1, 2]") == {}
+    assert parse_body("") == {}
+
+
+def test_parse_insight_fills_missing_fields():
+    from cs.insights.creative_insight import PROFILE_FIELDS, parse_insight
+
+    paragraph, profile, moments = parse_insight(
+        {
+            "paragraph": "  A paragraph. ",
+            "creative_profile": {"editing": "one cut", "visual_style": "", "extra": "ignored"},
+            "moments": [{"at": "00:03", "observed": "a cut"}, "junk", {"at": 5}],
+        }
+    )
+    assert paragraph == "A paragraph."
+    assert set(profile) == set(PROFILE_FIELDS)
+    assert profile["editing"] == "one cut" and profile["visual_style"] is None
+    assert moments == [{"at": "00:03", "observed": "a cut"}, {"at": "5", "observed": ""}]
+    assert parse_insight({}) == ("", dict.fromkeys(PROFILE_FIELDS), [])
