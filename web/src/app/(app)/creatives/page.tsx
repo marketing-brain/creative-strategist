@@ -41,6 +41,9 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
     api.accounts(),
     api.dimensions(),
   ]);
+  const selectedDim = dimensions.find((d) => d.name === sp.dimension);
+  const openValues = selectedDim?.kind === 'open' ? await api.dimensionValues(selectedDim.name) : undefined;
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   if (page > totalPages) redirect(makeHref(totalPages));
 
@@ -51,7 +54,7 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
           <h1 className="text-2xl font-semibold tracking-tight">Creatives</h1>
           <p className="text-sm text-muted-foreground">Every ad creative synced from your connected accounts.</p>
         </div>
-        <CreativeFilters accounts={accounts} dimensions={dimensions} />
+        <CreativeFilters accounts={accounts} dimensions={dimensions} openValues={openValues} />
       </div>
       {creatives.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border py-20 text-center">

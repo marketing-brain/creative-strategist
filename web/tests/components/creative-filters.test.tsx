@@ -8,8 +8,8 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push }), useSearchParams
 import { CreativeFilters } from '@/components/creative-filters';
 
 const dimensions = [
-  { name: 'hook_type', group: 'hook', applies_to: ['image', 'video'], values: ['question', 'statistic'], description: '' },
-  { name: 'hook_summary', group: 'summary', applies_to: ['image', 'video'], values: null, description: '' },
+  { name: 'hook_type', group: 'hook', kind: 'single' as const, applies_to: ['image', 'video'], values: ['question', 'statistic'], description: '' },
+  { name: 'hook_summary', group: 'summary', kind: 'text' as const, applies_to: ['image', 'video'], values: null, description: '' },
 ];
 
 afterEach(() => {

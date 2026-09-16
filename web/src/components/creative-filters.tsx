@@ -10,7 +10,15 @@ const formats = [
   { value: 'unresolved', label: 'Unresolved' },
 ];
 
-export function CreativeFilters({ accounts, dimensions }: { accounts: { id: string; name: string }[]; dimensions: Dimension[] }) {
+export function CreativeFilters({
+  accounts,
+  dimensions,
+  openValues,
+}: {
+  accounts: { id: string; name: string }[];
+  dimensions: Dimension[];
+  openValues?: { value: string; count: number }[];
+}) {
   const router = useRouter();
   const params = useSearchParams();
 
@@ -25,9 +33,10 @@ export function CreativeFilters({ accounts, dimensions }: { accounts: { id: stri
     router.push(`/creatives${s ? `?${s}` : ''}`);
   };
 
-  const filterableDimensions = dimensions.filter((d) => d.values);
+  const filterableDimensions = dimensions.filter((d) => d.values || d.kind === 'open');
   const selectedDimension = params.get('dimension') ?? '';
-  const dimensionValues = filterableDimensions.find((d) => d.name === selectedDimension)?.values ?? [];
+  const selected = filterableDimensions.find((d) => d.name === selectedDimension);
+  const dimensionValues = selected?.kind === 'open' ? (openValues ?? []).map((v) => v.value) : (selected?.values ?? []);
 
   return (
     <div className="flex flex-wrap gap-2">
