@@ -1,6 +1,8 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from cs.tagging.fakes import DEFAULT_V2_PAYLOAD, FakeTagger
 from cs.tagging.prompts import SYSTEM, prompt_sha, user_text
 from cs.tagging.tagger import GeminiGatewayTagger
@@ -76,6 +78,14 @@ async def test_gemini_tagger_handles_refusal(settings):
     client = _client(_response(None, finish_reason="content_filter", refusal="blocked"))
     res = await GeminiGatewayTagger(settings, client=client).tag([], "x", {"type": "object"})
     assert res.refused and res.tags == []
+
+
+async def test_gemini_tagger_rejects_a_truncated_response(settings):
+    """finish_reason=length means the JSON is cut off mid-object; say so instead of
+    surfacing an opaque JSONDecodeError (and retrying the whole video at full cost)."""
+    client = _client(_response('{"tags": [{"dimension": "hook', finish_reason="length"))
+    with pytest.raises(RuntimeError, match="truncated"):
+        await GeminiGatewayTagger(settings, client=client).tag([], "x", {"type": "object"})
 
 
 def test_prompt_builders():

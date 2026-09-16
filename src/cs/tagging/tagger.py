@@ -95,6 +95,10 @@ class GeminiGatewayTagger:
         if choice.finish_reason == "content_filter" or getattr(choice.message, "refusal", None):
             result.refused = True
             return result
+        if choice.finish_reason == "length":
+            # The JSON is cut off mid-object; parsing it would only raise an opaque
+            # JSONDecodeError, and the caller's retry would re-send the whole video.
+            raise RuntimeError("model response truncated (finish_reason=length)")
         text = choice.message.content or ""
         payload = json.loads(text) if text else {}
         result.payload = payload if isinstance(payload, dict) else {}
