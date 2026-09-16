@@ -6,9 +6,19 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 
+FFPROBE_TIMEOUT_S = 60
+FFMPEG_TIMEOUT_S = 180
+
 
 def _run(cmd: list[str]) -> bytes:
-    proc = subprocess.run(cmd, capture_output=True)
+    """ffprobe, bounded and detached from stdin: on the single worker a file that makes
+    ffprobe block would otherwise hold the whole tagging queue."""
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, stdin=subprocess.DEVNULL, timeout=FFPROBE_TIMEOUT_S
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"{cmd[0]} failed: timeout") from exc
     if proc.returncode != 0:
         raise RuntimeError(f"{cmd[0]} failed: {proc.stderr.decode(errors='ignore')[-500:]}")
     return proc.stdout
@@ -53,7 +63,7 @@ def probe_video(video: bytes) -> VideoStats:
                 "-select_streams",
                 "v:0",
                 "-show_entries",
-                "stream=width,height:format=duration",
+                "stream=width,height:stream_side_data=rotation:format=duration",
                 "-of",
                 "json",
                 f.name,
@@ -64,17 +74,36 @@ def probe_video(video: bytes) -> VideoStats:
         duration_s = float(info["format"]["duration"])
         try:
             cut_count = _count_scene_cuts(f.name)
-        except RuntimeError:
+        except (RuntimeError, subprocess.TimeoutExpired):
             cut_count = None
-    return VideoStats(
-        duration_s, int(stream.get("width", 0)), int(stream.get("height", 0)), cut_count
+    rotation = next(
+        (
+            float(sd["rotation"])
+            for sd in stream.get("side_data_list") or []
+            if sd.get("rotation") is not None
+        ),
+        None,
     )
+    width, height = _display_size(
+        int(stream.get("width", 0)), int(stream.get("height", 0)), rotation
+    )
+    return VideoStats(duration_s, width, height, cut_count)
+
+
+def _display_size(width: int, height: int, rotation: float | None) -> tuple[int, int]:
+    """ffprobe's stream width/height are the coded dimensions. A phone clip carrying a
+    quarter-turn display matrix (1920x1080 coded, rotation -90) is shown as 1080x1920,
+    which is the shape aspect_ratio has to reason about."""
+    if rotation is not None and abs(rotation) % 180 == 90:
+        return height, width
+    return width, height
 
 
 def _count_scene_cuts(path: str) -> int:
     proc = subprocess.run(
         [
             "ffmpeg",
+            "-nostdin",
             "-v",
             "info",
             "-i",
@@ -87,6 +116,8 @@ def _count_scene_cuts(path: str) -> int:
             "-",
         ],
         capture_output=True,
+        stdin=subprocess.DEVNULL,
+        timeout=FFMPEG_TIMEOUT_S,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"ffmpeg failed: {proc.stderr.decode(errors='ignore')[-500:]}")
