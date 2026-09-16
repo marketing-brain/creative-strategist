@@ -312,7 +312,8 @@ async def test_video_profile_rejects_timestamps_beyond_the_video_length(
     bad = {
         **DEFAULT_V2_PAYLOAD,
         "ordered": {
-            "beats": [{"value": "hook", "t_start": "0:00"}, {"value": "cta", "t_start": "0:47"}]
+            **DEFAULT_V2_PAYLOAD["ordered"],
+            "beats": [{"value": "hook", "t_start": "0:00"}, {"value": "cta", "t_start": "0:47"}],
         },
     }
     tagger = FakeTagger(payloads_by_call=[bad])

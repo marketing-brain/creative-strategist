@@ -12,7 +12,7 @@ from cs.core.config import Settings
 # The v2 video profile carries a verbatim transcript plus ~40 evidence strings; the
 # provider default output budget truncated a 93-second ad mid-object. Gemini 2.5 Flash
 # allows far more than this.
-VIDEO_MAX_OUTPUT_TOKENS = 16384
+VIDEO_MAX_OUTPUT_TOKENS = 24576
 
 
 @dataclass

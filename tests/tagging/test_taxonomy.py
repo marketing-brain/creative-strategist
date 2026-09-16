@@ -44,6 +44,10 @@ VIDEO_DIMENSIONS = {
         "product_reveal",
         "ending",
         "music",
+        "messenger_age_band",
+        "messenger_gender_presentation",
+        "spoken_language",
+        "subtitle_language",
     ],
     "multi": [
         "hook_devices",
@@ -52,8 +56,11 @@ VIDEO_DIMENSIONS = {
         "offer_elements",
         "cta_modes",
         "registers",
+        "cast",
+        "native_format_cues",
+        "price_mentions",
     ],
-    "ordered": ["beats"],
+    "ordered": ["beats", "scenes"],
     "open": [
         "concept_tags",
         "topics",
@@ -61,14 +68,17 @@ VIDEO_DIMENSIONS = {
         "audience_callouts",
         "claims",
         "visual_motifs",
+        "products_mentioned",
+        "features_mentioned",
     ],
     "text": ["hook_verbatim", "concept_summary", "transcript"],
+    "series": ["overlay_texts"],
 }
 
 
 def test_version_and_nested_formats():
     t = load_taxonomy()
-    assert t.version == "2.2" and len(t.sha256) == 64
+    assert t.version == "2.3" and len(t.sha256) == 64
     assert t.nested_formats == ("video",)
     assert t.is_nested("video") and not t.is_nested("image") and not t.is_nested("carousel")
 
@@ -107,8 +117,8 @@ def test_legacy_flat_schema_is_unchanged_for_images():
 
 def test_nested_schema_enforces_every_enum_and_skips_computed():
     schema = load_taxonomy().json_schema("video")
-    assert list(schema["properties"]) == ["single", "multi", "ordered", "open", "text"]
-    assert schema["required"] == ["single", "multi", "ordered", "open", "text"]
+    assert list(schema["properties"]) == ["single", "multi", "ordered", "open", "text", "series"]
+    assert schema["required"] == ["single", "multi", "ordered", "open", "text", "series"]
     single = schema["properties"]["single"]
     assert "aspect_ratio" not in single["properties"]
     messenger = single["properties"]["messenger"]
@@ -143,6 +153,10 @@ def _payload() -> dict:
         "brand_presence": ("prominent", 1.0, "logo"),
         "ending": ("cta_card", 1.0, "card"),
         "music": ("none", 1.0, "silent"),
+        "messenger_age_band": ("40_to_60", 0.7, "greying"),
+        "messenger_gender_presentation": ("woman", 1.0, "presenter"),
+        "spoken_language": ("en", 1.0, "speech"),
+        "subtitle_language": ("en", 1.0, "overlays"),
     }
     return {
         "single": {
@@ -169,7 +183,23 @@ def _payload() -> dict:
                 {"value": "problem", "t_start_s": 5.0},
                 {"value": "proof", "t_start_s": 5.0},
                 {"value": "cta", "t_start_s": 85.0},
-            ]
+            ],
+            "scenes": [
+                {
+                    "value": "talking_head",
+                    "t_start": "0:00",
+                    "face": True,
+                    "product": False,
+                    "packaging": False,
+                },
+                {
+                    "value": "product_closeup",
+                    "t_start": "0:55",
+                    "face": False,
+                    "product": True,
+                    "packaging": True,
+                },
+            ],
         },
         "open": {
             "concept_tags": [
@@ -356,3 +386,47 @@ def test_validate_nested_accepts_clock_strings_and_rejects_garbage():
     p["ordered"]["beats"] = [{"value": "hook", "t_start": "soon"}]
     with pytest.raises(ValueError, match="clock time"):
         load_taxonomy().validate(p, "video")
+
+
+def test_validate_nested_scenes_carry_flags_in_raw_value():
+    rows = load_taxonomy().validate(_payload(), "video")
+    scenes = [
+        (r["value"], r["ordinal"], r["t_start_s"], r["raw_value"])
+        for r in rows
+        if r["dimension"] == "scenes"
+    ]
+    assert scenes == [
+        ("talking_head", 0, 0.0, "face"),
+        ("product_closeup", 1, 55.0, "product|packaging"),
+    ]
+    assert all(r["raw_value"] is None for r in rows if r["dimension"] == "beats")
+
+
+def test_validate_nested_series_sorts_by_time_and_drops_blanks():
+    p = _payload()
+    p["series"] = {
+        "overlay_texts": [
+            {"t_start": "0:03", "text": "20% OFF"},
+            {"t_start": "0:00", "text": "Worst OTC Sleep Aids!!"},
+            {"t_start": "0:05", "text": "   "},
+        ]
+    }
+    rows = load_taxonomy().validate(p, "video")
+    got = [
+        (r["ordinal"], r["t_start_s"], r["value"], r["kind"])
+        for r in rows
+        if r["dimension"] == "overlay_texts"
+    ]
+    assert got == [(0, 0.0, "Worst OTC Sleep Aids!!", "series"), (1, 3.0, "20% OFF", "series")]
+    p["series"] = {"overlay_texts": []}
+    rows = load_taxonomy().validate(p, "video")
+    assert not [r for r in rows if r["dimension"] == "overlay_texts"]
+
+
+def test_nested_schema_has_series_and_scene_flags():
+    schema = load_taxonomy().json_schema("video")
+    scenes = schema["properties"]["ordered"]["properties"]["scenes"]["items"]
+    assert scenes["required"] == ["value", "t_start", "face", "product", "packaging"]
+    assert scenes["properties"]["face"] == {"type": "boolean"}
+    overlays = schema["properties"]["series"]["properties"]["overlay_texts"]["items"]
+    assert overlays["required"] == ["t_start", "text"]

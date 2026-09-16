@@ -11,7 +11,7 @@ import yaml
 from cs.tagging.vocab import normalize
 
 DEFAULT_PATH = Path(__file__).with_name("taxonomy.yaml")
-KINDS = ("numeric", "single", "multi", "ordered", "open", "text")
+KINDS = ("numeric", "single", "multi", "ordered", "open", "text", "series")
 EVIDENCE_MAX = 500
 ROW_KEYS = (
     "dimension",
@@ -38,6 +38,8 @@ class Dimension:
     vocab_hint: int = 0
     # Formats for which code, not the model, produces the value (spec §1 layer 0).
     computed_for: tuple[str, ...] = ()
+    # ordered only: boolean facts per item (e.g. face/product on screen), stored in raw_value.
+    flags: tuple[str, ...] = ()
 
     @property
     def computed(self) -> bool:
@@ -113,7 +115,7 @@ class Taxonomy:
         def items(props: dict) -> dict:
             return {"type": "array", "items": obj(props)}
 
-        single, multi, ordered, open_, text = {}, {}, {}, {}, {}
+        single, multi, ordered, open_, text, series = {}, {}, {}, {}, {}, {}
         for d in self.model_dimensions(fmt):
             if d.kind == "single":
                 single[d.name] = obj(
@@ -129,7 +131,12 @@ class Taxonomy:
                     props["t_start"] = {"type": "string"}
                 multi[d.name] = items(props)
             elif d.kind == "ordered":
-                ordered[d.name] = items({"value": enum(d), "t_start": {"type": "string"}})
+                props = {"value": enum(d), "t_start": {"type": "string"}}
+                for flag in d.flags:
+                    props[flag] = {"type": "boolean"}
+                ordered[d.name] = items(props)
+            elif d.kind == "series":
+                series[d.name] = items({"t_start": {"type": "string"}, "text": {"type": "string"}})
             elif d.kind == "open":
                 open_[d.name] = items({"slug": {"type": "string"}, "evidence": {"type": "string"}})
             elif d.kind == "text":
@@ -141,6 +148,7 @@ class Taxonomy:
                 "ordered": obj(ordered),
                 "open": obj(open_),
                 "text": obj(text),
+                "series": obj(series),
             }
         )
 
@@ -199,6 +207,8 @@ class Taxonomy:
                 rows.extend(self._open_rows(d, section.get(d.name)))
             elif d.kind == "text":
                 rows.append(_row(d, str(section.get(d.name) or "")))
+            elif d.kind == "series":
+                rows.extend(self._series_rows(d, section.get(d.name)))
         return rows
 
     @staticmethod
@@ -241,8 +251,23 @@ class Taxonomy:
             if t is None or t < last:
                 raise ValueError(f"{d.name}: t_start_s must be present and non-decreasing")
             last = t
-            out.append(_row(d, value, t_start_s=t, ordinal=i))
+            flags = "|".join(f for f in d.flags if item.get(f) is True) or None
+            out.append(_row(d, value, raw_value=flags, t_start_s=t, ordinal=i))
         return out
+
+    @staticmethod
+    def _series_rows(d: Dimension, items) -> list[dict]:
+        """Timestamped free text (on-screen overlays). Empty is fine; items are sorted by time
+        so a model that lists them out of order does not fail the run."""
+        parsed: list[tuple[float, str]] = []
+        for item in _items(d, items):
+            text = str(_item(d, item).get("text", "")).strip()
+            t = _seconds(_clock(item))
+            if not text or t is None:
+                continue
+            parsed.append((t, text[:EVIDENCE_MAX]))
+        parsed.sort(key=lambda p: p[0])
+        return [_row(d, text, t_start_s=t, ordinal=i) for i, (t, text) in enumerate(parsed)]
 
     @staticmethod
     def _open_rows(d: Dimension, items) -> list[dict]:
@@ -266,6 +291,7 @@ _SECTION = {
     "ordered": "ordered",
     "open": "open",
     "text": "text",
+    "series": "series",
 }
 
 
@@ -372,6 +398,7 @@ def load_taxonomy(path: Path | None = None) -> Taxonomy:
                 max_values=d.get("max_values"),
                 vocab_hint=int(d.get("vocab_hint", 0)),
                 computed_for=tuple(d.get("computed_for", ())),
+                flags=tuple(d.get("flags", ())),
             )
         )
     return Taxonomy(

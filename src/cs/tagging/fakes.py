@@ -42,6 +42,10 @@ DEFAULT_V2_PAYLOAD = {
         "brand_presence": _single("prominent", 1.0, "logo on pouch"),
         "ending": _single("cta_card", 1.0, "end card with button"),
         "music": _single("none", 1.0, "no music bed"),
+        "messenger_age_band": _single("25_to_40", 0.8, "appears mid-thirties"),
+        "messenger_gender_presentation": _single("woman", 1.0, "presenter"),
+        "spoken_language": _single("en", 1.0, "English speech"),
+        "subtitle_language": _single("en", 1.0, "English overlays"),
     },
     "multi": {
         "hook_devices": [
@@ -72,6 +76,9 @@ DEFAULT_V2_PAYLOAD = {
             {"value": "fear", "evidence": "warning"},
             {"value": "authority", "evidence": "credential"},
         ],
+        "cast": [{"value": "solo_person", "evidence": "one presenter"}],
+        "native_format_cues": [],
+        "price_mentions": [{"value": "price_on_screen", "t_start": "0:03.6", "evidence": "$29"}],
     },
     "ordered": {
         "beats": [
@@ -81,7 +88,23 @@ DEFAULT_V2_PAYLOAD = {
             {"value": "solution_intro", "t_start": "0:02"},
             {"value": "offer", "t_start": "0:03.6"},
             {"value": "cta", "t_start": "0:03.7"},
-        ]
+        ],
+        "scenes": [
+            {
+                "value": "talking_head",
+                "t_start": "0:00",
+                "face": True,
+                "product": False,
+                "packaging": False,
+            },
+            {
+                "value": "product_closeup",
+                "t_start": "0:03",
+                "face": False,
+                "product": True,
+                "packaging": True,
+            },
+        ],
     },
     "open": {
         "concept_tags": [
@@ -102,6 +125,8 @@ DEFAULT_V2_PAYLOAD = {
             {"slug": "pharmacy coat", "evidence": "0:00"},
             {"slug": "lab_report_screenshot", "evidence": "1:13"},
         ],
+        "products_mentioned": [{"slug": "Magnesium Ashwagandha Gummies", "evidence": "pouch"}],
+        "features_mentioned": [{"slug": "third_party_tested", "evidence": "CoA"}],
     },
     "text": {
         "hook_verbatim": (
@@ -114,6 +139,12 @@ DEFAULT_V2_PAYLOAD = {
         "transcript": (
             "As a pharmacist with almost ten years of experience, these are the worst sleep aids."
         ),
+    },
+    "series": {
+        "overlay_texts": [
+            {"t_start": "0:03", "text": "20% OFF TODAY"},
+            {"t_start": "0:00", "text": "Worst OTC Sleep Aids!!"},
+        ]
     },
 }
 

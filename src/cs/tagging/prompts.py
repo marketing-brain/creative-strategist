@@ -53,8 +53,14 @@ SYSTEM_V2 = (
     "(8) transcript is verbatim speech with no timestamps; an empty string when there is no "
     "speech. hook_verbatim is the exact first on-screen text, then the first spoken "
     "sentence, separated by ' / '. "
-    "(9) Every list may be empty except beats and concept_tags. Emit every field of the "
-    "schema; cite concrete visual or audio evidence for each value."
+    "(9) scenes is a complete shot list from 0:00 to the end: a new scene whenever the shot "
+    "type or what is on screen changes; its face/product/packaging booleans describe that "
+    "scene only. "
+    "(10) overlay_texts is every on-screen text verbatim, in order, with the time it first "
+    "appears; do not include subtitles that transcribe the speech. "
+    "(11) proof_devices counts only what is visibly shown or explicitly spoken. "
+    "(12) Every list may be empty except beats, scenes and concept_tags. Emit every field "
+    "of the schema; cite concrete visual or audio evidence for each value."
 )
 
 
@@ -87,9 +93,12 @@ def user_text_nested(
                 f"- {d.name} (multi, {d.group}): {d.description} Allowed values: {vals}{ts}"
             )
         elif d.kind == "ordered":
+            flags = (
+                " Each item also carries booleans: " + ", ".join(d.flags) + "." if d.flags else ""
+            )
             lines.append(
                 f"- {d.name} (ordered, {d.group}): {d.description} Allowed values: {vals} "
-                "Each item carries t_start as minutes:seconds."
+                f"Each item carries t_start as minutes:seconds.{flags}"
             )
         elif d.kind == "open":
             cap = f" At most {d.max_values}." if d.max_values else ""
@@ -102,6 +111,11 @@ def user_text_nested(
                 )
         elif d.kind == "text":
             lines.append(f"- {d.name} (text): {d.description}")
+        elif d.kind == "series":
+            lines.append(
+                f"- {d.name} (series, {d.group}): {d.description} Each item carries t_start as "
+                "minutes:seconds and text."
+            )
     lines += ["", "Return JSON matching the schema exactly."]
     return "\n".join(lines)
 

@@ -12,6 +12,21 @@ function DimensionRow({ name, kind, tags }: { name: string; kind: Tag['kind']; t
       </li>
     );
   }
+  if (kind === 'series') {
+    const items = [...tags].sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0));
+    return (
+      <li className="w-full text-sm">
+        <span className="text-muted-foreground">{name}</span>
+        <ol className="mt-0.5 space-y-0.5">
+          {items.map((t, i) => (
+            <li key={`${t.dimension}-${i}`}>
+              <span className="tabular-nums text-muted-foreground">{secs(t.t_start_s)}</span> {t.value}
+            </li>
+          ))}
+        </ol>
+      </li>
+    );
+  }
   if (kind === 'text') {
     return (
       <li className="w-full text-sm">

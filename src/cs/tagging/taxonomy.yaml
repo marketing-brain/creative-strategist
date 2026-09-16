@@ -1,4 +1,4 @@
-version: "2.2"
+version: "2.3"
 # Formats whose model call returns the nested v2 profile (spec §2). Every other format
 # keeps the legacy flat {"tags": [...]} schema.
 nested_formats: [video]
@@ -214,7 +214,7 @@ dimensions:
     timestamped: true
     applies_to: [video]
     values: [personal_testimonial, expert_credential, study_or_citation, review_screenshot, lab_report_or_certificate, before_after, live_demo, comparison_table, guarantee, press_mention]
-    description: Every kind of proof shown or spoken, each with the second it starts. expert_credential requires a stated credential.
+    description: Every kind of proof that is visibly shown or explicitly spoken, each with the second it starts. A passing mention of a recommendation is not proof. expert_credential requires a stated credential.
   - name: angles
     group: message
     kind: multi
@@ -303,3 +303,72 @@ dimensions:
     kind: text
     applies_to: [video]
     description: Verbatim speech with no timestamps. Empty string when there is no speech.
+
+  # ---- added 2026-09-16 before the org 3 drain: capture-once facts only the video model can see ----
+  - name: messenger_age_band
+    group: messenger
+    kind: single
+    applies_to: [video]
+    values: [none, under_25, 25_to_40, 40_to_60, over_60]
+    description: Apparent age band of the main on-camera person; none when no person is shown.
+  - name: messenger_gender_presentation
+    group: messenger
+    kind: single
+    applies_to: [video]
+    values: [none, woman, man, mixed]
+    description: Apparent gender presentation of the on-camera people; mixed when both appear; none when no person is shown.
+  - name: spoken_language
+    group: form
+    kind: single
+    applies_to: [video]
+    values: [none, en, es, fr, de, pt, it, hi, other]
+    description: Language of the speech; none when there is no speech.
+  - name: subtitle_language
+    group: form
+    kind: single
+    applies_to: [video]
+    values: [none, en, es, fr, de, pt, it, hi, other]
+    description: Language of on-screen text; none when there is no on-screen text.
+  - name: cast
+    group: messenger
+    kind: multi
+    applies_to: [video]
+    values: [solo_person, multiple_people, couple, child, pet]
+    description: Who appears on screen at any point. Empty when no person or animal appears.
+  - name: native_format_cues
+    group: form
+    kind: multi
+    applies_to: [video]
+    values: [green_screen, reply_to_comment, duet_or_stitch, platform_caption_style, social_post_screenshot, message_screenshot]
+    description: Platform-native formats the video imitates or uses. Empty when none.
+  - name: price_mentions
+    group: message
+    kind: multi
+    timestamped: true
+    applies_to: [video]
+    values: [price_on_screen, price_spoken]
+    description: Where a price or amount of money is shown or said, each with the second it first appears. Empty when no price appears.
+  - name: scenes
+    group: structure
+    kind: ordered
+    flags: [face, product, packaging]
+    applies_to: [video]
+    values: [talking_head, product_closeup, product_in_use, packaging_shot, broll, screen_recording, text_card, before_after, unboxing, lifestyle, other]
+    description: The shots in order. Start a new scene whenever the shot type or what is on screen changes; the first scene starts at 0:00. Each scene also says whether a face, the product, and its packaging are on screen.
+  - name: products_mentioned
+    group: concept
+    kind: open
+    vocab_hint: 40
+    applies_to: [video]
+    description: Products the ad shows or names, as slugs (e.g. magnesium_ashwagandha_gummies). Empty when none can be identified.
+  - name: features_mentioned
+    group: concept
+    kind: open
+    vocab_hint: 40
+    applies_to: [video]
+    description: Product features, ingredients or attributes the ad calls out (e.g. liposomal, ten_in_one, third_party_tested).
+  - name: overlay_texts
+    group: text
+    kind: series
+    applies_to: [video]
+    description: Every on-screen text overlay in order of first appearance, verbatim, with the time it first appears. Exclude subtitles that merely transcribe the speech; include captions that add words not spoken, headline cards, price tags and CTA text.
