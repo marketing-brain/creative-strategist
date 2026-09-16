@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     apify_api_key: str = ""
 
     worker_poll_seconds: float = 1.0
+    # 'done' jobs are deleted after this many days; 'dead' rows are kept (queue.is_dead).
+    job_retention_days: int = 30
     job_lease_seconds: int = 600
 
     cors_origins: str = "http://localhost:3000"

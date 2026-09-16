@@ -142,6 +142,21 @@ async def heartbeat(db: Database, job_id: UUID, worker_id: str) -> bool:
     return int(result.split()[-1]) == 1
 
 
+async def purge_done(db: Database, older_than_days: int) -> int:
+    """Delete finished jobs past their retention. Only 'done' rows go: 'dead' rows are the
+    record `is_dead` reads to stop a sweep re-enqueueing something that already gave up, and
+    pending/running rows are live work."""
+    return int(
+        (
+            await db.execute(
+                "DELETE FROM job WHERE status='done'"
+                " AND finished_at < now() - make_interval(days => $1)",
+                older_than_days,
+            )
+        ).split()[-1]
+    )
+
+
 async def reclaim_stale(db: Database, lease_seconds: int) -> int:
     """Release jobs whose lease expired, dead-lettering the ones out of attempts."""
     result = await db.execute(
