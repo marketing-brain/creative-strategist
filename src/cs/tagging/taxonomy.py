@@ -183,15 +183,19 @@ class Taxonomy:
             raise ValueError("profile payload is not an object")
         rows: list[dict] = []
         for d in self.model_dimensions(fmt):
-            section = payload.get(_SECTION[d.kind]) or {}
+            section = payload.get(_SECTION[d.kind])
+            if section is None:
+                section = {}
+            if not isinstance(section, dict):
+                raise ValueError(f"{d.kind} section is not an object")
             if d.kind == "single":
                 rows.append(self._single_row(d, section.get(d.name)))
             elif d.kind == "multi":
-                rows.extend(self._multi_rows(d, section.get(d.name) or []))
+                rows.extend(self._multi_rows(d, section.get(d.name)))
             elif d.kind == "ordered":
-                rows.extend(self._ordered_rows(d, section.get(d.name) or []))
+                rows.extend(self._ordered_rows(d, section.get(d.name)))
             elif d.kind == "open":
-                rows.extend(self._open_rows(d, section.get(d.name) or []))
+                rows.extend(self._open_rows(d, section.get(d.name)))
             elif d.kind == "text":
                 rows.append(_row(d, str(section.get(d.name) or "")))
         return rows
@@ -207,11 +211,11 @@ class Taxonomy:
         return _row(d, value, confidence=conf, evidence=item.get("evidence"))
 
     @staticmethod
-    def _multi_rows(d: Dimension, items: list) -> list[dict]:
+    def _multi_rows(d: Dimension, items) -> list[dict]:
         out: list[dict] = []
         seen: set[str] = set()
-        for item in items:
-            value = str(item.get("value", "")).strip()
+        for item in _items(d, items):
+            value = str(_item(d, item).get("value", "")).strip()
             if value not in (d.values or ()):
                 raise ValueError(f"{d.name}: value {value!r} not allowed")
             if value in seen:
@@ -222,13 +226,14 @@ class Taxonomy:
         return out
 
     @staticmethod
-    def _ordered_rows(d: Dimension, items: list) -> list[dict]:
+    def _ordered_rows(d: Dimension, items) -> list[dict]:
+        items = _items(d, items)
         if not items:
             raise ValueError(f"{d.name}: must not be empty")
         out: list[dict] = []
         last = float("-inf")
         for i, item in enumerate(items):
-            value = str(item.get("value", "")).strip()
+            value = str(_item(d, item).get("value", "")).strip()
             if value not in (d.values or ()):
                 raise ValueError(f"{d.name}: value {value!r} not allowed")
             t = _seconds(item.get("t_start_s"))
@@ -239,11 +244,11 @@ class Taxonomy:
         return out
 
     @staticmethod
-    def _open_rows(d: Dimension, items: list) -> list[dict]:
+    def _open_rows(d: Dimension, items) -> list[dict]:
         out: list[dict] = []
         seen: set[str] = set()
-        for item in items:
-            raw = str(item.get("slug", ""))
+        for item in _items(d, items):
+            raw = str(_item(d, item).get("slug", ""))
             slug = normalize(raw)
             if not slug or slug in seen:
                 continue
@@ -261,6 +266,22 @@ _SECTION = {
     "open": "open",
     "text": "text",
 }
+
+
+def _items(d: Dimension, items) -> list:
+    """The collection a model returned for `d`, as a list. A missing collection is empty;
+    anything that is not a list is a rule break, not a crash."""
+    if items is None:
+        return []
+    if not isinstance(items, list):
+        raise ValueError(f"{d.name}: not a list")
+    return items
+
+
+def _item(d: Dimension, item) -> dict:
+    if not isinstance(item, dict):
+        raise ValueError(f"{d.name}: item is not an object")
+    return item
 
 
 def _seconds(v) -> float | None:

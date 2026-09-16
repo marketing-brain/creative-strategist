@@ -268,6 +268,8 @@ def test_validate_nested_caps_concept_tags_at_six():
             ),
             "beats",
         ),
+        (lambda p: p["multi"].update(registers=["fear"]), "registers"),
+        (lambda p: p.update(multi=[]), "multi"),
     ],
 )
 def test_validate_nested_rejects_rule_breaks(mutate, message):
