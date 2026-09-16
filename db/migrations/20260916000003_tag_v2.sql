@@ -9,6 +9,12 @@ ALTER TABLE tag
   ADD COLUMN ordinal INT,
   ADD COLUMN raw_value TEXT;
 
+-- A verbatim transcript in tag.value can exceed btree's 2704-byte entry limit, which
+-- would make the insert fail outright, so the lookup index now skips text rows (no
+-- filter ever looks a text value up by equality).
+DROP INDEX tag_org_dim_val_idx;
+CREATE INDEX tag_org_dim_val_idx ON tag (org_id, dimension, value) WHERE kind <> 'text';
+
 -- Per-org canonical vocabulary for open dimensions. A slug's canonical_slug is itself
 -- until someone merges it; count is bumped for the canonical row on each finished run.
 CREATE TABLE tag_vocab (
@@ -25,6 +31,8 @@ CREATE INDEX tag_vocab_count_idx ON tag_vocab (org_id, dimension, count DESC);
 -- migrate:down
 DROP INDEX tag_vocab_count_idx;
 DROP TABLE tag_vocab;
+DROP INDEX tag_org_dim_val_idx;
+CREATE INDEX tag_org_dim_val_idx ON tag (org_id, dimension, value);
 ALTER TABLE tag
   DROP COLUMN raw_value,
   DROP COLUMN ordinal,

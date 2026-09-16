@@ -1,3 +1,6 @@
+import random
+import string
+
 from cs.connectors.base import PlatformCreative
 from cs.core import repo as ingest_repo
 from cs.tagging import repo
@@ -100,3 +103,38 @@ async def test_finish_tag_run_round_trips_v2_columns(db, org_id, settings):
     assert await repo.latest_tag_value(db, org_id, cid, "transcript") == "hello there"
     assert await repo.latest_tag_value(db, org_id, cid, "nope") is None
     assert await repo.latest_tag_value(db, org_id, cid, "beats") == "hook"
+
+
+async def test_finish_tag_run_stores_a_transcript_too_long_for_a_btree_entry(db, org_id, settings):
+    """A verbatim transcript easily exceeds btree's 2704-byte entry limit, so the
+    (org_id, dimension, value) index must not cover text rows."""
+    acct = await ingest_repo.upsert_ad_account(db, org_id, "1", "M", "USD")
+    cid, _ = await ingest_repo.upsert_creative(
+        db,
+        org_id,
+        acct,
+        PlatformCreative("v", "video", "H", "P", None, None, "u", None, None, {}),
+        "raw",
+        format_source="manual_review",
+    )
+    transcript = "".join(random.Random(1).choices(string.ascii_letters + " ", k=6000))
+    tv = await repo.ensure_taxonomy_version(db, load_taxonomy())
+    rid = await repo.start_tag_run(db, org_id, cid, tv, "fake")
+    await repo.finish_tag_run(
+        db,
+        org_id,
+        rid,
+        [
+            {
+                "dimension": "transcript",
+                "kind": "text",
+                "value": transcript,
+                "confidence": 1.0,
+                "evidence": "",
+            }
+        ],
+        "sha",
+        1,
+        1,
+    )
+    assert await repo.latest_tag_value(db, org_id, cid, "transcript") == transcript
