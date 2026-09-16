@@ -1,4 +1,4 @@
-from cs.tagging.consistency import agreement, summarize
+from cs.tagging.consistency import agreement, diff_lines, summarize
 from cs.tagging.taxonomy import load_taxonomy
 
 
@@ -62,3 +62,23 @@ def test_summarize_means_and_ignores_none():
         [{"messenger": 1.0, "transcript": None}, {"messenger": 0.0, "transcript": None}]
     )
     assert out == {"messenger": 0.5, "transcript": None}
+
+
+def test_diff_lines_name_what_flipped():
+    t = load_taxonomy()
+    a = [
+        _r("messenger", "single", "creator_on_camera"),
+        _r("hook_devices", "multi", "bold_claim"),
+        _r("beats", "ordered", "hook", 0),
+        _r("beats", "ordered", "cta", 1),
+    ]
+    b = [
+        _r("messenger", "single", "expert_on_camera"),
+        _r("hook_devices", "multi", "question"),
+        _r("beats", "ordered", "hook", 0),
+    ]
+    lines = diff_lines(a, b, t, "video")
+    assert "messenger: creator_on_camera vs expert_on_camera" in lines
+    assert "hook_devices: only first=['bold_claim'] only second=['question']" in lines
+    assert "beats: hook > cta  vs  hook" in lines
+    assert not [line for line in lines if line.startswith("angles")]
