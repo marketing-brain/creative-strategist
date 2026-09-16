@@ -251,7 +251,7 @@ Nothing is persisted. The report is pasted into the PR. Dimensions below 0.8 on 
 - `tests/tagging/test_runner.py`: video path with a fake tagger writes computed rows, canonical open rows, ordered beats; image path unchanged.
 - `tests/tagging/test_repo.py`: new columns round-trip; `latest_tags` returns multi rows.
 - API tests for the transcript endpoint and open values endpoint.
-- Web: there is no component test harness; `tag-list` is checked by rendering a v2-tagged creative in the running app.
+- Web: `web/tests/tag-list.test.tsx` (vitest + jsdom, the existing harness under `web/tests`) renders one tag of each kind and asserts the arc string, the chip without a percentage, and the numeric line.
 
 ## Out of scope
 
