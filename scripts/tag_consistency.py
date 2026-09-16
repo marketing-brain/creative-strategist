@@ -49,10 +49,16 @@ async def main(org_id: UUID, n: int, seed: int) -> None:
         }
         scores = []
         for cid in ids[:n]:
-            creative = await ingest_repo.get_creative(db, org_id, cid)
-            a, *_ = await profile_video(ctx, creative, taxonomy, tagger, hints)
-            b, *_ = await profile_video(ctx, creative, taxonomy, tagger, hints)
-            s = agreement(a, b, taxonomy, "video")
+            # One unreadable asset or one model error must not lose the whole sample:
+            # the table is built from whichever creatives got through.
+            try:
+                creative = await ingest_repo.get_creative(db, org_id, cid)
+                a, *_ = await profile_video(ctx, creative, taxonomy, tagger, hints)
+                b, *_ = await profile_video(ctx, creative, taxonomy, tagger, hints)
+                s = agreement(a, b, taxonomy, "video")
+            except Exception as exc:
+                print(f"{cid}: FAILED {exc}")
+                continue
             scores.append(s)
             low = [k for k, v in s.items() if v is not None and v < 1.0]
             print(f"{cid}: disagreements on {', '.join(low) or 'none'}")
@@ -67,6 +73,11 @@ async def main(org_id: UUID, n: int, seed: int) -> None:
             )
             flag = "  <-- below bar" if below_bar else ""
             print(f"{d.name:<22} {d.kind:<8} {'-' if v is None else f'{v:.2f}'}{flag}")
+            if d.kind == "ordered":  # same steps, ignoring their order (spec section 9)
+                sv = summary.get(f"{d.name}:set")
+                s_flag = "  <-- below bar" if sv is not None and sv < 0.6 else ""
+                name = f"{d.name}:set"
+                print(f"{name:<22} {'ordered:set':<8} {'-' if sv is None else f'{sv:.2f}'}{s_flag}")
     finally:
         await db.close()
 

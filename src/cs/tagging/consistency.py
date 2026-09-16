@@ -26,6 +26,10 @@ def agreement(
             seq_a = [r["value"] for r in sorted(a, key=lambda r: r["ordinal"] or 0)]
             seq_b = [r["value"] for r in sorted(b, key=lambda r: r["ordinal"] or 0)]
             out[d.name] = 1.0 if seq_a == seq_b else 0.0
+            # Secondary figure (spec section 9): whether the two runs picked the same
+            # steps at all, regardless of the order they put them in.
+            sa, sb = set(seq_a), set(seq_b)
+            out[f"{d.name}:set"] = 1.0 if not sa and not sb else len(sa & sb) / len(sa | sb)
         else:
             out[d.name] = None
     return out

@@ -40,7 +40,7 @@ def test_agreement_per_kind():
     got = agreement(a, b, t, "video")
     assert got["messenger"] == 0.0 and got["duration_s"] == 1.0
     assert got["hook_devices"] == 0.5
-    assert got["beats"] == 1.0
+    assert got["beats"] == 1.0 and got["beats:set"] == 1.0
     assert got["concept_tags"] == 0.5
     assert got["transcript"] is None
     assert got["angles"] == 1.0  # both empty
@@ -50,8 +50,11 @@ def test_ordered_disagrees_on_order_and_length():
     t = load_taxonomy()
     a = [_r("beats", "ordered", "hook", 0), _r("beats", "ordered", "problem", 1)]
     b = [_r("beats", "ordered", "problem", 0), _r("beats", "ordered", "hook", 1)]
-    assert agreement(a, b, t, "video")["beats"] == 0.0
-    assert agreement(a, a[:1], t, "video")["beats"] == 0.0
+    got = agreement(a, b, t, "video")
+    assert got["beats"] == 0.0
+    assert got["beats:set"] == 1.0  # same steps, different order
+    shorter = agreement(a, a[:1], t, "video")
+    assert shorter["beats"] == 0.0 and shorter["beats:set"] == 0.5
 
 
 def test_summarize_means_and_ignores_none():
