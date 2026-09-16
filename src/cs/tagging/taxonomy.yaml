@@ -1,4 +1,4 @@
-version: "2.3"
+version: "2.4"
 # Formats whose model call returns the nested v2 profile (spec §2). Every other format
 # keeps the legacy flat {"tags": [...]} schema.
 nested_formats: [video]
@@ -150,7 +150,7 @@ dimensions:
     kind: single
     applies_to: [video]
     values: [none, creator_on_camera, creator_off_camera, expert_on_camera, founder_on_camera, actor_scripted, multiple_people, graphic_only]
-    description: Who carries the message. expert_on_camera only when a credential is stated on screen or in speech; creator_off_camera means hands, POV or body without a face; graphic_only when no person appears and the content is text or graphics.
+    description: Who carries the message, judged by who speaks or performs it. expert_on_camera only when a credential is stated on screen or in speech. creator_off_camera means a person speaking or performing without their face shown (voiceover, POV, hands doing something). graphic_only when text or graphics carry the message and nobody speaks, even if a silent hand or body part holds the product. multiple_people only when speech is shared roughly equally; otherwise the main speaker's type.
   - name: narration
     group: messenger
     kind: single
@@ -162,7 +162,7 @@ dimensions:
     kind: single
     applies_to: [video]
     values: [none, subtitles, text_cards, both]
-    description: On-screen text treatment. subtitles transcribe speech; text_cards are headline overlays that are not a transcript.
+    description: On-screen text treatment. subtitles transcribe the speech word for word; text_cards are any other on-screen text (headlines, bullet cards, prices, CTA text). both when both occur at any point. If overlay_texts lists anything, captions is text_cards or both, never none or subtitles.
   - name: opening_shot
     group: structure
     kind: single
@@ -334,7 +334,7 @@ dimensions:
     kind: multi
     applies_to: [video]
     values: [solo_person, multiple_people, couple, child, pet]
-    description: Who appears on screen at any point. Empty when no person or animal appears.
+    description: Who appears on screen with a face or full body at any point. A hand or body part alone does not count. Empty when no person or animal appears.
   - name: native_format_cues
     group: form
     kind: multi
@@ -354,7 +354,7 @@ dimensions:
     flags: [face, product, packaging]
     applies_to: [video]
     values: [talking_head, product_closeup, product_in_use, packaging_shot, broll, screen_recording, text_card, before_after, unboxing, lifestyle, other]
-    description: The shots in order. Start a new scene whenever the shot type or what is on screen changes; the first scene starts at 0:00. Each scene also says whether a face, the product, and its packaging are on screen.
+    description: The shots in order. Start a new scene only when the shot type or the face/product/packaging booleans change; consecutive cuts of the same shot type with the same booleans are one scene. The first scene starts at 0:00.
   - name: products_mentioned
     group: concept
     kind: open

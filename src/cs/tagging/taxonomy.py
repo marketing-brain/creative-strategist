@@ -243,7 +243,7 @@ class Taxonomy:
             raise ValueError(f"{d.name}: must not be empty")
         out: list[dict] = []
         last = float("-inf")
-        for i, item in enumerate(items):
+        for item in items:
             value = str(_item(d, item).get("value", "")).strip()
             if value not in (d.values or ()):
                 raise ValueError(f"{d.name}: value {value!r} not allowed")
@@ -252,7 +252,9 @@ class Taxonomy:
                 raise ValueError(f"{d.name}: t_start_s must be present and non-decreasing")
             last = t
             flags = "|".join(f for f in d.flags if item.get(f) is True) or None
-            out.append(_row(d, value, raw_value=flags, t_start_s=t, ordinal=i))
+            if out and out[-1]["value"] == value and out[-1]["raw_value"] == flags:
+                continue  # consecutive cuts of the same shot/beat are one step
+            out.append(_row(d, value, raw_value=flags, t_start_s=t, ordinal=len(out)))
         return out
 
     @staticmethod
@@ -407,3 +409,17 @@ def load_taxonomy(path: Path | None = None) -> Taxonomy:
         dimensions=tuple(dims),
         nested_formats=tuple(data.get("nested_formats", ())),
     )
+
+
+def reconcile_captions(rows: list[dict]) -> list[dict]:
+    """Cross-field rule (spec §1): when overlay_texts lists anything, captions cannot be
+    'none' or 'subtitles' — the overlays are text cards by definition."""
+    if not any(r["dimension"] == "overlay_texts" for r in rows):
+        return rows
+    fixed = {"none": "text_cards", "subtitles": "both"}
+    return [
+        {**r, "value": fixed[r["value"]]}
+        if r["dimension"] == "captions" and r["value"] in fixed
+        else r
+        for r in rows
+    ]

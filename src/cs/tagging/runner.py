@@ -8,7 +8,7 @@ from cs.tagging import repo, vocab
 from cs.tagging.images import prepare_image
 from cs.tagging.prompts import SYSTEM, SYSTEM_V2, prompt_sha, user_text, user_text_nested
 from cs.tagging.tagger import Tagger, TagResult
-from cs.tagging.taxonomy import Taxonomy, computed_rows, load_taxonomy
+from cs.tagging.taxonomy import Taxonomy, computed_rows, load_taxonomy, reconcile_captions
 from cs.tagging.video import aspect_label, cuts_per_10s, probe_video
 
 
@@ -68,7 +68,7 @@ async def profile_video(
     result = await tagger.tag([], text, schema, video=(data, "video/mp4"), system=SYSTEM_V2)
     if result.refused:
         raise RuntimeError("model refused to tag creative")
-    rows = taxonomy.validate(result.payload, "video")
+    rows = reconcile_captions(taxonomy.validate(result.payload, "video"))
     late = [r for r in rows if r["t_start_s"] is not None and r["t_start_s"] > stats.duration_s + 1]
     if late:
         raise ValueError(

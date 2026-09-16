@@ -78,7 +78,7 @@ VIDEO_DIMENSIONS = {
 
 def test_version_and_nested_formats():
     t = load_taxonomy()
-    assert t.version == "2.3" and len(t.sha256) == 64
+    assert t.version == "2.4" and len(t.sha256) == 64
     assert t.nested_formats == ("video",)
     assert t.is_nested("video") and not t.is_nested("image") and not t.is_nested("carousel")
 
@@ -430,3 +430,52 @@ def test_nested_schema_has_series_and_scene_flags():
     assert scenes["properties"]["face"] == {"type": "boolean"}
     overlays = schema["properties"]["series"]["properties"]["overlay_texts"]["items"]
     assert overlays["required"] == ["t_start", "text"]
+
+
+def test_ordered_collapses_consecutive_identical_steps():
+    from cs.tagging.taxonomy import reconcile_captions
+
+    def scene(t, product):
+        return {
+            "value": "talking_head",
+            "t_start": t,
+            "face": True,
+            "product": product,
+            "packaging": False,
+        }
+
+    p = _payload()
+    p["ordered"]["beats"] = [
+        {"value": "hook", "t_start": "0:00"},
+        {"value": "agitation", "t_start": "0:05"},
+        {"value": "agitation", "t_start": "0:09"},
+        {"value": "proof", "t_start": "0:20"},
+        {"value": "agitation", "t_start": "0:30"},
+    ]
+    p["ordered"]["scenes"] = [
+        scene("0:00", False),
+        scene("0:04", False),
+        scene("0:09", True),
+        scene("0:12", True),
+    ]
+    rows = load_taxonomy().validate(p, "video")
+    beats = [(r["ordinal"], r["value"], r["t_start_s"]) for r in rows if r["dimension"] == "beats"]
+    assert beats == [
+        (0, "hook", 0.0),
+        (1, "agitation", 5.0),
+        (2, "proof", 20.0),
+        (3, "agitation", 30.0),
+    ]
+    scenes = [
+        (r["ordinal"], r["raw_value"], r["t_start_s"]) for r in rows if r["dimension"] == "scenes"
+    ]
+    assert scenes == [(0, "face", 0.0), (1, "face|product", 9.0)]
+
+    # captions cannot be 'subtitles' or 'none' once overlays exist
+    p["single"]["captions"] = {"value": "subtitles", "confidence": 1.0, "evidence": "e"}
+    p["series"] = {"overlay_texts": [{"t_start": "0:03", "text": "20% OFF"}]}
+    rows = reconcile_captions(load_taxonomy().validate(p, "video"))
+    assert [r["value"] for r in rows if r["dimension"] == "captions"] == ["both"]
+    p["series"] = {"overlay_texts": []}
+    rows = reconcile_captions(load_taxonomy().validate(p, "video"))
+    assert [r["value"] for r in rows if r["dimension"] == "captions"] == ["subtitles"]
