@@ -133,6 +133,17 @@ def test_grounding_flags_invented_or_rerounded_numbers():
         "Hold rate is roughly 20% and CTR 1.5%, costing $1,200.", brief, "video", 24_000
     )
     assert problems == ["numbers not in the brief: 20%, 1.5%, $1,200"]
+    # A comma after a small number is punctuation, not a thousands separator.
+    plain = "Skews to women over 55, aged 45-64, live 34 days."
+    assert grounding_problems(plain, brief, "video", 24_000) == []
+
+
+def test_grounding_rejects_paragraphs_over_250_words():
+    brief = render_brief(CREATIVE, weak_retention(), 24_000)
+    assert grounding_problems("word " * 250, brief, "video", 24_000) == []
+    assert grounding_problems("word " * 251, brief, "video", 24_000) == [
+        "the paragraph is longer than 250 words"
+    ]
 
 
 def test_grounding_flags_timestamps_past_the_end_or_on_images():

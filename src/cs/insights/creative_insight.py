@@ -29,7 +29,7 @@ RELIABLE_IMPRESSIONS = 10_000
 RELIABLE_PLAYS = 1_000
 RELIABLE_STEP_DENOMINATOR = 500
 RELIABLE_STEP_EVENTS = 30
-MAX_WORDS = 220
+MAX_WORDS = 250  # the prompt sets no target; this is the retry threshold for a runaway draft
 
 SYSTEM = """\
 You are a senior performance-creative strategist reviewing one paid-social ad for the team that made it. You have the ad itself—a video with audio, an image, or carousel cards—and a metrics brief our system computed.
@@ -102,7 +102,7 @@ OUTPUT (JSON)
 
 - creative_profile: a compact object with these fields: concept_and_message, product_and_persuasion, creator_and_cast, visual_style, editing, music_and_sound, speech_and_text, structure. Use concise descriptions and consistent labels across ads. Describe the creative without performance judgments; use null for unavailable information.
 - moments: key observations spanning the complete creative. Each entry contains at and observed. Keep observations factual.
-- paragraph: one paragraph, 90–150 words, plain prose. Start with the overall performance pattern and its key supplied numbers, then explain the strongest creative connections and any material contradiction or uncertainty. Prioritize a coherent interpretation over listing metrics. Do not force explanations or pad sparse evidence.
+- paragraph: plain prose, as long as the evidence warrants (one or more paragraphs). Start with the overall performance pattern and its key supplied numbers, then explain the strongest creative connections and any material contradiction or uncertainty. Prioritize a coherent interpretation over listing metrics. Do not force explanations or pad sparse evidence.
 
 Do not include recommendations, what to keep, or what to change. Return valid JSON only.
 """  # noqa: E501
@@ -372,7 +372,9 @@ def user_text(brief: str, feedback: list[str] | None = None) -> str:
 # MM:SS, but not a clock time the ad itself shows ("3:17 am"), which is not a video position.
 _CLOCK = re.compile(r"(?<![\d:])\d{1,2}:[0-5]\d\s?(?:am|pm|AM|PM|a\.m\.|p\.m\.)\b")
 _TIMESTAMP = re.compile(r"(?<![\d:])(\d{1,2}):([0-5]\d)(?![\d:])")
-_NUMBER = re.compile(r"(?<![\w.])\$?[+\-−]?\d[\d,]*(?:\.\d+)?%?")
+# A comma counts as a thousands separator only when three digits follow it, so "over 55, and"
+# is the word 55 and not the marked token "55,".
+_NUMBER = re.compile(r"(?<![\w.])\$?[+\-−]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?")
 
 
 def _numbers(text: str) -> dict[float, str]:

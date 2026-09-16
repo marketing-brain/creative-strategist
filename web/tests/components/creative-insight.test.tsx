@@ -8,6 +8,11 @@ describe('CreativeInsightCard', () => {
     expect(screen.getByText('Retention is the weak layer.')).toBeInTheDocument();
     expect(screen.getByText('Based on 2026-08-15 to 2026-09-13')).toBeInTheDocument();
   });
+  it('renders blank-line breaks as separate paragraphs', () => {
+    render(<CreativeInsightCard insight={{ paragraph: 'Attention is strong.\n\nConversion is weak.', window_start: '2026-08-15', window_end: '2026-09-13', created_at: '2026-09-14T00:00:00Z' }} />);
+    expect(screen.getByText('Attention is strong.').tagName).toBe('P');
+    expect(screen.getByText('Conversion is weak.').tagName).toBe('P');
+  });
   it('explains the empty state', () => {
     render(<CreativeInsightCard insight={{ paragraph: null }} />);
     expect(screen.getByText(/no insight yet/i)).toBeInTheDocument();

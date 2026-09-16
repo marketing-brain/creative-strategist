@@ -15,7 +15,16 @@ export function CreativeInsightCard({ insight }: { insight: CreativeInsight }) {
       <div className="flex gap-3.5 rounded-xl border border-border bg-card px-6 py-4">
         <Sparkles className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
         {insight.paragraph ? (
-          <p className="text-base leading-relaxed text-pretty">{insight.paragraph}</p>
+          <div className="space-y-3">
+            {insight.paragraph
+              .split(/\n\s*\n/)
+              .filter((p) => p.trim())
+              .map((p, i) => (
+                <p key={i} className="text-base leading-relaxed text-pretty">
+                  {p.trim()}
+                </p>
+              ))}
+          </div>
         ) : (
           <p className="text-sm leading-relaxed text-muted-foreground">
             No insight yet. It is written once this creative has enough delivery to compare against the account.
