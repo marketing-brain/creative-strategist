@@ -615,6 +615,10 @@ def _placement_rows(
     total = sum(s.impressions for s in placements.values())
     rows: list[Placement] = []
     for key, w in placements.items():
+        # Meta delivers a long tail of placements with a few dozen impressions each. They
+        # still count towards the share denominator, but they are not rows anyone can read.
+        if w.impressions < PLACEMENT_FLOOR:
+            continue
         b = baseline.get(key, Sums())
         readable = w.impressions >= PLACEMENT_FLOOR and b.impressions >= PLACEMENT_FLOOR
         hook = ratio(w.video_3s_views, w.impressions) if fmt == "video" else None

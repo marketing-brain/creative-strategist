@@ -150,7 +150,9 @@ async def insert_placement(
     plays: int = 0,
     thruplay: int = 0,
 ) -> None:
-    fivetran_id = f"{ad_id}-{week}-{publisher_platform}-{platform_position}"
+    # Fivetran's _fivetran_id hashes the breakdown combination only, so the same value
+    # repeats across every ad and week that ran in this placement.
+    fivetran_id = f"{publisher_platform}-{platform_position}"
     await db.execute(
         f'INSERT INTO "{schema}".{PLACEMENT_AD} VALUES ($1, $2, $3, $4, $5, 999, $6, $7, $8, $9)',
         ad_id,
@@ -203,7 +205,7 @@ async def insert_demographics(
         "VALUES ($1, $2, $3, $4, $5, 999, $6, $7, $8, $9)",
         ad_id,
         month,
-        f"{ad_id}-{month}-{age}-{gender}",
+        f"{age}-{gender}",
         age,
         gender,
         impressions,

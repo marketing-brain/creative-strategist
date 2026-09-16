@@ -264,8 +264,9 @@ async def _breakdown_child_totals(
 ) -> dict[tuple, dict[str, int]]:
     """Sum each child table of a breakdown report into {(ad_id, period, *keys): {col: value}}.
 
-    Child tables carry only the parent's key columns, so the join back to the parent is by
-    `_fivetran_id`, the hash Fivetran gives each breakdown combination."""
+    `_fivetran_id` hashes the breakdown combination, not the row: the same hash repeats across
+    every ad and week with that placement. The join therefore needs ad_id and the period too,
+    which the child tables carry, or one child row fans out over hundreds of parents."""
     totals: dict[tuple, dict[str, int]] = {}
     for suffix, column in columns.items():
         try:
@@ -273,7 +274,9 @@ async def _breakdown_child_totals(
                 SELECT p.ad_id, p.{period} AS period, {", ".join("p." + k for k in keys)},
                        sum(c.value) AS total
                 FROM {_q(schema, table + "_" + suffix)} c
-                JOIN {_q(schema, table)} p ON p._fivetran_id = c._fivetran_id
+                JOIN {_q(schema, table)} p
+                  ON p._fivetran_id = c._fivetran_id
+                 AND p.ad_id = c.ad_id AND p.{period} = c.{period}
                 WHERE c.action_type = 'video_view'
                 GROUP BY 1, 2, {", ".join(str(i + 3) for i in range(len(keys)))}
             """)
@@ -299,7 +302,9 @@ async def _breakdown_action_totals(
             SELECT p.ad_id, p.{period} AS period, {", ".join("p." + k for k in keys)},
                    a.action_type, sum(a.value) AS total
             FROM {_q(schema, table + "_actions")} a
-            JOIN {_q(schema, table)} p ON p._fivetran_id = a._fivetran_id
+            JOIN {_q(schema, table)} p
+              ON p._fivetran_id = a._fivetran_id
+             AND p.ad_id = a.ad_id AND p.{period} = a.{period}
             GROUP BY 1, 2, {", ".join(str(i + 3) for i in range(len(keys)))}, a.action_type
         """)
     except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):

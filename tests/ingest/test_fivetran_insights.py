@@ -212,15 +212,18 @@ async def test_sync_folds_placement_and_audience_breakdowns(db, blobs, settings,
     """The weekly placement and monthly age x gender reports land in their own tables, with
     the video counts joined back from the child tables by _fivetran_id."""
     acct = await _seed(db, org_id)
-    for platform, position, impressions, clicks, views in (
-        ("instagram", "instagram_reels", 8_000, 80, 2_000),
-        ("facebook", "feed", 4_000, 20, 400),
+    # Two weeks of the same placement: Fivetran gives them the same _fivetran_id, so a join
+    # that ignores ad_id and week multiplies every child value by the number of weeks.
+    for week, (platform, position, impressions, clicks, views) in (
+        ("2026-08-31", ("instagram", "instagram_reels", 8_000, 80, 2_000)),
+        ("2026-08-31", ("facebook", "feed", 4_000, 20, 400)),
+        ("2026-09-07", ("instagram", "instagram_reels", 1_000, 10, 250)),
     ):
         await insert_placement(
             db,
             SCHEMA,
             ad_id="ad1",
-            week="2026-08-31",
+            week=week,
             publisher_platform=platform,
             platform_position=position,
             impressions=impressions,
@@ -237,10 +240,12 @@ async def test_sync_folds_placement_and_audience_breakdowns(db, blobs, settings,
     ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
 
     summary = await fivetran_insights.sync_insights(ctx, org_id, connection)
-    assert summary["placement_rows"] == 2 and summary["audience_rows"] == 1
+    assert summary["placement_rows"] == 3 and summary["audience_rows"] == 1
 
     rows = await db.fetch(
-        "SELECT * FROM metric_placement WHERE org_id=$1 ORDER BY impressions DESC", org_id
+        "SELECT * FROM metric_placement WHERE org_id=$1 AND week='2026-08-31' "
+        "ORDER BY impressions DESC",
+        org_id,
     )
     assert [(r["publisher_platform"], r["platform_position"]) for r in rows] == [
         ("instagram", "instagram_reels"),

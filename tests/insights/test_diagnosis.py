@@ -246,7 +246,7 @@ REELS = ("instagram", "instagram_reels")
 FEED = ("facebook", "feed")
 
 
-def _placements(reels_hook=2_000, feed_hook=400):
+def _placements(reels_hook=2_000, feed_hook=400) -> tuple[dict, dict]:
     """8k impressions in Reels, 4k in Feed. The baseline account average is 25% hook and 1%
     CTR in both, so only the ad's own numbers move the tier."""
     window = {
@@ -283,15 +283,24 @@ def test_context_is_on_par_when_every_carrying_placement_travels():
     assert "travels" in t.reason
 
 
-def test_a_small_placement_cannot_break_the_tier_and_reads_as_unreadable():
+def test_a_placement_the_account_barely_ran_is_shown_but_cannot_break_the_tier():
     window, baseline = _placements()
-    window[("facebook", "marketplace")] = sums(impressions=400, link_clicks=0, video_3s_views=10)
+    window[("facebook", "marketplace")] = sums(impressions=2_000, link_clicks=0, video_3s_views=10)
     baseline[("facebook", "marketplace")] = sums(impressions=900, link_clicks=9, video_3s_views=200)
     window[FEED] = sums(impressions=4_000, link_clicks=40, video_3s_views=1_000)
     t = context_tier("video", window, baseline)
     assert t.status == "on_par"
-    tiny = next(p for p in t.placements if p.position == "marketplace")
-    assert tiny.readable is False and tiny.hook_lift is None
+    thin = next(p for p in t.placements if p.position == "marketplace")
+    assert thin.readable is False and thin.hook_lift is None
+
+
+def test_the_long_tail_of_tiny_placements_is_not_shown_but_still_counts_in_the_share():
+    window, baseline = _placements(reels_hook=2_000, feed_hook=1_000)
+    window[("facebook", "search")] = sums(impressions=120, link_clicks=1, video_3s_views=30)
+    t = context_tier("video", window, baseline)
+    assert [p.position for p in t.placements] == ["instagram_reels", "feed"]
+    # 8,000 of 12,120 impressions, not of the 12,000 the two visible rows carry.
+    assert t.placements[0].share == pytest.approx(8_000 / 12_120)
 
 
 def test_context_reads_ctr_only_for_images():
