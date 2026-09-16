@@ -43,7 +43,18 @@ async def _seed(client, db, settings):
 async def test_tags_endpoints(client, db, settings):
     cid = await _seed(client, db, settings)
     r = await client.get(f"/creatives/{cid}/tags", headers=H)
-    assert r.json() == [{"dimension": "tone", "value": "warm", "confidence": 0.8, "evidence": "e"}]
+    assert r.json() == [
+        {
+            "dimension": "tone",
+            "value": "warm",
+            "confidence": 0.8,
+            "evidence": "e",
+            "kind": "single",
+            "raw_value": None,
+            "t_start_s": None,
+            "ordinal": None,
+        }
+    ]
     r = await client.get("/tags/dimensions", headers=H)
     assert any(d["name"] == "hook_type" for d in r.json())
     r = await client.post(f"/creatives/{cid}/retag", headers=H)

@@ -68,7 +68,8 @@ async def finish_tag_run(
         for t in tags:
             await tx.execute(
                 "INSERT INTO tag (id, org_id, tag_run_id, creative_id, dimension, value, "
-                "confidence, evidence) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+                "confidence, evidence, kind, raw_value, t_start_s, ordinal) "
+                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
                 new_id(),
                 org_id,
                 run_id,
@@ -77,6 +78,10 @@ async def finish_tag_run(
                 t["value"],
                 t["confidence"],
                 t["evidence"],
+                t.get("kind", "single"),
+                t.get("raw_value"),
+                t.get("t_start_s"),
+                t.get("ordinal"),
             )
         await tx.execute(
             "UPDATE tag_run SET status='done', prompt_sha256=$2, input_tokens=$3, "
@@ -110,7 +115,18 @@ async def latest_tags(db: Database, org_id: UUID, creative_id: UUID) -> list[asy
     if rid is None:
         return []
     return await db.fetch(
-        "SELECT dimension, value, confidence, evidence FROM tag "
-        "WHERE tag_run_id=$1 ORDER BY dimension",
+        "SELECT dimension, value, confidence, evidence, kind, raw_value, t_start_s, ordinal "
+        "FROM tag WHERE tag_run_id=$1 ORDER BY dimension, ordinal, t_start_s, value",
         rid,
+    )
+
+
+async def latest_tag_value(
+    db: Database, org_id: UUID, creative_id: UUID, dimension: str
+) -> str | None:
+    rid = await latest_run_id(db, org_id, creative_id)
+    if rid is None:
+        return None
+    return await db.fetchval(
+        "SELECT value FROM tag WHERE tag_run_id=$1 AND dimension=$2 LIMIT 1", rid, dimension
     )
