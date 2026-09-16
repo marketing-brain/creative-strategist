@@ -19,8 +19,12 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
     const q = new URLSearchParams();
     if (sp.account_id) q.set('account_id', sp.account_id);
     if (sp.format) q.set('format', sp.format);
-    if (sp.dimension) q.set('dimension', sp.dimension);
-    if (sp.value) q.set('value', sp.value);
+    // GET /creatives 422s unless dimension and value arrive together; a dimension on its
+    // own only selects which value dropdown to fetch.
+    if (sp.dimension && sp.value) {
+      q.set('dimension', sp.dimension);
+      q.set('value', sp.value);
+    }
     q.set('limit', String(PAGE_SIZE));
     q.set('offset', String((p - 1) * PAGE_SIZE));
     return q;
@@ -29,8 +33,10 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
     const q = new URLSearchParams();
     if (sp.account_id) q.set('account_id', sp.account_id);
     if (sp.format) q.set('format', sp.format);
-    if (sp.dimension) q.set('dimension', sp.dimension);
-    if (sp.value) q.set('value', sp.value);
+    if (sp.dimension && sp.value) {
+      q.set('dimension', sp.dimension);
+      q.set('value', sp.value);
+    }
     if (p > 1) q.set('page', String(p));
     const s = q.toString();
     return `/creatives${s ? `?${s}` : ''}`;
