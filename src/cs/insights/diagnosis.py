@@ -25,6 +25,41 @@ CURVE_POINTS = (0, 25, 50, 75, 95, 100)
 # things, and a curve at "50% of runtime" is 5s into one ad and 30s into another. Buckets
 # are (low, high] seconds; the first boundary is the ThruPlay rule.
 LENGTH_BUCKETS_S: tuple[tuple[int, int | None], ...] = ((0, 15), (15, 30), (30, 60), (60, None))
+# Context tier. A placement is only compared with the account's average for the same
+# placement once both sides clear the floor; only placements carrying a real share of
+# delivery can break the tier.
+PLACEMENT_FLOOR = 1_000
+PLACEMENT_SHARE_FLOOR = 0.20
+AUDIENCE_SLICES = 3
+
+_PLATFORM_LABELS = {
+    "facebook": "Facebook",
+    "instagram": "Instagram",
+    "messenger": "Messenger",
+    "audience_network": "Audience Network",
+    "threads": "Threads",
+    "whatsapp": "WhatsApp",
+    "unknown": "Unknown",
+}
+_POSITION_LABELS = {
+    "feed": "Feed",
+    "reels": "Reels",
+    "stories": "Stories",
+    "story": "Stories",
+    "explore": "Explore",
+    "explore_home": "Explore home",
+    "profile_feed": "Profile feed",
+    "profile_reels": "Profile reels",
+    "reels_overlay": "Reels overlay",
+    "video_feeds": "Video feeds",
+    "marketplace": "Marketplace",
+    "search": "Search",
+    "right_hand_column": "Right column",
+    "instream_video": "In-stream video",
+    "facebook_stories": "Stories",
+    "biz_inbox": "Business inbox",
+    "unknown": "Unknown",
+}
 
 Status = Literal[
     "strong", "on_par", "weak", "not_applicable", "not_enough_data", "too_young", "not_measured"
@@ -109,6 +144,34 @@ class Step:
 
 
 @dataclass
+class Placement:
+    platform: str
+    position: str
+    label: str
+    impressions: int
+    share: float | None
+    hook_rate: float | None
+    hook_lift: float | None
+    link_ctr: float | None
+    ctr_lift: float | None
+    readable: bool
+
+
+@dataclass
+class AudienceSlice:
+    label: str
+    age: str
+    gender: str
+    share: float
+    baseline_share: float
+
+
+# Per-placement and per-age/gender window sums, keyed the way the breakdown tables are.
+PlacementSums = Mapping[tuple[str, str], Sums]
+AudienceSums = Mapping[tuple[str, str], int]
+
+
+@dataclass
 class Tier:
     tier: int
     key: str
@@ -120,6 +183,8 @@ class Tier:
     metrics: list[Metric] = field(default_factory=list)
     curve: Curve | None = None
     steps: list[Step] | None = None
+    placements: list[Placement] | None = None
+    audience: list[AudienceSlice] | None = None
 
 
 def ratio(numerator: float | int | Decimal, denominator: float | int | Decimal) -> float | None:
@@ -531,18 +596,144 @@ def fatigue_tier(
 # ---------------------------------------------------------------- tier 5: context
 
 
-def context_tier() -> Tier:
-    return Tier(
+def placement_label(platform: str, position: str) -> str:
+    """'instagram' + 'instagram_reels' -> 'Instagram · Reels'. Meta repeats the platform in
+    most position values and spells the rest in snake case."""
+    plat = _PLATFORM_LABELS.get(platform, platform.replace("_", " ").title())
+    pos = position
+    for prefix in (platform + "_", "facebook_", "instagram_"):
+        if pos.startswith(prefix):
+            pos = pos[len(prefix) :]
+            break
+    pos = _POSITION_LABELS.get(pos, pos.replace("_", " ").title())
+    return f"{plat} · {pos}"
+
+
+def _placement_rows(
+    fmt: str, placements: PlacementSums, baseline: PlacementSums
+) -> list[Placement]:
+    total = sum(s.impressions for s in placements.values())
+    rows: list[Placement] = []
+    for key, w in placements.items():
+        b = baseline.get(key, Sums())
+        readable = w.impressions >= PLACEMENT_FLOOR and b.impressions >= PLACEMENT_FLOOR
+        hook = ratio(w.video_3s_views, w.impressions) if fmt == "video" else None
+        hook_base = ratio(b.video_3s_views, b.impressions) if fmt == "video" else None
+        ctr = ratio(w.link_clicks, w.impressions)
+        rows.append(
+            Placement(
+                platform=key[0],
+                position=key[1],
+                label=placement_label(*key),
+                impressions=w.impressions,
+                share=ratio(w.impressions, total),
+                hook_rate=hook,
+                hook_lift=lift(hook, hook_base) if readable else None,
+                link_ctr=ctr,
+                ctr_lift=lift(ctr, ratio(b.link_clicks, b.impressions)) if readable else None,
+                readable=readable,
+            )
+        )
+    rows.sort(key=lambda r: r.impressions, reverse=True)
+    return rows
+
+
+def _audience_slices(audience: AudienceSums, baseline: AudienceSums) -> list[AudienceSlice]:
+    """The ad's age x gender mix against the account's, largest slices first."""
+    total = sum(audience.values())
+    base_total = sum(baseline.values())
+    if not total or not base_total:
+        return []
+    slices = [
+        AudienceSlice(
+            label=f"{age} {gender}",
+            age=age,
+            gender=gender,
+            share=impressions / total,
+            baseline_share=baseline.get((age, gender), 0) / base_total,
+        )
+        for (age, gender), impressions in audience.items()
+    ]
+    slices.sort(key=lambda s: s.share, reverse=True)
+    return slices[:AUDIENCE_SLICES]
+
+
+def context_tier(
+    fmt: str,
+    placements: PlacementSums | None,
+    placement_baseline: PlacementSums | None,
+    audience: AudienceSums | None = None,
+    audience_baseline: AudienceSums | None = None,
+) -> Tier:
+    """Where the ad ran, and whether it travels. Each placement is compared with the account's
+    average for that same placement, never with the account overall: Reels and Feed have
+    different hook rates for every creative, so a cross-placement comparison only measures
+    the delivery mix. The audience mix is shown as context and never sets the status."""
+    tier = Tier(
         5,
         "context",
         "Context",
         "Does it need a native recut per placement?",
         "not_measured",
-        reason=(
+    )
+    if not placements:
+        tier.reason = (
             "Placement breakdown (Reels vs Feed vs Stories) is not connected for this account "
             "yet. When it is, this row shows hook rate and CTR per placement."
-        ),
+        )
+        return tier
+    tier.placements = _placement_rows(fmt, placements, placement_baseline or {})
+    tier.audience = _audience_slices(audience or {}, audience_baseline or {})
+    readable = [r for r in tier.placements if r.readable]
+    if not readable:
+        tier.status = "not_enough_data"
+        tier.reason = (
+            f"No placement has the {PLACEMENT_FLOOR:,} impressions on both sides needed to "
+            "compare it with the account's average for that placement."
+        )
+        return tier
+
+    def worst_lift(row: Placement) -> float | None:
+        lifts = [x for x in (row.hook_lift, row.ctr_lift) if x is not None]
+        return min(lifts) if lifts else None
+
+    def best_lift(row: Placement) -> float | None:
+        lifts = [x for x in (row.hook_lift, row.ctr_lift) if x is not None]
+        return max(lifts) if lifts else None
+
+    carrying = [
+        r for r in readable if (r.share or 0) >= PLACEMENT_SHARE_FLOOR and worst_lift(r) is not None
+    ]
+    failing = [r for r in carrying if worst_lift(r) <= -LIFT_THRESHOLD]  # type: ignore[operator]
+    if failing:
+        row = min(failing, key=lambda r: worst_lift(r))  # type: ignore[arg-type,return-value]
+        metric = (
+            "hook rate"
+            if row.hook_lift is not None and row.hook_lift == worst_lift(row)
+            else "link CTR"
+        )
+        tier.status = "weak"
+        tier.decision = (
+            f"{row.label} carries {row.share:.0%} of delivery and its {metric} runs "
+            f"{abs(worst_lift(row) or 0):.0%} below the account's {row.label} average. "  # type: ignore[arg-type]
+            "Recut a native version for that placement, or exclude it from the ad set."
+        )
+        return tier
+    main = readable[0]
+    best = best_lift(main)
+    if best is not None and best >= LIFT_THRESHOLD:
+        tier.status = "strong"
+        tier.decision = (
+            f"{main.label} takes {main.share:.0%} of delivery and beats the account's "
+            f"{main.label} average by {best:.0%}. Keep the placement mix and scale it."
+        )
+        return tier
+    tier.status = "on_par"
+    tier.reason = (
+        f"The ad travels: no placement carrying {PLACEMENT_SHARE_FLOOR:.0%} or more of "
+        "delivery is behind the account's average for that placement."
     )
+    return tier
 
 
 # ---------------------------------------------------------------- verdict + assembly
@@ -613,6 +804,10 @@ def diagnose(
     window_end: date,
     retention_baseline: Sums | None = None,
     retention_baseline_creatives: int = 0,
+    placements: PlacementSums | None = None,
+    placement_baseline: PlacementSums | None = None,
+    audience: AudienceSums | None = None,
+    audience_baseline: AudienceSums | None = None,
 ) -> Diagnosis:
     """`baseline` is every other creative of the same format; `retention_baseline` narrows it
     to videos of the same length bucket (see retention_tier). Without it, retention reads as
@@ -628,7 +823,7 @@ def diagnose(
         ),
         conversion_tier(window, baseline),
         fatigue_tier(fmt, first14, trailing7, days_live),
-        context_tier(),
+        context_tier(fmt, placements, placement_baseline, audience, audience_baseline),
     ]
     broken, verdict = _verdict(tiers, window)
     return Diagnosis(window_start, window_end, fmt, baseline_creatives, broken, verdict, tiers)

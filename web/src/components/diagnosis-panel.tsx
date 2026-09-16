@@ -1,6 +1,6 @@
 import { AlertCircle, CheckCircle2, Clock, Lock } from 'lucide-react';
 import { cn } from 'cn';
-import type { Diagnosis, DiagnosisCurve, DiagnosisMetric, DiagnosisStatus, DiagnosisStep, DiagnosisTier } from '@/lib/types';
+import type { Diagnosis, DiagnosisAudienceSlice, DiagnosisCurve, DiagnosisMetric, DiagnosisPlacement, DiagnosisStatus, DiagnosisStep, DiagnosisTier } from '@/lib/types';
 
 // Type system (see docs/superpowers/specs/2026-09-12-creative-diagnosis-panel-design.md and the
 // 2026-09-12 readability revision): four sizes only -- 24px metric values, 16px names and step
@@ -158,7 +158,77 @@ function StepChain({ steps }: { steps: DiagnosisStep[] }) {
   );
 }
 
-function TierRow({ tier, broken, last }: { tier: DiagnosisTier; broken: boolean; last: boolean }) {
+function liftText(x: number | null): string {
+  if (x == null) return 'text-muted-foreground';
+  return x >= 0.15 ? 'text-success' : x <= -0.15 ? 'text-destructive' : 'text-muted-foreground';
+}
+
+// Each placement reads against the account's average for that same placement, so the lift
+// column is the point of the table; the share column says how much of the ad's delivery it
+// speaks for.
+function PlacementTable({ placements, format }: { placements: DiagnosisPlacement[]; format: Diagnosis['format'] }) {
+  const video = format === 'video';
+  return (
+    <div className="w-full overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-muted-foreground">
+            <th className="py-1 pr-4 text-left font-normal">Placement</th>
+            <th className="py-1 pr-4 text-right font-normal">Delivery</th>
+            {video && <th className="py-1 pr-4 text-right font-normal">Hook rate</th>}
+            <th className="py-1 text-right font-normal">Link CTR</th>
+          </tr>
+        </thead>
+        <tbody>
+          {placements.map((p) => (
+            <tr key={`${p.platform}/${p.position}`} className="border-t border-border">
+              <td className="py-1.5 pr-4">{p.label}</td>
+              <td className="py-1.5 pr-4 text-right tabular-nums">{p.share != null ? pct(p.share) : '—'}</td>
+              {video && (
+                <td className="py-1.5 pr-4 text-right tabular-nums">
+                  {p.readable && p.hook_rate != null ? (
+                    <>
+                      {pct(p.hook_rate)}{' '}
+                      <span className={cn('font-semibold', liftText(p.hook_lift))}>{p.hook_lift != null ? signed(p.hook_lift) : ''}</span>
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </td>
+              )}
+              <td className="py-1.5 text-right tabular-nums">
+                {p.readable && p.link_ctr != null ? (
+                  <>
+                    {pct1(p.link_ctr)} <span className={cn('font-semibold', liftText(p.ctr_lift))}>{p.ctr_lift != null ? signed(p.ctr_lift) : ''}</span>
+                  </>
+                ) : (
+                  <span className="text-muted-foreground">too little volume</span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function AudienceLine({ audience }: { audience: DiagnosisAudienceSlice[] }) {
+  return (
+    <p className="text-sm text-muted-foreground">
+      {'Audience: '}
+      {audience.map((s, i) => (
+        <span key={s.label}>
+          {i > 0 && ' · '}
+          {`${s.label} ${pct(s.share)}`}
+          <span className="text-muted-foreground/70">{` (account ${pct(s.baseline_share)})`}</span>
+        </span>
+      ))}
+    </p>
+  );
+}
+
+function TierRow({ tier, broken, last, format }: { tier: DiagnosisTier; broken: boolean; last: boolean; format: Diagnosis['format'] }) {
   const weak = tier.status === 'weak';
   const text = weak ? tier.decision : tier.reason;
   return (
@@ -189,6 +259,8 @@ function TierRow({ tier, broken, last }: { tier: DiagnosisTier; broken: boolean;
         )}
         {tier.curve && <RetentionCurve curve={tier.curve} />}
         {tier.steps && tier.steps.length > 0 && <StepChain steps={tier.steps} />}
+        {tier.placements && tier.placements.length > 0 && <PlacementTable placements={tier.placements} format={format} />}
+        {tier.audience && tier.audience.length > 0 && <AudienceLine audience={tier.audience} />}
       </div>
     </div>
   );
@@ -228,7 +300,7 @@ export function DiagnosisPanel({ diagnosis: d }: { diagnosis: Diagnosis }) {
           </div>
         </div>
         {d.tiers.map((t) => (
-          <TierRow key={t.key} tier={t} broken={t.tier === d.broken_tier} last={false} />
+          <TierRow key={t.key} tier={t} broken={t.tier === d.broken_tier} last={false} format={d.format} />
         ))}
         <div className="flex flex-wrap gap-x-6 gap-y-1.5 bg-sidebar px-6 py-3.5 text-sm text-muted-foreground">
           {formulas.map(([name, def]) => (

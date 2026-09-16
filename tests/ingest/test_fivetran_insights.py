@@ -6,6 +6,8 @@ from cs.ingest.fivetran import insights as fivetran_insights
 from cs.ingest.fivetran.fixtures import (
     create_fixture_schema,
     insert_daily_insight,
+    insert_demographics,
+    insert_placement,
     insert_retention,
 )
 from cs.jobs.registry import JobContext
@@ -88,6 +90,8 @@ async def test_sync_insights_folds_action_breakdowns_into_metric_daily(db, blobs
         "skipped": 0,
         "retention_tables": True,
         "attribution_windows": True,
+        "placement_rows": 0,
+        "audience_rows": 0,
     }
 
     rows = await db.fetch("SELECT * FROM metric_daily WHERE org_id=$1", org_id)
@@ -147,6 +151,8 @@ async def test_sync_insights_without_retention_report_writes_zeros(db, blobs, se
         "skipped": 0,
         "retention_tables": False,
         "attribution_windows": True,
+        "placement_rows": 0,
+        "audience_rows": 0,
     }
     row = await db.fetchrow("SELECT * FROM metric_daily WHERE org_id=$1", org_id)
     assert row["video_3s_views"] == 30 and row["purchases"] == 2
@@ -200,3 +206,56 @@ async def test_bigint_ad_id_still_joins_against_our_text_ad_table(db, blobs, set
     row = await db.fetchrow("SELECT * FROM metric_daily WHERE org_id=$1", org_id)
     assert row["ad_account_id"] == acct and row["spend"] == 10
     assert row["purchases_click_7d"] == 0 and row["purchase_value_view_1d"] == 0
+
+
+async def test_sync_folds_placement_and_audience_breakdowns(db, blobs, settings, org_id):
+    """The weekly placement and monthly age x gender reports land in their own tables, with
+    the video counts joined back from the child tables by _fivetran_id."""
+    acct = await _seed(db, org_id)
+    for platform, position, impressions, clicks, views in (
+        ("instagram", "instagram_reels", 8_000, 80, 2_000),
+        ("facebook", "feed", 4_000, 20, 400),
+    ):
+        await insert_placement(
+            db,
+            SCHEMA,
+            ad_id="ad1",
+            week="2026-08-31",
+            publisher_platform=platform,
+            platform_position=position,
+            impressions=impressions,
+            link_clicks=clicks,
+            video_3s_views=views,
+            plays=views,
+            thruplay=views // 4,
+        )
+    await insert_demographics(
+        db, SCHEMA, ad_id="ad1", month="2026-09", age="25-34", gender="female", impressions=9_000
+    )
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    summary = await fivetran_insights.sync_insights(ctx, org_id, connection)
+    assert summary["placement_rows"] == 2 and summary["audience_rows"] == 1
+
+    rows = await db.fetch(
+        "SELECT * FROM metric_placement WHERE org_id=$1 ORDER BY impressions DESC", org_id
+    )
+    assert [(r["publisher_platform"], r["platform_position"]) for r in rows] == [
+        ("instagram", "instagram_reels"),
+        ("facebook", "feed"),
+    ]
+    assert rows[0]["ad_account_id"] == acct and rows[0]["creative_id"] is not None
+    assert rows[0]["impressions"] == 8_000 and rows[0]["link_clicks"] == 80
+    assert rows[0]["video_3s_views"] == 2_000 and rows[0]["video_plays"] == 2_000
+    assert rows[0]["video_thruplay"] == 500
+
+    aud = await db.fetchrow("SELECT * FROM metric_audience WHERE org_id=$1", org_id)
+    # Meta reports the month as 'YYYY-MM'; it is stored as that month's first day.
+    assert aud["month"].isoformat() == "2026-09-01"
+    assert aud["age"] == "25-34" and aud["gender"] == "female" and aud["impressions"] == 9_000
+
+    # metric_daily must not pick up the breakdown impressions a second time.
+    daily = await db.fetchrow("SELECT impressions FROM metric_daily WHERE org_id=$1", org_id)
+    assert daily["impressions"] == 1000

@@ -236,10 +236,93 @@ def test_fatigue_early_decay_and_stable():
     assert fatigue_tier("image", first, trailing, 40).metrics[1].key == "link_ctr"
 
 
-def test_context_is_always_locked():
-    t = context_tier()
+def test_context_is_locked_without_placement_data():
+    t = context_tier("video", None, None)
     assert t.tier == 5 and t.status == "not_measured"
     assert "not connected" in t.reason and t.metrics == []
+
+
+REELS = ("instagram", "instagram_reels")
+FEED = ("facebook", "feed")
+
+
+def _placements(reels_hook=2_000, feed_hook=400):
+    """8k impressions in Reels, 4k in Feed. The baseline account average is 25% hook and 1%
+    CTR in both, so only the ad's own numbers move the tier."""
+    window = {
+        REELS: sums(impressions=8_000, link_clicks=80, video_3s_views=reels_hook),
+        FEED: sums(impressions=4_000, link_clicks=40, video_3s_views=feed_hook),
+    }
+    baseline = {
+        REELS: sums(impressions=80_000, link_clicks=800, video_3s_views=20_000),
+        FEED: sums(impressions=40_000, link_clicks=400, video_3s_views=10_000),
+    }
+    return window, baseline
+
+
+def test_context_is_weak_when_a_placement_carrying_real_delivery_underperforms():
+    t = context_tier("video", *_placements(feed_hook=400))
+    assert t.status == "weak"
+    # Feed is a third of delivery and its hook rate is 10% against the account's 25%.
+    assert "Facebook · Feed carries 33% of delivery" in t.decision
+    assert "hook rate runs 60% below" in t.decision
+    assert [p.label for p in t.placements] == ["Instagram · Reels", "Facebook · Feed"]
+    assert t.placements[1].hook_lift == pytest.approx(-0.6)
+
+
+def test_context_is_strong_when_the_main_placement_beats_the_account():
+    window, baseline = _placements(reels_hook=3_000, feed_hook=1_000)
+    t = context_tier("video", window, baseline)
+    assert t.status == "strong"
+    assert "Instagram · Reels takes 67% of delivery" in t.decision
+
+
+def test_context_is_on_par_when_every_carrying_placement_travels():
+    t = context_tier("video", *_placements(reels_hook=2_000, feed_hook=1_000))
+    assert t.status == "on_par" and t.decision is None
+    assert "travels" in t.reason
+
+
+def test_a_small_placement_cannot_break_the_tier_and_reads_as_unreadable():
+    window, baseline = _placements()
+    window[("facebook", "marketplace")] = sums(impressions=400, link_clicks=0, video_3s_views=10)
+    baseline[("facebook", "marketplace")] = sums(impressions=900, link_clicks=9, video_3s_views=200)
+    window[FEED] = sums(impressions=4_000, link_clicks=40, video_3s_views=1_000)
+    t = context_tier("video", window, baseline)
+    assert t.status == "on_par"
+    tiny = next(p for p in t.placements if p.position == "marketplace")
+    assert tiny.readable is False and tiny.hook_lift is None
+
+
+def test_context_reads_ctr_only_for_images():
+    window = {FEED: sums(impressions=4_000, link_clicks=20, video_3s_views=0)}
+    baseline = {FEED: sums(impressions=40_000, link_clicks=400, video_3s_views=0)}
+    t = context_tier("image", window, baseline)
+    assert t.status == "weak" and "link CTR" in t.decision
+    assert t.placements[0].hook_rate is None
+
+
+def test_context_needs_volume_on_both_sides():
+    window = {FEED: sums(impressions=4_000, link_clicks=40, video_3s_views=100)}
+    baseline = {FEED: sums(impressions=500, link_clicks=5, video_3s_views=200)}
+    t = context_tier("video", window, baseline)
+    assert t.status == "not_enough_data" and "1,000 impressions" in t.reason
+
+
+def test_audience_mix_is_context_only():
+    window, baseline = _placements(reels_hook=2_000, feed_hook=1_000)
+    t = context_tier(
+        "video",
+        window,
+        baseline,
+        {("25-34", "female"): 9_000, ("35-44", "female"): 3_000},
+        {("25-34", "female"): 40_000, ("35-44", "female"): 40_000},
+    )
+    assert t.status == "on_par"  # unchanged by a skewed mix
+    assert [(s.label, s.share, s.baseline_share) for s in t.audience] == [
+        ("25-34 female", 0.75, 0.5),
+        ("35-44 female", 0.25, 0.5),
+    ]
 
 
 def _video_window_weak_retention():

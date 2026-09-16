@@ -10,6 +10,8 @@ const tier = (over: Partial<DiagnosisTier> & Pick<DiagnosisTier, 'tier' | 'key' 
   metrics: [],
   curve: null,
   steps: null,
+  placements: null,
+  audience: null,
   ...over,
 });
 
@@ -135,5 +137,33 @@ describe('DiagnosisPanel', () => {
     unmount();
     render(<DiagnosisPanel diagnosis={{ ...broken, verdict: { kind: 'too_early', headline: 'Too early to diagnose.', detail: 'Only 640 impressions.' } }} />);
     expect(screen.getByText('Too early to diagnose.')).toBeInTheDocument();
+  });
+
+  it('renders a placement table and the audience mix on the context tier', () => {
+    const withContext: Diagnosis = {
+      ...broken,
+      tiers: broken.tiers.map((t) =>
+        t.key === 'context'
+          ? {
+              ...t,
+              status: 'weak' as const,
+              reason: null,
+              decision: 'Facebook · Feed carries 31% of delivery and its hook rate runs 34% below.',
+              placements: [
+                { platform: 'instagram', position: 'instagram_reels', label: 'Instagram · Reels', impressions: 214000, share: 0.52, hook_rate: 0.61, hook_lift: 0.18, link_ctr: 0.035, ctr_lift: 0.06, readable: true },
+                { platform: 'facebook', position: 'feed', label: 'Facebook · Feed', impressions: 127000, share: 0.31, hook_rate: 0.39, hook_lift: -0.34, link_ctr: 0.021, ctr_lift: -0.19, readable: true },
+                { platform: 'facebook', position: 'marketplace', label: 'Facebook · Marketplace', impressions: 800, share: 0.02, hook_rate: null, hook_lift: null, link_ctr: null, ctr_lift: null, readable: false },
+              ],
+              audience: [{ label: '25-34 female', age: '25-34', gender: 'female', share: 0.41, baseline_share: 0.29 }],
+            }
+          : t
+      ),
+    };
+    render(<DiagnosisPanel diagnosis={withContext} />);
+    expect(screen.getByText('Instagram · Reels')).toBeInTheDocument();
+    expect(screen.getByText('−34%')).toBeInTheDocument();
+    expect(screen.getByText('too little volume')).toBeInTheDocument();
+    expect(screen.getByText(/25-34 female 41%/)).toBeInTheDocument();
+    expect(screen.getByText(/account 29%/)).toBeInTheDocument();
   });
 });

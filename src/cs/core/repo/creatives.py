@@ -251,6 +251,102 @@ async def baseline_window_sums(
     )
 
 
+_PLACEMENT_SUMS_SQL = """
+    sum(impressions) AS impressions, sum(reach) AS reach, sum(spend) AS spend,
+    sum(link_clicks) AS link_clicks, sum(video_3s_views) AS video_3s_views,
+    sum(video_plays) AS video_plays, sum(video_thruplay) AS video_thruplay,
+    sum(video_p25) AS video_p25, sum(video_p50) AS video_p50, sum(video_p75) AS video_p75,
+    sum(video_p100) AS video_p100, sum(purchases) AS purchases
+"""
+
+
+# Placement rows are weekly and the funnel window is 30 days, so a week is counted when it
+# overlaps the window at all. Both the creative and its baseline use the same rule, so the
+# comparison stays like-for-like even where a boundary week reaches outside the window.
+def _week_overlap(since: int, until: int) -> str:
+    return f"p.week <= ${until} AND p.week + 6 >= ${since}"
+
+
+async def creative_placement_sums(
+    db: Database, org_id: UUID, creative_id: UUID, since: date, until: date
+) -> list[asyncpg.Record]:
+    return await db.fetch(
+        f"SELECT p.publisher_platform, p.platform_position, {_PLACEMENT_SUMS_SQL} "
+        "FROM metric_placement p "
+        f"WHERE p.org_id=$1 AND p.creative_id=$2 AND {_week_overlap(3, 4)} "
+        "GROUP BY 1, 2",
+        org_id,
+        creative_id,
+        since,
+        until,
+    )
+
+
+async def baseline_placement_sums(
+    db: Database,
+    org_id: UUID,
+    ad_account_id: UUID,
+    fmt: str,
+    exclude_creative_id: UUID,
+    since: date,
+    until: date,
+) -> list[asyncpg.Record]:
+    """The account's per-placement totals over every *other* creative of the same format."""
+    return await db.fetch(
+        f"SELECT p.publisher_platform, p.platform_position, {_PLACEMENT_SUMS_SQL} "
+        "FROM metric_placement p JOIN creative c ON c.id = p.creative_id "
+        "WHERE p.org_id=$1 AND p.ad_account_id=$2 AND c.format=$3 AND p.creative_id <> $6 "
+        f"AND {_week_overlap(4, 5)} GROUP BY 1, 2",
+        org_id,
+        ad_account_id,
+        fmt,
+        since,
+        until,
+        exclude_creative_id,
+    )
+
+
+# Audience rows are monthly; any month touching the window counts, on both sides.
+def _month_overlap(since: int, until: int) -> str:
+    return f"a.month <= ${until} AND (a.month + INTERVAL '1 month' - INTERVAL '1 day') >= ${since}"
+
+
+async def creative_audience_sums(
+    db: Database, org_id: UUID, creative_id: UUID, since: date, until: date
+) -> list[asyncpg.Record]:
+    return await db.fetch(
+        "SELECT a.age, a.gender, sum(a.impressions) AS impressions FROM metric_audience a "
+        f"WHERE a.org_id=$1 AND a.creative_id=$2 AND {_month_overlap(3, 4)} GROUP BY 1, 2",
+        org_id,
+        creative_id,
+        since,
+        until,
+    )
+
+
+async def baseline_audience_sums(
+    db: Database,
+    org_id: UUID,
+    ad_account_id: UUID,
+    fmt: str,
+    exclude_creative_id: UUID,
+    since: date,
+    until: date,
+) -> list[asyncpg.Record]:
+    return await db.fetch(
+        "SELECT a.age, a.gender, sum(a.impressions) AS impressions FROM metric_audience a "
+        "JOIN creative c ON c.id = a.creative_id "
+        "WHERE a.org_id=$1 AND a.ad_account_id=$2 AND c.format=$3 AND a.creative_id <> $6 "
+        f"AND {_month_overlap(4, 5)} GROUP BY 1, 2",
+        org_id,
+        ad_account_id,
+        fmt,
+        since,
+        until,
+        exclude_creative_id,
+    )
+
+
 async def creative_first_metric_day(db: Database, org_id: UUID, creative_id: UUID) -> date | None:
     return await db.fetchval(
         "SELECT min(day) FROM metric_daily WHERE org_id=$1 AND creative_id=$2 AND impressions > 0",

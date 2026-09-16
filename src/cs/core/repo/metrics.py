@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from cs.connectors.base import MetricRow
+from cs.connectors.base import AudienceRow, MetricRow, PlacementRow
 from cs.core.db import Database
 from cs.core.repo.partitions import ensure_metric_partition
 
@@ -108,3 +108,98 @@ async def upsert_metrics(
         async with db.transaction() as tx:
             await tx.executemany(_UPSERT_METRIC_SQL, params[i : i + METRIC_CHUNK_SIZE])
     return len(params), skipped
+
+
+_UPSERT_PLACEMENT_SQL = """
+    INSERT INTO metric_placement (org_id, ad_account_id, creative_id, ad_id, week,
+        publisher_platform, platform_position, impressions, reach, spend, link_clicks,
+        video_3s_views, video_plays, video_thruplay, video_p25, video_p50, video_p75,
+        video_p100, purchases)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+    ON CONFLICT (creative_id, ad_id, week, publisher_platform, platform_position) DO UPDATE SET
+        impressions=EXCLUDED.impressions, reach=EXCLUDED.reach, spend=EXCLUDED.spend,
+        link_clicks=EXCLUDED.link_clicks, video_3s_views=EXCLUDED.video_3s_views,
+        video_plays=EXCLUDED.video_plays, video_thruplay=EXCLUDED.video_thruplay,
+        video_p25=EXCLUDED.video_p25, video_p50=EXCLUDED.video_p50,
+        video_p75=EXCLUDED.video_p75, video_p100=EXCLUDED.video_p100,
+        purchases=EXCLUDED.purchases
+"""
+
+_UPSERT_AUDIENCE_SQL = """
+    INSERT INTO metric_audience (org_id, ad_account_id, creative_id, ad_id, month, age, gender,
+        impressions, reach, spend, link_clicks)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    ON CONFLICT (creative_id, ad_id, month, age, gender) DO UPDATE SET
+        impressions=EXCLUDED.impressions, reach=EXCLUDED.reach, spend=EXCLUDED.spend,
+        link_clicks=EXCLUDED.link_clicks
+"""
+
+
+async def upsert_placement(
+    db: Database, org_id: UUID, ad_account_id: UUID, rows: list[PlacementRow]
+) -> tuple[int, int]:
+    """Upsert placement rows, returning (written, skipped). Rows for an ad we have not
+    ingested are skipped, the same rule upsert_metrics uses."""
+    return await _upsert_breakdown(
+        db,
+        org_id,
+        ad_account_id,
+        rows,
+        _UPSERT_PLACEMENT_SQL,
+        lambda r: (
+            r.week,
+            r.publisher_platform,
+            r.platform_position,
+            r.impressions,
+            r.reach,
+            r.spend,
+            r.link_clicks,
+            r.video_3s_views,
+            r.video_plays,
+            r.video_thruplay,
+            r.video_p25,
+            r.video_p50,
+            r.video_p75,
+            r.video_p100,
+            r.purchases,
+        ),
+    )
+
+
+async def upsert_audience(
+    db: Database, org_id: UUID, ad_account_id: UUID, rows: list[AudienceRow]
+) -> tuple[int, int]:
+    return await _upsert_breakdown(
+        db,
+        org_id,
+        ad_account_id,
+        rows,
+        _UPSERT_AUDIENCE_SQL,
+        lambda r: (r.month, r.age, r.gender, r.impressions, r.reach, r.spend, r.link_clicks),
+    )
+
+
+async def _upsert_breakdown(db, org_id, ad_account_id, rows, sql, values) -> tuple[int, int]:
+    if not rows:
+        return 0, 0
+    ids = await db.fetch(
+        "SELECT platform_ad_id, id, creative_id FROM ad WHERE org_id=$1 AND ad_account_id=$2",
+        org_id,
+        ad_account_id,
+    )
+    by_platform_id = {r["platform_ad_id"]: (r["id"], r["creative_id"]) for r in ids}
+    written = skipped = 0
+    for start in range(0, len(rows), METRIC_CHUNK_SIZE):
+        chunk = rows[start : start + METRIC_CHUNK_SIZE]
+        args = []
+        for row in chunk:
+            known = by_platform_id.get(row.platform_ad_id)
+            if known is None:
+                skipped += 1
+                continue
+            ad_id, creative_id = known
+            args.append((org_id, ad_account_id, creative_id, ad_id, *values(row)))
+        if args:
+            await db.executemany(sql, args)
+            written += len(args)
+    return written, skipped

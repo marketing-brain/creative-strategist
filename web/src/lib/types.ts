@@ -12,6 +12,19 @@ export type DiagnosisMetric = { key: string; label: string; value: number | null
 export type DiagnosisCurvePoint = { p: number; share: number | null; baseline_share: number | null };
 export type DiagnosisCurve = { points: DiagnosisCurvePoint[]; drop_segment: [number, number] | null; avg_watch_s: number | null; duration_s: number | null; baseline_label: string | null };
 export type DiagnosisStep = { key: string; label: string; rate: number | null; baseline_rate: number | null; lift: number | null; numerator: number; denominator: number; readable: boolean };
+export type DiagnosisPlacement = {
+  platform: string;
+  position: string;
+  label: string;
+  impressions: number;
+  share: number | null;
+  hook_rate: number | null;
+  hook_lift: number | null;
+  link_ctr: number | null;
+  ctr_lift: number | null;
+  readable: boolean;
+};
+export type DiagnosisAudienceSlice = { label: string; age: string; gender: string; share: number; baseline_share: number };
 export type DiagnosisTier = {
   tier: number;
   key: 'attention' | 'retention' | 'conversion' | 'fatigue' | 'context';
@@ -23,6 +36,8 @@ export type DiagnosisTier = {
   metrics: DiagnosisMetric[];
   curve: DiagnosisCurve | null;
   steps: DiagnosisStep[] | null;
+  placements: DiagnosisPlacement[] | null;
+  audience: DiagnosisAudienceSlice[] | null;
 };
 export type Diagnosis = {
   window_start: string;

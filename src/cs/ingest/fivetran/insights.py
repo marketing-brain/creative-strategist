@@ -7,12 +7,15 @@ from uuid import UUID
 
 import asyncpg
 
-from cs.connectors.base import MetricRow
+from cs.connectors.base import AudienceRow, MetricRow, PlacementRow
 from cs.core import repo
 from cs.ingest.fivetran.schema import (
     BASIC_AD,
     BASIC_AD_ACTION_VALUES,
     BASIC_AD_ACTIONS,
+    DEMOGRAPHICS_AD,
+    PLACEMENT_AD,
+    PLACEMENT_CHILD_COLUMNS,
     VIDEO_RETENTION_AD,
     VIDEO_RETENTION_CHILD_COLUMNS,
 )
@@ -243,9 +246,159 @@ async def sync_insights(
         written += w
         skipped += s
     skipped += len(metric_rows) - sum(len(v) for v in by_account.values())
+
+    placement = await sync_placement(db, org_id, schema, account_by_platform_ad_id)
+    audience = await sync_audience(db, org_id, schema, account_by_platform_ad_id)
     return {
         "written": written,
         "skipped": skipped,
         "retention_tables": retention is not None,
         "attribution_windows": action_windows is not None,
+        "placement_rows": placement,
+        "audience_rows": audience,
     }
+
+
+async def _breakdown_child_totals(
+    db, schema: str, table: str, period: str, keys: tuple[str, ...], columns: dict[str, str]
+) -> dict[tuple, dict[str, int]]:
+    """Sum each child table of a breakdown report into {(ad_id, period, *keys): {col: value}}.
+
+    Child tables carry only the parent's key columns, so the join back to the parent is by
+    `_fivetran_id`, the hash Fivetran gives each breakdown combination."""
+    totals: dict[tuple, dict[str, int]] = {}
+    for suffix, column in columns.items():
+        try:
+            rows = await db.fetch(f"""
+                SELECT p.ad_id, p.{period} AS period, {", ".join("p." + k for k in keys)},
+                       sum(c.value) AS total
+                FROM {_q(schema, table + "_" + suffix)} c
+                JOIN {_q(schema, table)} p ON p._fivetran_id = c._fivetran_id
+                WHERE c.action_type = 'video_view'
+                GROUP BY 1, 2, {", ".join(str(i + 3) for i in range(len(keys)))}
+            """)
+        except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
+            continue
+        for r in rows:
+            key = (_pid(r["ad_id"]), r["period"], *(r[k] for k in keys))
+            totals.setdefault(key, {})[column] = int(r["total"] or 0)
+    return totals
+
+
+async def _breakdown_action_totals(
+    db,
+    schema: str,
+    table: str,
+    period: str,
+    keys: tuple[str, ...],
+    wanted: dict[str, tuple[str, ...]],
+) -> dict[tuple, dict[str, int]]:
+    """Action counts per breakdown row, for the action types each column prefers."""
+    try:
+        rows = await db.fetch(f"""
+            SELECT p.ad_id, p.{period} AS period, {", ".join("p." + k for k in keys)},
+                   a.action_type, sum(a.value) AS total
+            FROM {_q(schema, table + "_actions")} a
+            JOIN {_q(schema, table)} p ON p._fivetran_id = a._fivetran_id
+            GROUP BY 1, 2, {", ".join(str(i + 3) for i in range(len(keys)))}, a.action_type
+        """)
+    except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
+        return {}
+    by_key: dict[tuple, dict[str, int]] = {}
+    for r in rows:
+        key = (_pid(r["ad_id"]), r["period"], *(r[k] for k in keys))
+        by_key.setdefault(key, {})[r["action_type"]] = int(r["total"] or 0)
+    out: dict[tuple, dict[str, int]] = {}
+    for key, actions in by_key.items():
+        out[key] = {
+            column: next((actions[t] for t in types if t in actions), 0)
+            for column, types in wanted.items()
+        }
+    return out
+
+
+async def _write_by_account(db, org_id: UUID, accounts: dict[str, UUID], rows, upsert) -> int:
+    """Group breakdown rows by the ad account their ad belongs to and upsert each group.
+    Rows for an ad we have not ingested have no account and are dropped here."""
+    by_account: dict[UUID, list] = {}
+    for row in rows:
+        acct_id = accounts.get(row.platform_ad_id)
+        if acct_id is not None:
+            by_account.setdefault(acct_id, []).append(row)
+    written = 0
+    for acct_id, group in by_account.items():
+        w, _ = await upsert(db, org_id, acct_id, group)
+        written += w
+    return written
+
+
+async def sync_placement(db, org_id: UUID, schema: str, accounts: dict[str, UUID]) -> int:
+    """Fold the weekly placement report into metric_placement. Missing report -> no rows."""
+    keys = ("publisher_platform", "platform_position")
+    try:
+        parents = await db.fetch(f"""
+            SELECT ad_id, week, publisher_platform, platform_position,
+                   impressions, reach, spend, inline_link_clicks
+            FROM {_q(schema, PLACEMENT_AD)}
+        """)
+    except asyncpg.UndefinedTableError:
+        return 0
+    video = await _breakdown_child_totals(
+        db, schema, PLACEMENT_AD, "week", keys, PLACEMENT_CHILD_COLUMNS
+    )
+    actions = await _breakdown_action_totals(
+        db,
+        schema,
+        PLACEMENT_AD,
+        "week",
+        keys,
+        {"video_3s_views": VIDEO_3S_ACTION_TYPES, "purchases": PURCHASE_TYPES},
+    )
+    rows = []
+    for p in parents:
+        key = (_pid(p["ad_id"]), p["week"], p["publisher_platform"], p["platform_position"])
+        v, a = video.get(key, {}), actions.get(key, {})
+        rows.append(
+            PlacementRow(
+                platform_ad_id=_pid(p["ad_id"]) or "",
+                week=p["week"],
+                publisher_platform=p["publisher_platform"] or "unknown",
+                platform_position=p["platform_position"] or "unknown",
+                impressions=int(p["impressions"] or 0),
+                reach=int(p["reach"] or 0),
+                spend=Decimal(str(p["spend"] or 0)),
+                link_clicks=int(p["inline_link_clicks"] or 0),
+                video_3s_views=a.get("video_3s_views", 0),
+                purchases=a.get("purchases", 0),
+                **{col: v.get(col, 0) for col in PLACEMENT_CHILD_COLUMNS.values()},
+            )
+        )
+    return await _write_by_account(db, org_id, accounts, rows, repo.upsert_placement)
+
+
+async def sync_audience(db, org_id: UUID, schema: str, accounts: dict[str, UUID]) -> int:
+    """Fold the monthly age x gender report into metric_audience. Meta reports the month as
+    'YYYY-MM'; it is stored as that month's first day."""
+    try:
+        parents = await db.fetch(f"""
+            SELECT ad_id, month, age, gender, impressions, reach, spend, inline_link_clicks
+            FROM {_q(schema, DEMOGRAPHICS_AD)}
+        """)
+    except asyncpg.UndefinedTableError:
+        return 0
+    rows = [
+        AudienceRow(
+            platform_ad_id=_pid(p["ad_id"]) or "",
+            month=date.fromisoformat(f"{p['month']}-01")
+            if isinstance(p["month"], str)
+            else p["month"],
+            age=p["age"] or "unknown",
+            gender=p["gender"] or "unknown",
+            impressions=int(p["impressions"] or 0),
+            reach=int(p["reach"] or 0),
+            spend=Decimal(str(p["spend"] or 0)),
+            link_clicks=int(p["inline_link_clicks"] or 0),
+        )
+        for p in parents
+    ]
+    return await _write_by_account(db, org_id, accounts, rows, repo.upsert_audience)

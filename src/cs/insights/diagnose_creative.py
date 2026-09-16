@@ -31,6 +31,14 @@ class DiagnosedCreative:
     days_live: int | None
 
 
+def _by_placement(rows: list[Any]) -> dict[tuple[str, str], Sums]:
+    return {(r["publisher_platform"], r["platform_position"]): Sums.from_record(r) for r in rows}
+
+
+def _by_audience(rows: list[Any]) -> dict[tuple[str, str], int]:
+    return {(r["age"], r["gender"]): int(r["impressions"] or 0) for r in rows}
+
+
 async def diagnose_creative(
     db: Database,
     org_id: UUID,
@@ -79,6 +87,19 @@ async def diagnose_creative(
         )
         retention_baseline = Sums.from_record(same_length)
         retention_creatives = int(same_length["creatives"] or 0)
+    account_id, fmt = creative["ad_account_id"], creative["format"]
+    placements = _by_placement(
+        await repo.creative_placement_sums(db, org_id, creative_id, since, until)
+    )
+    placement_baseline = _by_placement(
+        await repo.baseline_placement_sums(db, org_id, account_id, fmt, creative_id, since, until)
+    )
+    audience = _by_audience(
+        await repo.creative_audience_sums(db, org_id, creative_id, since, until)
+    )
+    audience_baseline = _by_audience(
+        await repo.baseline_audience_sums(db, org_id, account_id, fmt, creative_id, since, until)
+    )
     diagnosis = diagnose(
         fmt=creative["format"],
         window=window,
@@ -92,5 +113,9 @@ async def diagnose_creative(
         window_end=until,
         retention_baseline=retention_baseline,
         retention_baseline_creatives=retention_creatives,
+        placements=placements,
+        placement_baseline=placement_baseline,
+        audience=audience,
+        audience_baseline=audience_baseline,
     )
     return DiagnosedCreative(diagnosis, window, baseline, first14, trailing7, first_day, days_live)

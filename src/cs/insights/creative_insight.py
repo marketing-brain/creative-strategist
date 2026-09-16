@@ -178,6 +178,9 @@ def evidence_tier(tier: Tier, d: DiagnosedCreative) -> EvidenceTier:
     if tier.key == "fatigue" and d.first14 is not None and d.trailing7 is not None:
         low = min(d.first14.impressions, d.trailing7.impressions)
         return "reliable" if low >= RELIABLE_IMPRESSIONS else "directional"
+    if tier.key == "context":
+        top = max((p.impressions for p in tier.placements or [] if p.readable), default=0)
+        return "reliable" if top >= RELIABLE_IMPRESSIONS else "directional"
     return "directional"
 
 
@@ -235,6 +238,10 @@ def _metric_line(m: Metric, compare: str) -> str | None:
     return line
 
 
+def _signed(lift: float) -> str:
+    return f"{'+' if lift >= 0 else '-'}{abs(lift) * 100:.0f}%"
+
+
 def _attr(value: str) -> str:
     return value.replace('"', "'").replace("\n", " ")
 
@@ -278,6 +285,24 @@ def _layer_lines(tier: Tier, d: DiagnosedCreative, duration_ms: int | None) -> l
                 lines.append(f"{s.label}: not readable yet")
     if tier.key == "fatigue" and d.days_live is not None:
         lines.append(f"live for {d.days_live} days")
+    if tier.key == "context":
+        lines.append("per placement, this ad vs the account's average for that same placement:")
+        for p in tier.placements or []:
+            share = f"{p.share * 100:.0f}% of delivery" if p.share is not None else "unknown share"
+            if not p.readable:
+                lines.append(f"  {p.label}: {share}, too little volume to compare")
+                continue
+            parts = []
+            if p.hook_rate is not None and p.hook_lift is not None:
+                parts.append(f"hook {_pct(p.hook_rate, 1)} ({_signed(p.hook_lift)})")
+            if p.link_ctr is not None and p.ctr_lift is not None:
+                parts.append(f"link CTR {_pct(p.link_ctr, 2)} ({_signed(p.ctr_lift)})")
+            lines.append(f"  {p.label}: {share} · " + ", ".join(parts))
+        for s in tier.audience or []:
+            lines.append(
+                f"  audience {s.label}: {_pct(s.share, 0)} of this ad's impressions vs "
+                f"{_pct(s.baseline_share, 0)} of the account's"
+            )
     return lines
 
 

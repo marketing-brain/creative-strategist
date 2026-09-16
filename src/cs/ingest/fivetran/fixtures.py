@@ -18,7 +18,10 @@ from cs.ingest.fivetran.schema import (
     BASIC_AD,
     CAMPAIGN_HISTORY,
     CREATIVE_HISTORY,
+    DEMOGRAPHICS_AD,
     INSIGHTS_ACTION_TABLES,
+    PLACEMENT_AD,
+    PLACEMENT_CHILD_COLUMNS,
     VIDEO_RETENTION_AD,
     VIDEO_RETENTION_CHILD_COLUMNS,
 )
@@ -92,6 +95,7 @@ async def create_fixture_schema(db: Database, schema: str, *, with_retention: bo
         )
     if with_retention:
         await create_retention_tables(db, schema)
+    await create_breakdown_tables(db, schema)
 
 
 async def create_retention_tables(db: Database, schema: str) -> None:
@@ -106,6 +110,107 @@ async def create_retention_tables(db: Database, schema: str) -> None:
             f'CREATE TABLE "{schema}".{VIDEO_RETENTION_AD}_{suffix} '
             f"(ad_id TEXT, date DATE, index INT, value DOUBLE PRECISION, action_type TEXT)"
         )
+
+
+async def create_breakdown_tables(db: Database, schema: str) -> None:
+    """The weekly placement report (with its unpivoted video child tables and actions) and
+    the monthly age x gender report, shaped like the tables Fivetran lands in production.
+    `month` really is text there, formatted 'YYYY-MM'."""
+    await db.execute(
+        f'CREATE TABLE "{schema}".{PLACEMENT_AD} (ad_id TEXT, week DATE, _fivetran_id TEXT, '
+        "publisher_platform TEXT, platform_position TEXT, account_id BIGINT, "
+        "impressions INT, reach INT, spend NUMERIC, inline_link_clicks INT)"
+    )
+    for suffix in (*PLACEMENT_CHILD_COLUMNS, "actions"):
+        await db.execute(
+            f'CREATE TABLE "{schema}".{PLACEMENT_AD}_{suffix} '
+            "(ad_id TEXT, week DATE, _fivetran_id TEXT, index INT, value DOUBLE PRECISION, "
+            "action_type TEXT)"
+        )
+    await db.execute(
+        f'CREATE TABLE "{schema}".{DEMOGRAPHICS_AD} (ad_id TEXT, month TEXT, _fivetran_id TEXT, '
+        "age TEXT, gender TEXT, account_id BIGINT, "
+        "impressions INT, reach INT, spend NUMERIC, inline_link_clicks INT)"
+    )
+
+
+async def insert_placement(
+    db: Database,
+    schema: str,
+    *,
+    ad_id: str,
+    week: str,
+    publisher_platform: str,
+    platform_position: str,
+    impressions: int,
+    link_clicks: int,
+    reach: int = 0,
+    spend: float = 0.0,
+    video_3s_views: int = 0,
+    plays: int = 0,
+    thruplay: int = 0,
+) -> None:
+    fivetran_id = f"{ad_id}-{week}-{publisher_platform}-{platform_position}"
+    await db.execute(
+        f'INSERT INTO "{schema}".{PLACEMENT_AD} VALUES ($1, $2, $3, $4, $5, 999, $6, $7, $8, $9)',
+        ad_id,
+        date.fromisoformat(week),
+        fivetran_id,
+        publisher_platform,
+        platform_position,
+        impressions,
+        reach,
+        spend,
+        link_clicks,
+    )
+    child_values = {"video_play_actions": plays, "video_thruplay_watched_actions": thruplay}
+    for suffix, value in child_values.items():
+        if value:
+            await db.execute(
+                f'INSERT INTO "{schema}".{PLACEMENT_AD}_{suffix} '
+                "VALUES ($1, $2, $3, 0, $4, 'video_view')",
+                ad_id,
+                date.fromisoformat(week),
+                fivetran_id,
+                value,
+            )
+    if video_3s_views:
+        await db.execute(
+            f'INSERT INTO "{schema}".{PLACEMENT_AD}_actions '
+            "VALUES ($1, $2, $3, 0, $4, 'video_view')",
+            ad_id,
+            date.fromisoformat(week),
+            fivetran_id,
+            video_3s_views,
+        )
+
+
+async def insert_demographics(
+    db: Database,
+    schema: str,
+    *,
+    ad_id: str,
+    month: str,
+    age: str,
+    gender: str,
+    impressions: int,
+    link_clicks: int = 0,
+    reach: int = 0,
+    spend: float = 0.0,
+) -> None:
+    await db.execute(
+        f'INSERT INTO "{schema}".{DEMOGRAPHICS_AD} '
+        "VALUES ($1, $2, $3, $4, $5, 999, $6, $7, $8, $9)",
+        ad_id,
+        month,
+        f"{ad_id}-{month}-{age}-{gender}",
+        age,
+        gender,
+        impressions,
+        reach,
+        spend,
+        link_clicks,
+    )
 
 
 async def insert_campaign_ad_creative(

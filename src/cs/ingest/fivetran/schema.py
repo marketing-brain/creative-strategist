@@ -35,3 +35,16 @@ VIDEO_RETENTION_CHILD_COLUMNS = {
 }
 
 VIDEO_FULL_WATCH_TABLE = f"{VIDEO_RETENTION_AD}_video_p_100_watched_actions"
+
+PLACEMENT_AD = "placement_ad"
+DEMOGRAPHICS_AD = "demographics_ad"
+
+# Child tables of the placement report (Fivetran unpivots each list field) -> column.
+PLACEMENT_CHILD_COLUMNS = {
+    "video_play_actions": "video_plays",
+    "video_p_25_watched_actions": "video_p25",
+    "video_p_50_watched_actions": "video_p50",
+    "video_p_75_watched_actions": "video_p75",
+    "video_p_100_watched_actions": "video_p100",
+    "video_thruplay_watched_actions": "video_thruplay",
+}
