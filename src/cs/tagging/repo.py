@@ -128,5 +128,8 @@ async def latest_tag_value(
     if rid is None:
         return None
     return await db.fetchval(
-        "SELECT value FROM tag WHERE tag_run_id=$1 AND dimension=$2 LIMIT 1", rid, dimension
+        "SELECT value FROM tag WHERE tag_run_id=$1 AND dimension=$2 "
+        "ORDER BY ordinal, t_start_s, value LIMIT 1",
+        rid,
+        dimension,
     )

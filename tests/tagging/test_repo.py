@@ -99,3 +99,4 @@ async def test_finish_tag_run_round_trips_v2_columns(db, org_id, settings):
     assert got[3]["kind"] == "single" and got[3]["raw_value"] is None
     assert await repo.latest_tag_value(db, org_id, cid, "transcript") == "hello there"
     assert await repo.latest_tag_value(db, org_id, cid, "nope") is None
+    assert await repo.latest_tag_value(db, org_id, cid, "beats") == "hook"
