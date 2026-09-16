@@ -68,7 +68,7 @@ VIDEO_DIMENSIONS = {
 
 def test_version_and_nested_formats():
     t = load_taxonomy()
-    assert t.version == "2.1" and len(t.sha256) == 64
+    assert t.version == "2.2" and len(t.sha256) == 64
     assert t.nested_formats == ("video",)
     assert t.is_nested("video") and not t.is_nested("image") and not t.is_nested("carousel")
 
@@ -115,12 +115,13 @@ def test_nested_schema_enforces_every_enum_and_skips_computed():
     assert messenger["properties"]["value"]["enum"][0] == "none"
     assert messenger["required"] == ["value", "confidence", "evidence"]
     hook = schema["properties"]["multi"]["properties"]["hook_devices"]["items"]
-    assert hook["required"] == ["value", "evidence", "t_start_s"]
+    assert hook["required"] == ["value", "evidence", "t_start"]
+    assert hook["properties"]["t_start"] == {"type": "string"}
     assert "audience_callout" in hook["properties"]["value"]["enum"]
     angles = schema["properties"]["multi"]["properties"]["angles"]["items"]
-    assert "t_start_s" not in angles["properties"]
+    assert "t_start" not in angles["properties"]
     beats = schema["properties"]["ordered"]["properties"]["beats"]["items"]
-    assert beats["required"] == ["value", "t_start_s"]
+    assert beats["required"] == ["value", "t_start"]
     concept = schema["properties"]["open"]["properties"]["concept_tags"]["items"]
     assert concept["required"] == ["slug", "evidence"]
     assert schema["properties"]["text"]["properties"]["transcript"] == {"type": "string"}
@@ -323,3 +324,35 @@ def test_validate_dedupes_repeated_dimension_keeping_highest_confidence():
         ("hook_type", "statistic", 0.9),
         ("tone", "warm", 0.8),
     ]
+
+
+@pytest.mark.parametrize(
+    "clock, seconds",
+    [
+        ("0:00", 0.0),
+        ("0:47", 47.0),
+        ("1:13", 73.0),
+        ("01:05", 65.0),
+        ("0:03.5", 3.5),
+        ("1:02:05", 3725.0),
+        (12, 12.0),
+        ("12", 12.0),
+    ],
+)
+def test_clock_times_parse_to_seconds(clock, seconds):
+    from cs.tagging.taxonomy import _seconds
+
+    assert _seconds(clock) == seconds
+
+
+def test_validate_nested_accepts_clock_strings_and_rejects_garbage():
+    p = _payload()
+    p["ordered"]["beats"] = [
+        {"value": "hook", "t_start": "0:00"},
+        {"value": "cta", "t_start": "1:13"},
+    ]
+    rows = load_taxonomy().validate(p, "video")
+    assert [r["t_start_s"] for r in rows if r["dimension"] == "beats"] == [0.0, 73.0]
+    p["ordered"]["beats"] = [{"value": "hook", "t_start": "soon"}]
+    with pytest.raises(ValueError, match="clock time"):
+        load_taxonomy().validate(p, "video")

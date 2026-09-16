@@ -19,7 +19,8 @@ def test_user_text_nested_lists_every_model_dimension_and_hints():
     assert "- headline: H" in text and "- primary_text: P" in text
     assert "- messenger (single, messenger):" in text
     assert "Allowed values: none, creator_on_camera" in text
-    assert "- hook_devices (multi, hook):" in text and "Each item carries t_start_s" in text
+    assert "- hook_devices (multi, hook):" in text
+    assert "Each item carries t_start as minutes:seconds" in text
     assert "- angles (multi, message):" in text
     assert "t_start_s" not in text.split("- angles")[1].split("\n")[0]
     assert "- beats (ordered, structure):" in text
@@ -36,13 +37,13 @@ def test_user_text_nested_lists_every_model_dimension_and_hints():
 def test_user_text_nested_states_the_video_length():
     t = load_taxonomy()
     text = user_text_nested(t, "video", {}, {}, duration_s=93.24)
-    assert "Video length: 93.2 seconds." in text
-    assert "between 0 and 93.2 (1:13 would be 73, not 1.13)" in text
+    assert "Video length: 93.2 seconds (1:33.2)." in text
+    assert "clock time between 0:00 and 1:33.2" in text
     assert "Video length" not in user_text_nested(t, "video", {}, {})
 
 
 def test_system_v2_spells_out_seconds_not_minutes():
-    assert "1:13 is 73" in SYSTEM_V2 and "Never write minutes.seconds" in SYSTEM_V2
+    assert "minutes:seconds" in SYSTEM_V2 and '"1:13"' in SYSTEM_V2
 
 
 def test_legacy_user_text_unchanged_for_images():

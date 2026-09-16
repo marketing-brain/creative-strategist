@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -125,10 +126,10 @@ class Taxonomy:
             elif d.kind == "multi":
                 props = {"value": enum(d), "evidence": {"type": "string"}}
                 if d.timestamped:
-                    props["t_start_s"] = {"type": "number"}
+                    props["t_start"] = {"type": "string"}
                 multi[d.name] = items(props)
             elif d.kind == "ordered":
-                ordered[d.name] = items({"value": enum(d), "t_start_s": {"type": "number"}})
+                ordered[d.name] = items({"value": enum(d), "t_start": {"type": "string"}})
             elif d.kind == "open":
                 open_[d.name] = items({"slug": {"type": "string"}, "evidence": {"type": "string"}})
             elif d.kind == "text":
@@ -221,7 +222,7 @@ class Taxonomy:
             if value in seen:
                 continue
             seen.add(value)
-            t = _seconds(item.get("t_start_s")) if d.timestamped else None
+            t = _seconds(_clock(item)) if d.timestamped else None
             out.append(_row(d, value, evidence=item.get("evidence"), t_start_s=t))
         return out
 
@@ -236,7 +237,7 @@ class Taxonomy:
             value = str(_item(d, item).get("value", "")).strip()
             if value not in (d.values or ()):
                 raise ValueError(f"{d.name}: value {value!r} not allowed")
-            t = _seconds(item.get("t_start_s"))
+            t = _seconds(_clock(item))
             if t is None or t < last:
                 raise ValueError(f"{d.name}: t_start_s must be present and non-decreasing")
             last = t
@@ -284,10 +285,30 @@ def _item(d: Dimension, item) -> dict:
     return item
 
 
+_CLOCK = re.compile(r"^\s*(?:(\d{1,2}):)?(\d{1,2}):(\d{2}(?:\.\d+)?)\s*$")
+
+
+def _clock(item: dict):
+    """The model writes clock times ("1:13"); older payloads carried seconds as a number."""
+    return item.get("t_start", item.get("t_start_s"))
+
+
 def _seconds(v) -> float | None:
-    if v is None:
+    """Seconds from a clock string ("0:47", "1:13", "1:02:05.5") or a number of seconds.
+    Video models perceive time as minutes:seconds and, asked for a number, write 1.13 for
+    1:13; the clock form is what they can produce reliably."""
+    if v is None or v == "":
         return None
-    return max(0.0, float(v))
+    if isinstance(v, (int, float)):
+        return max(0.0, float(v))
+    m = _CLOCK.match(str(v))
+    if m:
+        h, mi, s = m.groups()
+        return float(h or 0) * 3600 + float(mi) * 60 + float(s)
+    try:
+        return max(0.0, float(v))
+    except ValueError:
+        raise ValueError(f"t_start {v!r} is not a clock time like 1:13") from None
 
 
 def _row(

@@ -45,22 +45,28 @@ DEFAULT_V2_PAYLOAD = {
     },
     "multi": {
         "hook_devices": [
-            {"value": "warning_or_risk", "t_start_s": 0.0, "evidence": "'Worst OTC sleep aids'"},
-            {"value": "audience_callout", "t_start_s": 1.0, "evidence": "'if you take benadryl'"},
-            {"value": "warning_or_risk", "t_start_s": 2.0, "evidence": "duplicate on purpose"},
+            {"value": "warning_or_risk", "t_start": "0:00", "evidence": "'Worst OTC sleep aids'"},
+            {"value": "audience_callout", "t_start": "0:01", "evidence": "'if you take benadryl'"},
+            {"value": "warning_or_risk", "t_start": "0:02", "evidence": "duplicate on purpose"},
         ],
         "proof_devices": [
-            {"value": "expert_credential", "t_start_s": 3.0, "evidence": "'as a pharmacist'"},
-            {"value": "lab_report_or_certificate", "t_start_s": 3.5, "evidence": "CoA on screen"},
+            {"value": "expert_credential", "t_start": "0:03", "evidence": "'as a pharmacist'"},
+            {
+                "value": "lab_report_or_certificate",
+                "t_start": "0:03.5",
+                "evidence": "CoA on screen",
+            },
         ],
         "angles": [
             {"value": "risk_avoidance", "evidence": "dementia warning"},
             {"value": "natural_alternative", "evidence": "magnesium instead"},
         ],
-        "offer_elements": [{"value": "discount_percent", "t_start_s": 3.6, "evidence": "20% off"}],
+        "offer_elements": [
+            {"value": "discount_percent", "t_start": "0:03.6", "evidence": "20% off"}
+        ],
         "cta_modes": [
-            {"value": "spoken", "t_start_s": 3.7, "evidence": "'tap below'"},
-            {"value": "end_card", "t_start_s": 3.8, "evidence": "card"},
+            {"value": "spoken", "t_start": "0:03.7", "evidence": "'tap below'"},
+            {"value": "end_card", "t_start": "0:03.8", "evidence": "card"},
         ],
         "registers": [
             {"value": "fear", "evidence": "warning"},
@@ -69,12 +75,12 @@ DEFAULT_V2_PAYLOAD = {
     },
     "ordered": {
         "beats": [
-            {"value": "hook", "t_start_s": 0.0},
-            {"value": "problem", "t_start_s": 1.0},
-            {"value": "proof", "t_start_s": 1.5},
-            {"value": "solution_intro", "t_start_s": 2.0},
-            {"value": "offer", "t_start_s": 3.6},
-            {"value": "cta", "t_start_s": 3.7},
+            {"value": "hook", "t_start": "0:00"},
+            {"value": "problem", "t_start": "0:01"},
+            {"value": "proof", "t_start": "0:01.5"},
+            {"value": "solution_intro", "t_start": "0:02"},
+            {"value": "offer", "t_start": "0:03.6"},
+            {"value": "cta", "t_start": "0:03.7"},
         ]
     },
     "open": {

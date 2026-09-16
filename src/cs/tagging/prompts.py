@@ -36,9 +36,8 @@ SYSTEM_V2 = (
     "into a structured profile that will be used to cluster ads into creative-concept "
     "families, so precision and consistency matter more than nuance. You are given the "
     "actual video file: watch every frame and listen to the full audio track. Rules: "
-    "(1) Every t_start_s is the total number of seconds elapsed since the start, as a plain "
-    "decimal number: 0:47 is 47, 1:13 is 73, 2:05 is 125. Never write minutes.seconds. When the "
-    "prompt states the video length, every t_start_s lies between 0 and that length. "
+    "(1) Every t_start is a clock time measured from the start of the video, written as "
+    'minutes:seconds, e.g. "0:03", "0:47", "1:13". Tenths are allowed ("0:03.5"). '
     "(2) hook_devices are judged on the first 5 seconds only. "
     "(3) messenger = expert_on_camera and proof_devices = expert_credential require a "
     "credential stated on screen or in speech (pharmacist, doctor, RD, PhD); years of "
@@ -68,9 +67,10 @@ def user_text_nested(
 ) -> str:
     lines = [f"Creative format: {fmt}"]
     if duration_s is not None:
+        clock = f"{int(duration_s // 60)}:{duration_s % 60:04.1f}"
         lines.append(
-            f"Video length: {duration_s:.1f} seconds. Every t_start_s is a number of seconds "
-            f"between 0 and {duration_s:.1f} (1:13 would be 73, not 1.13)."
+            f"Video length: {duration_s:.1f} seconds ({clock}). Every t_start is a clock time "
+            f"between 0:00 and {clock}."
         )
     lines += ["", "Ad copy fields:"]
     for k in ("headline", "primary_text", "description", "cta_type", "link_url"):
@@ -82,14 +82,14 @@ def user_text_nested(
         if d.kind == "single":
             lines.append(f"- {d.name} (single, {d.group}): {d.description} Allowed values: {vals}")
         elif d.kind == "multi":
-            ts = " Each item carries t_start_s." if d.timestamped else ""
+            ts = " Each item carries t_start as minutes:seconds." if d.timestamped else ""
             lines.append(
                 f"- {d.name} (multi, {d.group}): {d.description} Allowed values: {vals}{ts}"
             )
         elif d.kind == "ordered":
             lines.append(
                 f"- {d.name} (ordered, {d.group}): {d.description} Allowed values: {vals} "
-                "Each item carries t_start_s."
+                "Each item carries t_start as minutes:seconds."
             )
         elif d.kind == "open":
             cap = f" At most {d.max_values}." if d.max_values else ""
