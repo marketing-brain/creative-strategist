@@ -9,6 +9,11 @@ import openai
 
 from cs.core.config import Settings
 
+# The v2 video profile carries a verbatim transcript plus ~40 evidence strings; the
+# provider default output budget truncated a 93-second ad mid-object. Gemini 2.5 Flash
+# allows far more than this.
+VIDEO_MAX_OUTPUT_TOKENS = 16384
+
 
 @dataclass
 class TagResult:
@@ -74,8 +79,10 @@ class GeminiGatewayTagger:
     ) -> TagResult:
         from cs.tagging.prompts import SYSTEM
 
+        kwargs = {"max_tokens": VIDEO_MAX_OUTPUT_TOKENS} if video is not None else {}
         resp = await self.client.chat.completions.create(
             model=self.video_model if video is not None else self.model,
+            **kwargs,
             messages=[
                 {"role": "system", "content": system or SYSTEM},
                 {"role": "user", "content": build_content(images, user_text, video)},

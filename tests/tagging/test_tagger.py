@@ -111,3 +111,14 @@ def test_default_v2_payload_validates_against_the_taxonomy():
     rows = load_taxonomy().validate(DEFAULT_V2_PAYLOAD, "video")
     dims = {r["dimension"] for r in rows}
     assert {"messenger", "hook_devices", "beats", "concept_tags", "transcript"} <= dims
+
+
+async def test_video_calls_carry_an_explicit_output_budget(settings):
+    from cs.tagging.tagger import VIDEO_MAX_OUTPUT_TOKENS, GeminiGatewayTagger
+
+    client = _client(_response('{"single": {}}'))
+    tagger = GeminiGatewayTagger(settings, client=client)
+    await tagger.tag([], "u", {"type": "object"}, video=(b"v", "video/mp4"))
+    await tagger.tag([], "u", {"type": "object"})
+    assert client.chat.completions.calls[0]["max_tokens"] == VIDEO_MAX_OUTPUT_TOKENS
+    assert "max_tokens" not in client.chat.completions.calls[1]
