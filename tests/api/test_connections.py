@@ -155,9 +155,7 @@ async def test_status_surfaces_error_message(client, db):
     from cs.core import repo
 
     org_id = UUID(
-        (await client.get("/me", headers=dev_headers(org="org_conn_status_error"))).json()[
-            "org_id"
-        ]
+        (await client.get("/me", headers=dev_headers(org="org_conn_status_error"))).json()["org_id"]
     )
     conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", "s")
     await repo.set_meta_connection_status(

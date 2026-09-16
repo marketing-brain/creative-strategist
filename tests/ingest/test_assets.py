@@ -49,12 +49,17 @@ async def test_download_creative_stores_the_verdict_once_the_file_lands(
     ctx = JobContext(db=db, blobs=blobs, settings=settings, job=type("J", (), {"org_id": org_id})())
     async with httpx.AsyncClient() as http:
         await assets.download_creative(
-            ctx, http, cid, "https://cdn.example/v.mp4", "original_video",
+            ctx,
+            http,
+            cid,
+            "https://cdn.example/v.mp4",
+            "original_video",
             verdict=("video", "asset_feed_spec_video"),
         )
 
-    row = await db.fetchrow("SELECT format, format_source, format_verified_at FROM creative"
-                            " WHERE id=$1", cid)
+    row = await db.fetchrow(
+        "SELECT format, format_source, format_verified_at FROM creative WHERE id=$1", cid
+    )
     assert (row["format"], row["format_source"]) == ("video", "asset_feed_spec_video")
     assert row["format_verified_at"] is not None
 
@@ -72,7 +77,11 @@ async def test_download_creative_that_fails_leaves_the_creative_unresolved(
     async with httpx.AsyncClient() as http:
         try:
             await assets.download_creative(
-                ctx, http, cid, "https://cdn.example/gone.mp4", "original_video",
+                ctx,
+                http,
+                cid,
+                "https://cdn.example/gone.mp4",
+                "original_video",
                 verdict=("video", "asset_feed_spec_video"),
             )
         except httpx.HTTPStatusError:

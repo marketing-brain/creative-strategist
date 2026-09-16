@@ -84,7 +84,10 @@ async def test_sync_insights_folds_action_breakdowns_into_metric_daily(db, blobs
 
     summary = await fivetran_insights.sync_insights(ctx, org_id, connection)
     assert summary == {
-        "written": 1, "skipped": 0, "retention_tables": True, "attribution_windows": True,
+        "written": 1,
+        "skipped": 0,
+        "retention_tables": True,
+        "attribution_windows": True,
     }
 
     rows = await db.fetch("SELECT * FROM metric_daily WHERE org_id=$1", org_id)
@@ -113,9 +116,7 @@ async def test_sync_insights_folds_action_breakdowns_into_metric_daily(db, blobs
     assert row["purchase_value_click_7d"] == 80 and row["purchase_value_view_1d"] == 20
 
 
-async def test_attribution_split_is_zero_when_a_window_column_is_null(
-    db, blobs, settings, org_id
-):
+async def test_attribution_split_is_zero_when_a_window_column_is_null(db, blobs, settings, org_id):
     """Meta leaves _1_d_view NULL when an ad had no view-through purchases that day
     (org 2 has such rows): NULL is zero, not a missing split."""
     await _seed(db, org_id, with_retention=False)
@@ -142,7 +143,10 @@ async def test_sync_insights_without_retention_report_writes_zeros(db, blobs, se
 
     summary = await fivetran_insights.sync_insights(ctx, org_id, connection)
     assert summary == {
-        "written": 1, "skipped": 0, "retention_tables": False, "attribution_windows": True,
+        "written": 1,
+        "skipped": 0,
+        "retention_tables": False,
+        "attribution_windows": True,
     }
     row = await db.fetchrow("SELECT * FROM metric_daily WHERE org_id=$1", org_id)
     assert row["video_3s_views"] == 30 and row["purchases"] == 2

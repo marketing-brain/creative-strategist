@@ -21,9 +21,7 @@ class FinalizeBody(BaseModel):
 
 
 @router.get("")
-async def status(
-    auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)
-) -> dict:
+async def status(auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)) -> dict:
     """Connection status independent of ad_account rows -- a meta_connection can exist
     (mid first-sync, or errored with zero accounts ever discovered) while /accounts
     returns nothing, which used to leave the UI with no signal that a connection was
@@ -35,9 +33,7 @@ async def status(
         "connected": True,
         "status": conn["sync_status"],
         "error": conn["last_error"],
-        "last_synced_at": (
-            conn["last_synced_at"].isoformat() if conn["last_synced_at"] else None
-        ),
+        "last_synced_at": (conn["last_synced_at"].isoformat() if conn["last_synced_at"] else None),
     }
 
 

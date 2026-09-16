@@ -70,9 +70,7 @@ def classify(
     if object_type == "VIDEO":
         return Classification("video", "meta_object_type", videos_by_id.get(video_ref or ""))
     if object_type == "PHOTO":
-        return Classification(
-            "image", "meta_object_type", row["image_url"] or row["thumbnail_url"]
-        )
+        return Classification("image", "meta_object_type", row["image_url"] or row["thumbnail_url"])
 
     # Structural evidence of a carousel outranks every video rule below: a carousel
     # holding one video card earns video_views without ceasing to be a carousel.

@@ -8,7 +8,12 @@ async def _insert(db, org_id, account_id, *, fmt, source):
     await db.execute(
         "INSERT INTO creative (id, org_id, ad_account_id, platform_creative_id,"
         " format, format_source, raw_path) VALUES ($1, $2, $3, $4, $5, $6, '')",
-        new_id(), org_id, account_id, new_id().hex, fmt, source,
+        new_id(),
+        org_id,
+        account_id,
+        new_id().hex,
+        fmt,
+        source,
     )
 
 
@@ -47,5 +52,9 @@ async def test_format_source_has_no_default(db, org_id, ad_account_id):
         await db.execute(
             "INSERT INTO creative (id, org_id, ad_account_id, platform_creative_id,"
             " format, raw_path) VALUES ($1, $2, $3, $4, $5, '')",
-            new_id(), org_id, ad_account_id, new_id().hex, "image",
+            new_id(),
+            org_id,
+            ad_account_id,
+            new_id().hex,
+            "image",
         )

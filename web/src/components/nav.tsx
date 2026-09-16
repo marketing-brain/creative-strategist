@@ -5,14 +5,11 @@ import { usePathname } from 'next/navigation';
 import { OrganizationSwitcher, UserButton } from '@clerk/nextjs';
 import {
   BatteryWarning,
-  ClipboardCheck,
   FileText,
   LayoutGrid,
-  MessageSquare,
   Settings,
   Sparkles,
   TrendingUp,
-  Wand2,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from 'cn';
@@ -28,14 +25,6 @@ const groups: { label: string; items: NavItem[] }[] = [
       { href: '/insights', label: 'Insights', icon: TrendingUp },
       { href: '/fatigue', label: 'Fatigue', icon: BatteryWarning },
       { href: '/briefs', label: 'Briefs', icon: FileText },
-    ],
-  },
-  {
-    label: 'Studio',
-    items: [
-      { href: '/copilot', label: 'Copilot', icon: MessageSquare },
-      { href: '/generate', label: 'Generate', icon: Wand2 },
-      { href: '/review', label: 'Review', icon: ClipboardCheck },
     ],
   },
 ];

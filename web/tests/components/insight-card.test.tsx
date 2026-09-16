@@ -7,11 +7,10 @@ const base = { id: 'i1', kind: 'pattern' as const, dimension: 'hook_type', value
   explanation: 'Questions win', suggested_test: 'Try two more', created_at: '2026-09-01T00:00:00Z' };
 
 describe('InsightCard', () => {
-  it('renders a pattern insight with generate link', () => {
+  it('renders a pattern insight', () => {
     render(<InsightCard insight={base} />);
     expect(screen.getByText('hook_type = question')).toBeInTheDocument();
     expect(screen.getByText('+50% CTR')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /generate from this/i })).toHaveAttribute('href', '/generate?insight=i1');
   });
   it('links fatigue to the creative', () => {
     render(<InsightCard insight={{ ...base, kind: 'fatigue', dimension: 'creative', value: 'c9', creative_id: 'c9', creative_headline: 'Old ad', lift: -0.4 }} />);
