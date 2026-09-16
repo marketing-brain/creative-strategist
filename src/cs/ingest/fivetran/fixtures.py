@@ -54,7 +54,7 @@ async def create_fixture_schema(db: Database, schema: str, *, with_retention: bo
     """)
     await db.execute(f"""
         CREATE TABLE "{schema}".{AD_VIDEO_HISTORY} (
-          id TEXT, source TEXT, picture TEXT, _fivetran_synced TIMESTAMPTZ
+          id TEXT, source TEXT, picture TEXT, length REAL, _fivetran_synced TIMESTAMPTZ
         )
     """)
     await db.execute(f"""
@@ -82,10 +82,13 @@ async def create_fixture_schema(db: Database, schema: str, *, with_retention: bo
         f'CREATE TABLE "{schema}".{BASIC_AD} (ad_id TEXT, date DATE, '
         f"spend NUMERIC, impressions INT, inline_link_clicks INT, reach INT)"
     )
+    # _7_d_click / _1_d_view are the attribution-window columns Fivetran lands for org 2;
+    # they come last so positional 5-value inserts keep working (window columns NULL).
     for t in INSIGHTS_ACTION_TABLES:
         await db.execute(
             f'CREATE TABLE "{schema}".{t} '
-            f"(ad_id TEXT, date DATE, action_type TEXT, index INT, value NUMERIC)"
+            f"(ad_id TEXT, date DATE, action_type TEXT, index INT, value NUMERIC, "
+            f"_7_d_click DOUBLE PRECISION, _1_d_view DOUBLE PRECISION)"
         )
     if with_retention:
         await create_retention_tables(db, schema)
@@ -157,11 +160,14 @@ async def insert_campaign_ad_creative(
     )
 
 
-async def insert_video(db: Database, schema: str, *, video_id: str, source: str | None) -> None:
+async def insert_video(
+    db: Database, schema: str, *, video_id: str, source: str | None, length_s: float | None = None
+) -> None:
     await db.execute(
-        f'INSERT INTO "{schema}".ad_video_history VALUES ($1, $2, NULL, now())',
+        f'INSERT INTO "{schema}".ad_video_history VALUES ($1, $2, NULL, $3, now())',
         video_id,
         source,
+        length_s,
     )
 
 
@@ -218,8 +224,7 @@ async def insert_customization_rule(
         return json.dumps({"id": label_id, "name": f"placement_asset_{label_id}"})
 
     await db.execute(
-        f'INSERT INTO "{schema}".{AD_ASSET_CUSTOMIZATION_RULE}'
-        " VALUES ($1, $2, $3, $4, $5, now())",
+        f'INSERT INTO "{schema}".{AD_ASSET_CUSTOMIZATION_RULE} VALUES ($1, $2, $3, $4, $5, now())',
         creative_id,
         index,
         label(image_label_id),

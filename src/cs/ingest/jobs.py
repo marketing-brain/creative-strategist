@@ -108,7 +108,13 @@ async def download_creative(ctx: JobContext) -> None:
     creative_id = UUID(p["creative_id"])
     async with httpx.AsyncClient(timeout=120) as http:
         await assets.download_creative(
-            ctx, http, creative_id, p["asset_url"], p["kind"], verdict=_verdict(p)
+            ctx,
+            http,
+            creative_id,
+            p["asset_url"],
+            p["kind"],
+            verdict=_verdict(p),
+            duration_ms=p.get("duration_ms"),
         )
     log.info("creative downloaded", extra={"creative_id": str(creative_id)})
 

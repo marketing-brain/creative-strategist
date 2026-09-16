@@ -30,6 +30,7 @@ async def download_creative(
     kind: str,
     *,
     verdict: tuple[str, str] | None = None,
+    duration_ms: int | None = None,
 ) -> None:
     """verdict: the (format, format_source) the creative was kept unresolved for until its
     file existed; stored once the file is."""
@@ -38,9 +39,9 @@ async def download_creative(
     ext = _EXT_BY_MIME.get(mime, "bin")
     key = f"{org_id}/creatives/{creative_id}/original.{ext}"
     await ctx.blobs.put(key, data, mime)
-    duration_ms = None
-    if kind == "original_video":
-        # Maps retention-curve percentages to seconds (diagnosis panel, insight brief).
+    if kind == "original_video" and duration_ms is None:
+        # Meta's ad_video_history.length covers the account's own library and is passed in
+        # by the sync; ffprobe is the fallback for videos resolved from elsewhere (Apify).
         # Unprobeable files still store; the insight job retries the probe.
         try:
             duration_ms = await asyncio.to_thread(probe_duration_ms, data)

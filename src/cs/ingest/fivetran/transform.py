@@ -233,6 +233,13 @@ async def _feed_spec_video_ids(db, schema: str) -> dict[str, list[str]]:
     return out
 
 
+def _length_payload(cr: asyncpg.Record, video_length_ms: dict[str, int]) -> dict:
+    """Meta's own duration for this creative's video, when the library knows it."""
+    vid = _pid(cr["video_video_id"] or cr["video_id"])
+    ms = video_length_ms.get(vid or "")
+    return {"duration_ms": ms} if ms else {}
+
+
 def _video_ids_to_resolve(cr: asyncpg.Record, feed_spec_videos: dict[str, list[str]]) -> list[str]:
     own = _pid(cr["video_video_id"] or cr["video_id"])
     return feed_spec_videos.get(_pid(cr["id"]) or "") or ([own] if own else [])
@@ -284,6 +291,15 @@ async def _sync_ads_and_creatives(
     video_rows = await _latest_rows(db, schema, AD_VIDEO_HISTORY)
     videos_by_id: dict[str, str] = {
         pid: r["source"] for r in video_rows if r["source"] and (pid := _pid(r["id"]))
+    }
+    # Meta reports each video's length in seconds; it is authoritative and free, so the
+    # download stores it instead of running ffprobe (which stays the fallback for videos
+    # Apify fetches from outside the ad account's library).
+    video_length_ms: dict[str, int] = {
+        pid: int(float(length) * 1000)
+        for r in video_rows
+        if (length := (r["length"] if "length" in r.keys() else None)) is not None
+        and (pid := _pid(r["id"]))
     }
     afs_ids = await _afs_video_creative_ids(db, schema)
     vv_ids = await _video_view_creative_ids(db, schema)
@@ -375,6 +391,7 @@ async def _sync_ads_and_creatives(
                         "kind": kind,
                         "format": verdict.format,
                         "format_source": verdict.source,
+                        **_length_payload(cr, video_length_ms),
                     },
                     dedup_key=str(creative_id),
                 )
