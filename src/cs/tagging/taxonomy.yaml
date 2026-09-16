@@ -1,4 +1,4 @@
-version: "2.0"
+version: "2.1"
 # Formats whose model call returns the nested v2 profile (spec §2). Every other format
 # keeps the legacy flat {"tags": [...]} schema.
 nested_formats: [video]

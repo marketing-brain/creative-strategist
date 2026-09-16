@@ -33,6 +33,18 @@ def test_user_text_nested_lists_every_model_dimension_and_hints():
     assert text.rstrip().endswith("Return JSON matching the schema exactly.")
 
 
+def test_user_text_nested_states_the_video_length():
+    t = load_taxonomy()
+    text = user_text_nested(t, "video", {}, {}, duration_s=93.24)
+    assert "Video length: 93.2 seconds." in text
+    assert "between 0 and 93.2 (1:13 would be 73, not 1.13)" in text
+    assert "Video length" not in user_text_nested(t, "video", {}, {})
+
+
+def test_system_v2_spells_out_seconds_not_minutes():
+    assert "1:13 is 73" in SYSTEM_V2 and "Never write minutes.seconds" in SYSTEM_V2
+
+
 def test_legacy_user_text_unchanged_for_images():
     text = user_text(load_taxonomy(), "image", {"headline": "H"})
     assert "- hook_type (hook):" in text and "messenger" not in text

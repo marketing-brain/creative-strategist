@@ -63,12 +63,18 @@ async def profile_video(
     data = await ctx.blobs.get(creative["primary_asset_path"])
     stats = probe_video(data)
     copy = {k: creative[k] for k in COPY_FIELDS}
-    text = user_text_nested(taxonomy, "video", copy, hints)
+    text = user_text_nested(taxonomy, "video", copy, hints, duration_s=stats.duration_s)
     schema = taxonomy.json_schema("video")
     result = await tagger.tag([], text, schema, video=(data, "video/mp4"), system=SYSTEM_V2)
     if result.refused:
         raise RuntimeError("model refused to tag creative")
     rows = taxonomy.validate(result.payload, "video")
+    late = [r for r in rows if r["t_start_s"] is not None and r["t_start_s"] > stats.duration_s + 1]
+    if late:
+        raise ValueError(
+            f"{late[0]['dimension']}: t_start_s {late[0]['t_start_s']} is beyond the video length "
+            f"{stats.duration_s:.1f}s"
+        )
     rows += computed_rows(
         taxonomy,
         "video",

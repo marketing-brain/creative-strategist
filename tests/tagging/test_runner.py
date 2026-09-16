@@ -303,6 +303,26 @@ async def test_second_video_sees_vocabulary_hints_and_reuses_canonical(
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+async def test_video_profile_rejects_timestamps_beyond_the_video_length(
+    db, blobs, settings, org_id, tmp_path
+):
+    """The 4-second fixture cannot have a beat at 47s; the model wrote minutes.seconds or
+    hallucinated. The run fails rather than storing an impossible timeline."""
+    cid = await _make_video_creative(db, blobs, settings, org_id, tmp_path)
+    bad = {
+        **DEFAULT_V2_PAYLOAD,
+        "ordered": {
+            "beats": [{"value": "hook", "t_start_s": 0.0}, {"value": "cta", "t_start_s": 47.0}]
+        },
+    }
+    tagger = FakeTagger(payloads_by_call=[bad])
+    with pytest.raises(ValueError, match="beyond the video length"):
+        await runner.tag_creative(_ctx(db, blobs, settings, org_id, {}), cid, tagger)
+    assert "Video length: 4." in tagger.calls[0]["user_text"]
+    assert await db.fetchval("SELECT status FROM tag_run") == "failed"
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 async def test_video_profile_rule_break_fails_the_run(db, blobs, settings, org_id, tmp_path):
     cid = await _make_video_creative(db, blobs, settings, org_id, tmp_path)
     bad = {**DEFAULT_V2_PAYLOAD, "ordered": {"beats": []}}

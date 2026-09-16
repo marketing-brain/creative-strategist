@@ -29,6 +29,7 @@ def _single(value: str, confidence: float, evidence: str) -> dict:
     return {"value": value, "confidence": confidence, "evidence": evidence}
 
 
+# Timeline fits inside the 4-second fixture clip used by the runner tests.
 DEFAULT_V2_PAYLOAD = {
     "single": {
         "messenger": _single("expert_on_camera", 0.9, "white coat; says 'as a pharmacist'"),
@@ -50,16 +51,16 @@ DEFAULT_V2_PAYLOAD = {
         ],
         "proof_devices": [
             {"value": "expert_credential", "t_start_s": 3.0, "evidence": "'as a pharmacist'"},
-            {"value": "lab_report_or_certificate", "t_start_s": 73.0, "evidence": "CoA on screen"},
+            {"value": "lab_report_or_certificate", "t_start_s": 3.5, "evidence": "CoA on screen"},
         ],
         "angles": [
             {"value": "risk_avoidance", "evidence": "dementia warning"},
             {"value": "natural_alternative", "evidence": "magnesium instead"},
         ],
-        "offer_elements": [{"value": "discount_percent", "t_start_s": 80.0, "evidence": "20% off"}],
+        "offer_elements": [{"value": "discount_percent", "t_start_s": 3.6, "evidence": "20% off"}],
         "cta_modes": [
-            {"value": "spoken", "t_start_s": 85.0, "evidence": "'tap below'"},
-            {"value": "end_card", "t_start_s": 88.0, "evidence": "card"},
+            {"value": "spoken", "t_start_s": 3.7, "evidence": "'tap below'"},
+            {"value": "end_card", "t_start_s": 3.8, "evidence": "card"},
         ],
         "registers": [
             {"value": "fear", "evidence": "warning"},
@@ -69,11 +70,11 @@ DEFAULT_V2_PAYLOAD = {
     "ordered": {
         "beats": [
             {"value": "hook", "t_start_s": 0.0},
-            {"value": "problem", "t_start_s": 5.0},
-            {"value": "proof", "t_start_s": 14.0},
-            {"value": "solution_intro", "t_start_s": 47.0},
-            {"value": "offer", "t_start_s": 80.0},
-            {"value": "cta", "t_start_s": 85.0},
+            {"value": "problem", "t_start_s": 1.0},
+            {"value": "proof", "t_start_s": 1.5},
+            {"value": "solution_intro", "t_start_s": 2.0},
+            {"value": "offer", "t_start_s": 3.6},
+            {"value": "cta", "t_start_s": 3.7},
         ]
     },
     "open": {

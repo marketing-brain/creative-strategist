@@ -36,7 +36,9 @@ SYSTEM_V2 = (
     "into a structured profile that will be used to cluster ads into creative-concept "
     "families, so precision and consistency matter more than nuance. You are given the "
     "actual video file: watch every frame and listen to the full audio track. Rules: "
-    "(1) Timestamps are seconds from the start, as numbers. "
+    "(1) Every t_start_s is the total number of seconds elapsed since the start, as a plain "
+    "decimal number: 0:47 is 47, 1:13 is 73, 2:05 is 125. Never write minutes.seconds. When the "
+    "prompt states the video length, every t_start_s lies between 0 and that length. "
     "(2) hook_devices are judged on the first 5 seconds only. "
     "(3) messenger = expert_on_camera and proof_devices = expert_credential require a "
     "credential stated on screen or in speech (pharmacist, doctor, RD, PhD); years of "
@@ -58,9 +60,19 @@ SYSTEM_V2 = (
 
 
 def user_text_nested(
-    taxonomy: Taxonomy, fmt: str, copy: dict, hints: dict[str, list[tuple[str, int]]]
+    taxonomy: Taxonomy,
+    fmt: str,
+    copy: dict,
+    hints: dict[str, list[tuple[str, int]]],
+    duration_s: float | None = None,
 ) -> str:
-    lines = [f"Creative format: {fmt}", "", "Ad copy fields:"]
+    lines = [f"Creative format: {fmt}"]
+    if duration_s is not None:
+        lines.append(
+            f"Video length: {duration_s:.1f} seconds. Every t_start_s is a number of seconds "
+            f"between 0 and {duration_s:.1f} (1:13 would be 73, not 1.13)."
+        )
+    lines += ["", "Ad copy fields:"]
     for k in ("headline", "primary_text", "description", "cta_type", "link_url"):
         if copy.get(k):
             lines.append(f"- {k}: {copy[k]}")
