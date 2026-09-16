@@ -13,6 +13,7 @@ from cs.core.config import Settings
 @dataclass
 class TagResult:
     tags: list[dict] = field(default_factory=list)
+    payload: dict = field(default_factory=dict)
     input_tokens: int = 0
     output_tokens: int = 0
     model: str = ""
@@ -26,6 +27,7 @@ class Tagger(Protocol):
         user_text: str,
         schema: dict,
         video: tuple[bytes, str] | None = None,
+        system: str | None = None,
     ) -> TagResult: ...
 
 
@@ -68,13 +70,14 @@ class GeminiGatewayTagger:
         user_text: str,
         schema: dict,
         video: tuple[bytes, str] | None = None,
+        system: str | None = None,
     ) -> TagResult:
         from cs.tagging.prompts import SYSTEM
 
         resp = await self.client.chat.completions.create(
             model=self.video_model if video is not None else self.model,
             messages=[
-                {"role": "system", "content": SYSTEM},
+                {"role": "system", "content": system or SYSTEM},
                 {"role": "user", "content": build_content(images, user_text, video)},
             ],
             response_format={
@@ -93,5 +96,7 @@ class GeminiGatewayTagger:
             result.refused = True
             return result
         text = choice.message.content or ""
-        result.tags = json.loads(text).get("tags", []) if text else []
+        payload = json.loads(text) if text else {}
+        result.payload = payload if isinstance(payload, dict) else {}
+        result.tags = list(result.payload.get("tags", []))
         return result

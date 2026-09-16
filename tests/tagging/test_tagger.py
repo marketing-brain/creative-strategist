@@ -1,6 +1,7 @@
 import json
 from types import SimpleNamespace
 
+from cs.tagging.fakes import DEFAULT_V2_PAYLOAD, FakeTagger
 from cs.tagging.prompts import SYSTEM, prompt_sha, user_text
 from cs.tagging.tagger import GeminiGatewayTagger
 from cs.tagging.taxonomy import load_taxonomy
@@ -82,3 +83,21 @@ def test_prompt_builders():
     text = user_text(t, "video", {"headline": "H", "primary_text": "P"})
     assert "messenger" in text and "H" in text and "P" in text
     assert len(prompt_sha(SYSTEM, text, {"a": 1})) == 64
+
+
+async def test_fake_tagger_returns_nested_payload_for_nested_schema():
+    t = load_taxonomy()
+    tagger = FakeTagger()
+    flat = await tagger.tag([], "u", t.json_schema("image"))
+    nested = await tagger.tag(
+        [], "u", t.json_schema("video"), video=(b"v", "video/mp4"), system="S"
+    )
+    assert flat.tags and flat.payload == {"tags": flat.tags}
+    assert nested.payload == DEFAULT_V2_PAYLOAD and nested.tags == []
+    assert tagger.calls[1]["system"] == "S" and tagger.calls[0]["system"] is None
+
+
+def test_default_v2_payload_validates_against_the_taxonomy():
+    rows = load_taxonomy().validate(DEFAULT_V2_PAYLOAD, "video")
+    dims = {r["dimension"] for r in rows}
+    assert {"messenger", "hook_devices", "beats", "concept_tags", "transcript"} <= dims

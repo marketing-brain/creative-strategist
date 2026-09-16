@@ -31,6 +31,69 @@ def user_text(taxonomy: Taxonomy, fmt: str, copy: dict) -> str:
     return "\n".join(lines)
 
 
+SYSTEM_V2 = (
+    "You are a senior performance-creative analyst. You decompose one paid-social video ad "
+    "into a structured profile that will be used to cluster ads into creative-concept "
+    "families, so precision and consistency matter more than nuance. You are given the "
+    "actual video file: watch every frame and listen to the full audio track. Rules: "
+    "(1) Timestamps are seconds from the start, as numbers. "
+    "(2) hook_devices are judged on the first 5 seconds only. "
+    "(3) messenger = expert_on_camera and proof_devices = expert_credential require a "
+    "credential stated on screen or in speech (pharmacist, doctor, RD, PhD); years of "
+    "experience or a professional's recommendation without a credential do not count. "
+    "(4) creator_off_camera means hands, point-of-view or body without a face. "
+    "(5) For product_reveal, a generic pill, gummy or capsule shown in hand counts as the "
+    "product. "
+    "(6) beats are the ad's sections in order of appearance with non-decreasing t_start_s; "
+    "every ad has at least hook; add a beat only where the content changes role. "
+    "(7) Open slugs are lowercase snake_case of 1-4 words. concept_tags name the creative "
+    "idea the way a strategist would and never contain a brand name. When the prompt lists "
+    "existing slugs for a field, reuse one that fits and coin a new one only when none does. "
+    "(8) transcript is verbatim speech with no timestamps; an empty string when there is no "
+    "speech. hook_verbatim is the exact first on-screen text, then the first spoken "
+    "sentence, separated by ' / '. "
+    "(9) Every list may be empty except beats and concept_tags. Emit every field of the "
+    "schema; cite concrete visual or audio evidence for each value."
+)
+
+
+def user_text_nested(
+    taxonomy: Taxonomy, fmt: str, copy: dict, hints: dict[str, list[tuple[str, int]]]
+) -> str:
+    lines = [f"Creative format: {fmt}", "", "Ad copy fields:"]
+    for k in ("headline", "primary_text", "description", "cta_type", "link_url"):
+        if copy.get(k):
+            lines.append(f"- {k}: {copy[k]}")
+    lines += ["", "Profile fields:"]
+    for d in taxonomy.model_dimensions(fmt):
+        vals = ", ".join(d.values) if d.values else ""
+        if d.kind == "single":
+            lines.append(f"- {d.name} (single, {d.group}): {d.description} Allowed values: {vals}")
+        elif d.kind == "multi":
+            ts = " Each item carries t_start_s." if d.timestamped else ""
+            lines.append(
+                f"- {d.name} (multi, {d.group}): {d.description} Allowed values: {vals}{ts}"
+            )
+        elif d.kind == "ordered":
+            lines.append(
+                f"- {d.name} (ordered, {d.group}): {d.description} Allowed values: {vals} "
+                "Each item carries t_start_s."
+            )
+        elif d.kind == "open":
+            cap = f" At most {d.max_values}." if d.max_values else ""
+            lines.append(f"- {d.name} (open, {d.group}): {d.description}{cap}")
+            existing = hints.get(d.name) or []
+            if existing:
+                lines.append(
+                    "  Existing slugs (count): "
+                    + ", ".join(f"{slug} ({n})" for slug, n in existing)
+                )
+        elif d.kind == "text":
+            lines.append(f"- {d.name} (text): {d.description}")
+    lines += ["", "Return JSON matching the schema exactly."]
+    return "\n".join(lines)
+
+
 def prompt_sha(system: str, user: str, schema: dict) -> str:
     h = hashlib.sha256()
     h.update(system.encode())
