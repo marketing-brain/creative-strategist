@@ -69,7 +69,7 @@ const real: Diagnosis = {
     },
     {
       tier: 5, key: 'context', name: 'Context', question: 'Does it need a native recut per placement?', status: 'weak',
-      decision: "Facebook · Feed takes 31% of delivery, and the ad's hook rate there runs 34% below its own placement average -- a gap 6 other creatives in the same ad set do not have. Supply a native Facebook · Feed cut instead of the master.",
+      decision: "Facebook · Feed takes 31% of delivery, and the ad's hook rate there runs 34% below its own placement average — a gap 6 other creatives in the same ad set do not have. Supply a native Facebook · Feed cut instead of the master.",
       reason: null,
       comparison: '6 other creatives in the same ad set',
       metrics: [], curve: null, steps: null,

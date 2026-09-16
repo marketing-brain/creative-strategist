@@ -283,7 +283,7 @@ def test_context_is_weak_where_the_creative_does_not_travel():
     t = context_tier("video", window, _sibs(), SIX)
     assert t.status == "weak"
     assert "Instagram · Stories takes 33% of delivery" in t.decision
-    assert "6 other creatives in the same ad set" in t.decision
+    assert "\u2014 a gap 6 other creatives in the same ad set" in t.decision
     assert "Supply a native Instagram · Stories cut" in t.decision
     # Never a targeting instruction: Meta picked the mix, the advertiser did not.
     assert "exclude" not in t.decision.lower()

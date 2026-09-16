@@ -158,97 +158,74 @@ function StepChain({ steps }: { steps: DiagnosisStep[] }) {
   );
 }
 
-function fitText(x: number | null): string {
-  if (x == null) return 'text-muted-foreground';
+function fitText(x: number): string {
   return x >= 0.15 ? 'text-success' : x <= -0.15 ? 'text-destructive' : 'text-muted-foreground';
 }
 
-function Rate({ rate, fit, places }: { rate: number | null; fit: number | null; places: 0 | 1 }) {
-  if (rate == null) return <span className="text-muted-foreground">—</span>;
-  return (
-    <>
-      {places === 0 ? pct(rate) : pct1(rate)}{' '}
-      {fit != null ? <span className={cn('font-semibold', fitText(fit))}>{signed(fit)}</span> : <span className="text-muted-foreground">·</span>}
-    </>
-  );
-}
+// Three is what fits the evidence column in one row at this card width, so the row always
+// reads like the conversion step chain instead of leaving a stretched orphan on a second line.
+const PLACEMENT_CARDS = 3;
 
 // Fit, not lift: how far the rate sits from this creative's own placement average once the
 // comparison set's pattern for that placement is removed. Meta chose the mix, so a level
 // comparison would partly measure the optimiser's allocation. Fit is zero-sum across a
 // creative's placements -- it says where the creative travels, never how well it performed.
-function PlacementTable({ placements, format }: { placements: DiagnosisPlacement[]; format: Diagnosis['format'] }) {
+//
+// Same two-line card as the conversion step chain: what it is, then the number and what to
+// read it against. The verdict sentence above already names the decisive placement, so these
+// only have to substantiate it -- the full set stays in the API payload and the insight brief.
+function PlacementCards({ placements, format }: { placements: DiagnosisPlacement[]; format: Diagnosis['format'] }) {
   const video = format === 'video';
+  const fitOf = (p: DiagnosisPlacement) => (video ? p.hook_fit : p.ctr_fit);
+  const rated = placements.filter((p) => fitOf(p) != null);
+  const shown = rated.slice(0, PLACEMENT_CARDS);
+  const notes = [
+    rated.length - shown.length > 0 ? `${rated.length - shown.length} more` : null,
+    placements.length - rated.length > 0 ? `${placements.length - rated.length} too thin to rate` : null,
+  ].filter(Boolean);
+  if (shown.length === 0) return null;
   return (
-    <div className="w-full overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-muted-foreground">
-            <th className="py-1 pr-4 text-left font-normal">Placement</th>
-            <th className="py-1 pr-4 text-right font-normal">Delivery</th>
-            {video && <th className="py-1 pr-4 text-right font-normal">Hook rate · fit</th>}
-            <th className="py-1 text-right font-normal">Link CTR · fit</th>
-          </tr>
-        </thead>
-        <tbody>
-          {placements.map((p) => (
-            <tr key={`${p.platform}/${p.position}`} className="border-t border-border">
-              <td className="py-1.5 pr-4">
-                {p.label}
-                {!p.readable && <span className="text-muted-foreground"> · thin</span>}
-              </td>
-              <td className="py-1.5 pr-4 text-right tabular-nums">{p.share != null ? pct(p.share) : '—'}</td>
-              {video && (
-                <td className="py-1.5 pr-4 text-right tabular-nums">
-                  <Rate rate={p.hook_rate} fit={p.hook_fit} places={0} />
-                </td>
-              )}
-              <td className="py-1.5 text-right tabular-nums">
-                <Rate rate={p.link_ctr} fit={p.ctr_fit} places={1} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="flex w-full flex-col gap-2">
+      <div className="flex w-full flex-wrap items-stretch gap-2">
+        {shown.map((p) => {
+          const fit = fitOf(p) as number;
+          const rate = video ? p.hook_rate : p.link_ctr;
+          return (
+            <div
+              key={`${p.platform}/${p.position}`}
+              className="flex min-w-[8.5rem] flex-1 flex-col gap-1 rounded-lg border border-border px-3 py-2.5"
+              title={rate != null ? `${video ? 'Hook rate' : 'Link CTR'} ${video ? pct(rate) : pct1(rate)}` : undefined}
+            >
+              <span className="min-w-0 truncate text-sm text-muted-foreground">{p.label}</span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-base font-semibold tabular-nums">{p.share != null ? pct(p.share) : '—'}</span>
+                <span className={cn('text-sm font-semibold tabular-nums', fitText(fit))}>{signed(fit)}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {notes.length > 0 && <span className="text-sm text-muted-foreground">{`+ ${notes.join(' · ')}`}</span>}
     </div>
   );
 }
 
-// Shares, so the gap against peers is in percentage points, never a percentage of a
-// percentage. Same three columns as the placement table: what it is, how much of the ad's
-// delivery it took, and how that compares with the peer group.
-const points = (x: number) => `${x >= 0 ? '+' : '−'}${Math.round(Math.abs(x) * 100)} pts`;
+// Both numbers are shares, so the gap is in percentage points -- a percentage of a percentage
+// would not mean anything. It stays uncoloured: who Meta found is evidence about the creative,
+// not a verdict on it, and colour in this panel is reserved for status.
+const points = (x: number) => `${x >= 0 ? '+' : '−'}${Math.round(Math.abs(x) * 100)}\u00a0pts`;
 
-function pointsText(x: number): string {
-  return Math.abs(x) < 0.05 ? 'text-muted-foreground' : x > 0 ? 'text-foreground' : 'text-muted-foreground';
-}
-
-function AudienceTable({ audience }: { audience: DiagnosisAudienceSlice[] }) {
+// The slice that diverges most from the peer group -- the part a reader could not guess.
+function AudienceLine({ audience }: { audience: DiagnosisAudienceSlice[] }) {
+  const named = audience.filter((s) => s.age !== 'other');
+  if (named.length === 0) return null;
+  const top = named.reduce((a, b) => (Math.abs(b.share - b.baseline_share) > Math.abs(a.share - a.baseline_share) ? b : a));
   return (
-    <div className="w-full overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-muted-foreground">
-            <th className="py-1 pr-4 text-left font-normal">Age and gender</th>
-            <th className="py-1 pr-4 text-right font-normal">Delivery</th>
-            <th className="py-1 pr-4 text-right font-normal">Peers</th>
-            <th className="py-1 text-right font-normal">Gap</th>
-          </tr>
-        </thead>
-        <tbody>
-          {audience.map((s) => (
-            <tr key={s.label} className="border-t border-border">
-              <td className={cn('py-1.5 pr-4', s.age === 'other' && 'text-muted-foreground')}>{s.label}</td>
-              <td className="py-1.5 pr-4 text-right tabular-nums">{pct(s.share)}</td>
-              <td className="py-1.5 pr-4 text-right tabular-nums text-muted-foreground">{pct(s.baseline_share)}</td>
-              <td className={cn('py-1.5 text-right font-semibold tabular-nums', pointsText(s.share - s.baseline_share))}>
-                {points(s.share - s.baseline_share)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <p className="text-sm text-muted-foreground">
+      {'Who Meta found: '}
+      <span className="font-semibold text-foreground">{top.label}</span>
+      {` took ${pct(top.share)} of delivery, against ${pct(top.baseline_share)} for peers (${points(top.share - top.baseline_share)}).`}
+    </p>
   );
 }
 
@@ -283,16 +260,15 @@ function TierRow({ tier, broken, last, format }: { tier: DiagnosisTier; broken: 
         )}
         {tier.curve && <RetentionCurve curve={tier.curve} />}
         {tier.steps && tier.steps.length > 0 && <StepChain steps={tier.steps} />}
-        {tier.comparison && tier.placements && tier.placements.length > 0 && (
-          <span className="text-sm text-muted-foreground">{`Meta chose this mix. Fit is measured against ${tier.comparison}.`}</span>
+        {tier.placements && tier.placements.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <span className="text-sm text-muted-foreground">
+              {`Where Meta ran it · share of delivery and fit vs ${tier.comparison ?? 'the baseline'}`}
+            </span>
+            <PlacementCards placements={tier.placements} format={format} />
+          </div>
         )}
-        {tier.placements && tier.placements.length > 0 && <PlacementTable placements={tier.placements} format={format} />}
-        {tier.audience && tier.audience.length > 0 && (
-          <>
-            <span className="text-sm text-muted-foreground">Who Meta found, not who was targeted.</span>
-            <AudienceTable audience={tier.audience} />
-          </>
-        )}
+        {tier.audience && tier.audience.length > 0 && <AudienceLine audience={tier.audience} />}
       </div>
     </div>
   );

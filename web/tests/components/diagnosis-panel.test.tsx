@@ -140,7 +140,7 @@ describe('DiagnosisPanel', () => {
     expect(screen.getByText('Too early to diagnose.')).toBeInTheDocument();
   });
 
-  it('renders a placement table and the audience mix on the context tier', () => {
+  it('renders placement cards and the most divergent audience slice on the context tier', () => {
     const withContext: Diagnosis = {
       ...broken,
       tiers: broken.tiers.map((t) =>
@@ -168,13 +168,13 @@ describe('DiagnosisPanel', () => {
     render(<DiagnosisPanel diagnosis={withContext} />);
     expect(screen.getByText('Instagram · Reels')).toBeInTheDocument();
     expect(screen.getByText('−34%')).toBeInTheDocument();
-    expect(screen.getByText(/Facebook · Marketplace/)).toBeInTheDocument();
-    expect(screen.getByText('· thin')).toBeInTheDocument();
-    expect(screen.getByText(/Fit is measured against 6 other creatives in the same ad set/)).toBeInTheDocument();
+    expect(screen.getByText(/fit vs 6 other creatives in the same ad set/)).toBeInTheDocument();
+    // The unrated placement gets no card of its own, only a count.
+    expect(screen.queryByText('Facebook · Marketplace')).not.toBeInTheDocument();
+    expect(screen.getByText('+ 1 too thin to rate')).toBeInTheDocument();
+    // Only the slice that diverges most from the peers is named.
     expect(screen.getByText('25-34 female')).toBeInTheDocument();
-    expect(screen.getByText('Everyone else')).toBeInTheDocument();
-    expect(screen.getByText('+12 pts')).toBeInTheDocument();
-    expect(screen.getByText('−3 pts')).toBeInTheDocument();
-    expect(screen.getByText(/Who Meta found, not who was targeted/)).toBeInTheDocument();
+    expect(screen.queryByText('35-44 female')).not.toBeInTheDocument();
+    expect(screen.getByText(/took 41% of delivery, against 29% for peers \(\+12 pts\)/)).toBeInTheDocument();
   });
 });

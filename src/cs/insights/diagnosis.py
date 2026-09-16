@@ -784,7 +784,7 @@ def context_tier(
         tier.status = "weak"
         tier.decision = (
             f"{row.label} takes {row.share:.0%} of delivery, and the ad's {metric} there runs "
-            f"{abs(fit(row)):.0%} below its own placement average -- a gap {tier.comparison} "
+            f"{abs(fit(row)):.0%} below its own placement average \u2014 a gap {tier.comparison} "
             f"do not have. Supply a native {row.label} cut instead of the master."
         )
         return tier
