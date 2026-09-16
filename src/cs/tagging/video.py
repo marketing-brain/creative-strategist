@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import tempfile
+from dataclasses import dataclass
 
 
 def _run(cmd: list[str]) -> bytes:
@@ -22,3 +24,87 @@ def probe_duration_ms(video: bytes) -> int:
             ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", f.name]
         )
     return int(float(json.loads(out)["format"]["duration"]) * 1000)
+
+
+SCENE_THRESHOLD = 0.3
+_ASPECTS = {"9:16": 9 / 16, "4:5": 4 / 5, "1:1": 1.0, "16:9": 16 / 9}
+_ASPECT_TOLERANCE = 0.03
+
+
+@dataclass(frozen=True)
+class VideoStats:
+    duration_s: float
+    width: int
+    height: int
+    cut_count: int | None  # None when the cut probe failed
+
+
+def probe_video(video: bytes) -> VideoStats:
+    """Duration, frame size and scene-cut count from the file itself (spec §5). ffprobe
+    failure raises; a failed cut probe leaves cut_count None so the run still completes."""
+    with tempfile.NamedTemporaryFile(suffix=".mp4") as f:
+        f.write(video)
+        f.flush()
+        out = _run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height:format=duration",
+                "-of",
+                "json",
+                f.name,
+            ]
+        )
+        info = json.loads(out)
+        stream = (info.get("streams") or [{}])[0]
+        duration_s = float(info["format"]["duration"])
+        try:
+            cut_count = _count_scene_cuts(f.name)
+        except RuntimeError:
+            cut_count = None
+    return VideoStats(
+        duration_s, int(stream.get("width", 0)), int(stream.get("height", 0)), cut_count
+    )
+
+
+def _count_scene_cuts(path: str) -> int:
+    proc = subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "info",
+            "-i",
+            path,
+            "-an",
+            "-vf",
+            f"select='gt(scene,{SCENE_THRESHOLD})',showinfo",
+            "-f",
+            "null",
+            "-",
+        ],
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed: {proc.stderr.decode(errors='ignore')[-500:]}")
+    # showinfo prints one "[Parsed_showinfo_1 @ ...] n:   0 pts: ..." line per selected frame.
+    return len(
+        re.findall(r"Parsed_showinfo\S* @ [^\]]+\] n:\s*\d+", proc.stderr.decode(errors="ignore"))
+    )
+
+
+def cuts_per_10s(stats: VideoStats) -> float | None:
+    if stats.cut_count is None or stats.duration_s <= 0:
+        return None
+    return round(stats.cut_count / stats.duration_s * 10, 1)
+
+
+def aspect_label(width: int, height: int) -> str:
+    if width <= 0 or height <= 0:
+        return "other"
+    r = width / height
+    best = min(_ASPECTS.items(), key=lambda kv: abs(r - kv[1]) / kv[1])
+    return best[0] if abs(r - best[1]) / best[1] <= _ASPECT_TOLERANCE else "other"
