@@ -1,21 +1,20 @@
-"""Backfill -> tag -> insight -> generate -> approve, ready to download.
+"""Backfill -> tag -> insight.
 
 Ingest setup runs the real Fivetran transform against a fixture-seeded schema (no live
-connector/Meta creds); tagging, transcription, embedding, insight explanation, and
-generation still run on fakes.
+connector/Meta creds); tagging and insight explanation run on fakes.
 """
 
+import io
 from datetime import date, timedelta
 from uuid import UUID
 
 import httpx
 import respx
+from PIL import Image
 
 from cs.connectors.fivetran.connect import schema_for
 from cs.core import queue
 from cs.core import repo as ingest_repo
-from cs.generation import jobs as gen_jobs
-from cs.generation.fakes import FakeCopyWriter, FakeImageGenerator, FakeVideoGenerator, solid_png
 from cs.ingest.fivetran import insights as fivetran_insights
 from cs.ingest.fivetran import transform as fivetran_transform
 from cs.ingest.fivetran.fixtures import (
@@ -28,7 +27,7 @@ from cs.insights.fakes import FakeExplainer
 from cs.jobs.registry import JobContext
 from cs.jobs.worker import run_once
 from cs.tagging import jobs as tag_jobs
-from cs.tagging.fakes import FakeEmbedder, FakeTagger, FakeTranscriber
+from cs.tagging.fakes import FakeTagger
 from tests.conftest import dev_headers
 
 H = dev_headers(org="org_e2e")
@@ -40,15 +39,19 @@ async def _drain(db, blobs, settings):
             break
 
 
+def _png() -> bytes:
+    b = io.BytesIO()
+    Image.new("RGB", (64, 64), (10, 20, 30)).save(b, format="PNG")
+    return b.getvalue()
+
+
 @respx.mock
 async def test_full_loop(client, db, blobs, settings, monkeypatch):
     # meta.download_creative (enqueued by the real transform below) does a genuine HTTP GET
     # against each fixture ad's image_url -- mock every placehold.co URL so this test stays
     # hermetic (no real network call to a third-party host) rather than flaking offline/in CI.
     respx.get(url__regex=r"^https://placehold\.co/.*").mock(
-        return_value=httpx.Response(
-            200, content=solid_png(64, 64), headers={"content-type": "image/png"}
-        )
+        return_value=httpx.Response(200, content=_png(), headers={"content-type": "image/png"})
     )
     q_tags = [{"dimension": "hook_type", "value": "question", "confidence": 0.9, "evidence": "e"}]
     s_tags = [{"dimension": "hook_type", "value": "statistic", "confidence": 0.9, "evidence": "e"}]
@@ -57,12 +60,7 @@ async def test_full_loop(client, db, blobs, settings, monkeypatch):
     # to its initial state every time and every creative would get the first entry (q_tags).
     tagger = FakeTagger(tags_by_call=[q_tags] * 6 + [s_tags] * 6)
     monkeypatch.setattr(tag_jobs, "TAGGER_FACTORY", lambda s: tagger)
-    monkeypatch.setattr(tag_jobs, "TRANSCRIBER_FACTORY", lambda s, http: FakeTranscriber())
-    monkeypatch.setattr(tag_jobs, "EMBEDDER_FACTORY", lambda s, http: FakeEmbedder())
     monkeypatch.setattr(insight_jobs, "EXPLAINER_FACTORY", lambda s: FakeExplainer())
-    monkeypatch.setattr(gen_jobs, "COPYWRITER_FACTORY", lambda s: FakeCopyWriter())
-    monkeypatch.setattr(gen_jobs, "IMAGE_FACTORY", lambda s: FakeImageGenerator())
-    monkeypatch.setattr(gen_jobs, "VIDEO_FACTORY", lambda s: FakeVideoGenerator())
 
     # 1. seed a fixture Fivetran schema (no live connector/Meta creds needed), run the
     # transform directly to discover the account (mirroring what meta.sync_from_fivetran
@@ -117,27 +115,3 @@ async def test_full_loop(client, db, blobs, settings, monkeypatch):
     ins = (await client.get("/insights?kind=pattern", headers=H)).json()["items"]
     winner = next(i for i in ins if i["value"] == "question" and i["metric"] == "ctr")
     assert winner["lift"] > 0
-
-    # 3. brand kit + generate from the insight
-    await client.post(
-        "/brand-kit",
-        headers=H,
-        json={"colors": ["#112233"], "fonts": [], "voice_rules": "", "prohibited_claims": []},
-    )
-    gid = (
-        await client.post(
-            "/generations",
-            headers=H,
-            json={"kind": "static", "variants": 1, "source_insight_id": winner["id"]},
-        )
-    ).json()["id"]
-    await _drain(db, blobs, settings)
-    detail = (await client.get(f"/generations/{gid}", headers=H)).json()
-    assert detail["status"] == "done" and len(detail["assets"]) == 3
-
-    # 4. approve -> asset is ready to download, with its ad copy alongside it
-    aid = detail["assets"][0]["id"]
-    await client.post(f"/generated-assets/{aid}/approve", headers=H)
-    approved = (await client.get("/review-queue?state=approved", headers=H)).json()["items"]
-    asset = next(a for a in approved if a["id"] == aid)
-    assert asset["url"] and asset["headline"] and asset["primary_text"] and asset["cta_type"]

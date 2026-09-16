@@ -13,17 +13,6 @@ class FakeExplainer:
         return "fake explanation", "fake test"
 
 
-class FakeCopilot:
-    def __init__(self, reply: str = "fake answer"):
-        self.reply = reply
-        self.calls: list[list[dict]] = []
-
-    async def answer(self, history: list[dict], tools) -> str:
-        self.calls.append(history)
-        rows = await tools.insights(kind="pattern", limit=3)
-        return f"{self.reply} ({len(rows)} insights)"
-
-
 class FakeInsightWriter:
     model = "fake"
 

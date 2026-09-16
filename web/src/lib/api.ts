@@ -28,9 +28,6 @@ export const api = {
   fivetranConnectStart: () => apiFetch<{ connect_card_url: string; connector_id: string }>('/connections/meta/start', { method: 'POST' }),
   fivetranConnectFinalize: (connectorId: string) => apiFetch<{ ok: boolean }>('/connections/meta/finalize', { method: 'POST', body: JSON.stringify({ connector_id: connectorId }) }),
   fivetranDisconnect: () => apiFetch<{ ok: boolean }>('/connections/meta/disconnect', { method: 'POST' }),
-  brandKit: () => apiFetch<import('./types').BrandKit>('/brand-kit'),
-  saveBrandKit: (b: Omit<import('./types').BrandKit, 'id' | 'version' | 'logo_url'>) =>
-    apiFetch<import('./types').BrandKit>('/brand-kit', { method: 'POST', body: JSON.stringify(b) }),
   creatives: (q: string) =>
     apiFetch<import('./types').Paginated<import('./types').Creative>>(`/creatives${q}`),
   creative: (id: string) => apiFetch<import('./types').Creative>(`/creatives/${id}`),
@@ -45,15 +42,4 @@ export const api = {
   fatigue: (offset = 0) =>
     apiFetch<import('./types').Paginated<import('./types').Insight>>(`/fatigue?offset=${offset}`),
   briefs: () => apiFetch<import('./types').Brief[]>('/briefs'),
-  conversations: () => apiFetch<import('./types').Conversation[]>('/copilot/conversations'),
-  newConversation: (title: string) => apiFetch<{ id: string }>('/copilot/conversations', { method: 'POST', body: JSON.stringify({ title }) }),
-  messages: (id: string) => apiFetch<import('./types').Message[]>(`/copilot/conversations/${id}`),
-  send: (id: string, content: string) => apiFetch<{ reply: string }>(`/copilot/conversations/${id}/messages`, { method: 'POST', body: JSON.stringify({ content }) }),
-  generations: () => apiFetch<import('./types').Generation[]>('/generations'),
-  generation: (id: string) => apiFetch<import('./types').Generation>(`/generations/${id}`),
-  createGeneration: (b: object) => apiFetch<{ id: string }>('/generations', { method: 'POST', body: JSON.stringify(b) }),
-  reviewQueue: (state: string, offset = 0) =>
-    apiFetch<import('./types').Paginated<import('./types').GeneratedAsset>>(`/review-queue?state=${state}&offset=${offset}`),
-  approve: (id: string) => apiFetch<{ ok: boolean }>(`/generated-assets/${id}/approve`, { method: 'POST' }),
-  reject: (id: string) => apiFetch<{ ok: boolean }>(`/generated-assets/${id}/reject`, { method: 'POST' }),
 };

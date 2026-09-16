@@ -2,6 +2,7 @@ import time
 
 import pytest
 
+from cs.core.ids import new_id
 from cs.jobs import scheduler
 
 
@@ -47,3 +48,28 @@ async def test_schedule_state_is_persisted_and_reloadable(db, settings):
     assert (await scheduler.load_schedule_state(db))["test.persisted"] == pytest.approx(
         now + 601, abs=1e-3
     )
+
+
+async def test_purge_done_jobs_keeps_dead_and_live_rows(db, org_id):
+    from datetime import UTC, datetime, timedelta
+
+    from cs.core import queue
+
+    old = datetime.now(UTC) - timedelta(days=40)
+    for status, finished in (
+        ("done", old),
+        ("done", datetime.now(UTC)),
+        ("dead", old),
+        ("pending", None),
+    ):
+        await db.execute(
+            "INSERT INTO job (id, org_id, job_type, payload, status, finished_at, max_attempts)"
+            " VALUES ($1,$2,'t','{}',$3,$4,3)",
+            new_id(),
+            org_id,
+            status,
+            finished,
+        )
+    assert await queue.purge_done(db, 30) == 1
+    left = sorted(r["status"] for r in await db.fetch("SELECT status FROM job"))
+    assert left == ["dead", "done", "pending"]

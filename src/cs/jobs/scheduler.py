@@ -74,6 +74,13 @@ async def reclaim_stale_jobs(db: Database, settings: Settings) -> None:
         log.warning("reclaimed stale jobs", extra={"count": n})
 
 
+@register_schedule("core.purge_done_jobs", every_seconds=86400)
+async def purge_done_jobs(db: Database, settings: Settings) -> None:
+    n = await queue.purge_done(db, settings.job_retention_days)
+    if n:
+        log.info("purged finished jobs", extra={"count": n})
+
+
 async def run_scheduler(settings: Settings | None = None) -> None:
     settings = settings or get_settings()
     import cs.jobs.all_handlers  # noqa: F401 - schedules live beside handlers

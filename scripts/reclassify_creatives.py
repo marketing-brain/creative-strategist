@@ -11,7 +11,7 @@ taxonomy -- invalid output, not merely mislabeled.
 
 Two outcomes fall out of re-running classify(): image -> video (evidence proves a
 video) and image -> unresolved (no rule proves anything). Both delete the
-creative's tags/tag_run/creative_embedding/tag_batch_item rows -- the "produced by
+creative's tags/tag_run rows -- the "produced by
 the image model from an unproven premise" argument holds for either verdict. Only
 image -> video additionally clears primary_asset_id and deletes the stale asset (a
 replacement download gets enqueued); image -> unresolved leaves its stale asset in
@@ -36,12 +36,8 @@ each creative's deletion commits (not batched to the end of the run -- a crash
 partway through must not lose the record of what was already orphaned), so an
 operator can feed that list to a dedicated GC pass later, if one gets built.
 
-FK children of `tag_run` (re-derived from db/migrations/, not assumed): `tag`
-(`tag.tag_run_id`), `creative_embedding` (`creative_embedding.tag_run_id`), and
-`tag_batch_item` (`tag_batch_item.tag_run_id`) -- all three `REFERENCES
-tag_run(id)` with no `ON DELETE` clause, so all three must be deleted before
-`tag_run` itself. `tag_batch_item`'s parent `tag_batch` row is left alone: it is
-a historical record of what was submitted to the batch API, not per-creative
+`tag` (`tag.tag_run_id`) REFERENCES `tag_run(id)` with no `ON DELETE` clause, so tags
+must be deleted before `tag_run` itself.
 output, and nothing here invalidates it.
 """
 
@@ -315,18 +311,10 @@ async def _apply_one(db: Database, org_id: UUID, row: ReclassifyRow) -> list[str
                 org_id,
                 row.creative_id,
             )
-        # FK order: tag, creative_embedding, and tag_batch_item all reference
-        # tag_run with no ON DELETE clause (re-derived from db/migrations/ --
-        # see module docstring), so all three must go before tag_run.
+        # tag references tag_run with no ON DELETE clause, so tags go first.
         await tx.execute("DELETE FROM tag WHERE creative_id=$1", row.creative_id)
-        await tx.execute("DELETE FROM creative_embedding WHERE creative_id=$1", row.creative_id)
         # The insight paragraph was written against the wrong format too.
         await tx.execute("DELETE FROM creative_insight WHERE creative_id=$1", row.creative_id)
-        await tx.execute(
-            "DELETE FROM tag_batch_item WHERE tag_run_id IN"
-            " (SELECT id FROM tag_run WHERE creative_id=$1)",
-            row.creative_id,
-        )
         await tx.execute("DELETE FROM tag_run WHERE creative_id=$1", row.creative_id)
         if row.is_image_to_video and row.asset_url:
             await queue.enqueue(
@@ -369,15 +357,9 @@ async def _replace_with_image_download(tx, org_id: UUID, row: ReclassifyRow) -> 
         org_id,
         row.creative_id,
     )
-    # FK order: tag, creative_embedding and tag_batch_item all reference tag_run.
+    # tag references tag_run with no ON DELETE clause, so tags go first.
     await tx.execute("DELETE FROM tag WHERE creative_id=$1", row.creative_id)
-    await tx.execute("DELETE FROM creative_embedding WHERE creative_id=$1", row.creative_id)
     await tx.execute("DELETE FROM creative_insight WHERE creative_id=$1", row.creative_id)
-    await tx.execute(
-        "DELETE FROM tag_batch_item WHERE tag_run_id IN"
-        " (SELECT id FROM tag_run WHERE creative_id=$1)",
-        row.creative_id,
-    )
     await tx.execute("DELETE FROM tag_run WHERE creative_id=$1", row.creative_id)
     await queue.enqueue(
         tx,
@@ -468,7 +450,7 @@ def _print_report(plan: ReclassifyPlan) -> None:
         print(
             f"\n{len(i2v)} of those are image -> video: primary_asset_id cleared, the stale "
             f"original_image asset row deleted (blob object orphaned, not removed -- see "
-            f"module docstring), and tag/tag_run/creative_embedding/tag_batch_item rows "
+            f"module docstring), and tag/tag_run rows "
             f"deleted for all of them (those tags were produced by the image model from a "
             f"video frame and are invalid regardless of whether a replacement is available)."
         )
@@ -510,7 +492,7 @@ def _print_report(plan: ReclassifyPlan) -> None:
     if i2u:
         print(
             f"\n*** {len(i2u)} of those are image -> unresolved: for symmetry with "
-            f"image -> video, their tag/tag_run/creative_embedding/tag_batch_item rows "
+            f"image -> video, their tag/tag_run rows "
             f"are DELETED (produced by the image model from a premise -- 'provably an "
             f"image' -- that no longer holds, so they are invalid output, not merely "
             f"stale). Their stale original_image asset and primary_asset_id are LEFT IN "

@@ -54,12 +54,6 @@ class Settings(BaseSettings):
     # count: they were paid for. Kept tiny while the output is being validated; raise
     # deliberately.
     creative_insight_limit_per_format: int = 2
-    copilot_model: str = "google/gemini-3-flash"
-    copy_model: str = "google/gemini-3-flash"
-    image_model: str = "bfl/flux-2-pro"
-    video_model: str = "klingai/kling-v3.0-i2v"
-    transcription_model: str = "openai/whisper-1"
-    embedding_model: str = "openai/text-embedding-3-small"
 
     # Fallback for videos Fivetran's Meta connector can never expose: Partnership Ads,
     # where the video lives in the creator's own Instagram account rather than the
@@ -68,6 +62,8 @@ class Settings(BaseSettings):
     apify_api_key: str = ""
 
     worker_poll_seconds: float = 1.0
+    # 'done' jobs are deleted after this many days; 'dead' rows are kept (queue.is_dead).
+    job_retention_days: int = 30
     job_lease_seconds: int = 600
 
     cors_origins: str = "http://localhost:3000"

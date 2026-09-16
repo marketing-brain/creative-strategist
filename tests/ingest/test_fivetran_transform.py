@@ -67,7 +67,8 @@ async def test_discover_and_sync_entities(db, blobs, settings, org_id):
     assert (c["format"], c["format_source"]) == ("unresolved", "unresolved")
     job = await db.fetchrow("SELECT payload FROM job WHERE job_type='meta.download_creative'")
     assert (job["payload"]["format"], job["payload"]["format_source"]) == (
-        "image", "meta_object_type"
+        "image",
+        "meta_object_type",
     )
     assert c["headline"] == "Headline" and c["primary_text"] == "Primary text"
     assert c["cta_type"] == "SHOP_NOW" and c["link_url"] == "https://example.com"
@@ -369,11 +370,18 @@ async def _ad_with_impressions(db, *, ad_id: str, impressions: int) -> None:
     """A second ad row for creative cr1, plus its basic_ad impressions."""
     await db.execute(
         f'INSERT INTO "{SCHEMA}".ad_history VALUES ($1, $2, $3, $4, $5, $6, $7, now())',
-        ad_id, "999", "as1", "c1", "cr1", "name", "ACTIVE",
+        ad_id,
+        "999",
+        "as1",
+        "c1",
+        "cr1",
+        "name",
+        "ACTIVE",
     )
     await db.execute(
         f"INSERT INTO \"{SCHEMA}\".basic_ad VALUES ($1, '2026-09-01', 1.0, $2, 0)",
-        int(ad_id), impressions,
+        int(ad_id),
+        impressions,
     )
 
 
@@ -393,7 +401,9 @@ async def test_impressions_loader_sums_each_creative_across_its_ads(db):
     await _ad_with_impressions(db, ad_id="9002", impressions=25)
     await db.execute(
         f'INSERT INTO "{SCHEMA}".basic_ad_actions VALUES ($1, $2, $3, 0, 1)',
-        "9001", date(2026, 9, 1), "link_click",
+        "9001",
+        date(2026, 9, 1),
+        "link_click",
     )
 
     assert await fivetran_transform._impressions_by_creative(db, SCHEMA) == {"cr1": 55}
@@ -409,8 +419,18 @@ async def test_impressions_loader_returns_none_when_actions_table_is_missing(db)
 
 
 def _no_watch(ad_id: str, p100: float = 0) -> dict:
-    return dict(ad_id=ad_id, day="2026-09-01", plays=0, p25=0, p50=0, p75=0, p95=0,
-                p100=p100, thruplay=0, avg_time_watched=0)
+    return dict(
+        ad_id=ad_id,
+        day="2026-09-01",
+        plays=0,
+        p25=0,
+        p50=0,
+        p75=0,
+        p95=0,
+        p100=p100,
+        thruplay=0,
+        avg_time_watched=0,
+    )
 
 
 async def _sync_active(db, blobs, settings, org_id) -> dict:
@@ -430,8 +450,16 @@ async def test_sync_stores_served_image_url_post_without_full_watches_as_image(
     # watched to the end is an image, downloaded from its image_url.
     await create_fixture_schema(db, SCHEMA)
     await insert_campaign_ad_creative(
-        db, SCHEMA, campaign_id="c1", account_id="999", adset_id="as1", ad_id="9001",
-        creative_id="cr1", name="n", headline="H", image_url="https://cdn/i.jpg",
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="9001",
+        creative_id="cr1",
+        name="n",
+        headline="H",
+        image_url="https://cdn/i.jpg",
         object_type="SHARE",
     )
     await db.execute(
@@ -439,7 +467,9 @@ async def test_sync_stores_served_image_url_post_without_full_watches_as_image(
     )
     await db.execute(
         f'INSERT INTO "{SCHEMA}".basic_ad_actions VALUES ($1, $2, $3, 0, 7)',
-        "9001", date(2026, 9, 1), "link_click",
+        "9001",
+        date(2026, 9, 1),
+        "link_click",
     )
     await insert_retention(db, SCHEMA, **_no_watch("9001"))
 
@@ -451,15 +481,25 @@ async def test_sync_stores_served_image_url_post_without_full_watches_as_image(
     job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.download_creative'")
     assert (job["payload"]["format"], job["payload"]["format_source"]) == ("image", "image_url")
     assert (job["payload"]["asset_url"], job["payload"]["kind"]) == (
-        "https://cdn/i.jpg", "original_image"
+        "https://cdn/i.jpg",
+        "original_image",
     )
 
 
 async def test_sync_downloads_the_full_size_feed_spec_image(db, blobs, settings, org_id):
     await create_fixture_schema(db, SCHEMA)
     await insert_campaign_ad_creative(
-        db, SCHEMA, campaign_id="c1", account_id="999", adset_id="as1", ad_id="9001",
-        creative_id="cr1", name="n", headline="H", image_url=None, object_type="SHARE",
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="9001",
+        creative_id="cr1",
+        name="n",
+        headline="H",
+        image_url=None,
+        object_type="SHARE",
     )
     await insert_feed_spec_image(db, SCHEMA, creative_id="cr1", index=0, hash="h1", label_id="L1")
     await insert_library_image(db, SCHEMA, hash="h1", url="https://cdn/full-1080.jpg")
@@ -472,7 +512,8 @@ async def test_sync_downloads_the_full_size_feed_spec_image(db, blobs, settings,
     job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.download_creative'")
     assert job["payload"]["format_source"] == "asset_feed_spec_image"
     assert (job["payload"]["asset_url"], job["payload"]["kind"]) == (
-        "https://cdn/full-1080.jpg", "original_image"
+        "https://cdn/full-1080.jpg",
+        "original_image",
     )
 
 
@@ -482,14 +523,28 @@ async def test_feed_spec_image_loader_picks_the_feed_placement_image(db):
         await insert_feed_spec_image(
             db, SCHEMA, creative_id="cr1", index=index, hash=hash_, label_id=label
         )
-    await insert_customization_rule(db, SCHEMA, creative_id="cr1", index=0, image_label_id="Ls",
-                                    facebook_positions=["story", "facebook_reels"])
-    await insert_customization_rule(db, SCHEMA, creative_id="cr1", index=1, image_label_id="Lf",
-                                    facebook_positions=["feed", "marketplace"])
+    await insert_customization_rule(
+        db,
+        SCHEMA,
+        creative_id="cr1",
+        index=0,
+        image_label_id="Ls",
+        facebook_positions=["story", "facebook_reels"],
+    )
+    await insert_customization_rule(
+        db,
+        SCHEMA,
+        creative_id="cr1",
+        index=1,
+        image_label_id="Lf",
+        facebook_positions=["feed", "marketplace"],
+    )
     await insert_library_image(db, SCHEMA, hash="story", url="https://cdn/story.jpg")
     await insert_library_image(db, SCHEMA, hash="feed", url="https://cdn/feed.jpg")
 
-    assert await fivetran_transform._feed_spec_image_urls(db, SCHEMA) == {"cr1": "https://cdn/feed.jpg"}
+    assert await fivetran_transform._feed_spec_image_urls(db, SCHEMA) == {
+        "cr1": "https://cdn/feed.jpg"
+    }
 
 
 async def test_feed_spec_image_loader_falls_back_to_the_first_image_with_a_library_file(db):
@@ -498,7 +553,9 @@ async def test_feed_spec_image_loader_falls_back_to_the_first_image_with_a_libra
     await insert_feed_spec_image(db, SCHEMA, creative_id="cr1", index=1, hash="h1", label_id="L1")
     await insert_library_image(db, SCHEMA, hash="h1", url="https://cdn/one.jpg")
 
-    assert await fivetran_transform._feed_spec_image_urls(db, SCHEMA) == {"cr1": "https://cdn/one.jpg"}
+    assert await fivetran_transform._feed_spec_image_urls(db, SCHEMA) == {
+        "cr1": "https://cdn/one.jpg"
+    }
 
 
 async def test_feed_spec_image_loader_keeps_creatives_whose_hashes_are_not_in_the_library(db):
@@ -521,7 +578,13 @@ async def test_full_watch_loader_returns_creatives_watched_to_the_end(db):
     for ad_id, creative_id, p100 in (("9001", "cr1", 3), ("9002", "cr2", 0)):
         await db.execute(
             f'INSERT INTO "{SCHEMA}".ad_history VALUES ($1, $2, $3, $4, $5, $6, $7, now())',
-            ad_id, "999", "as1", "c1", creative_id, "name", "ACTIVE",
+            ad_id,
+            "999",
+            "as1",
+            "c1",
+            creative_id,
+            "name",
+            "ACTIVE",
         )
         await insert_retention(db, SCHEMA, **_no_watch(ad_id, p100=p100))
 
@@ -584,9 +647,7 @@ async def test_video_creative_downloads_from_ad_video_history_source(db, blobs, 
     assert creative["format"] == "unresolved"
     job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.download_creative'")
     assert job is not None
-    assert (job["payload"]["format"], job["payload"]["format_source"]) == (
-        "video", "meta_video_id"
-    )
+    assert (job["payload"]["format"], job["payload"]["format_source"]) == ("video", "meta_video_id")
     assert job["payload"]["asset_url"] == "https://cdn.example/video.mp4"
     assert job["payload"]["kind"] == "original_video"
 
@@ -749,17 +810,33 @@ async def test_placement_video_creative_resolves_feed_placement_video_first(
 ):
     await create_fixture_schema(db, SCHEMA)
     await insert_campaign_ad_creative(
-        db, SCHEMA, campaign_id="c1", account_id="999", adset_id="as1", ad_id="ad1",
-        creative_id="cr1", name="n", headline="H", image_url=None, object_type="SHARE",
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="ad1",
+        creative_id="cr1",
+        name="n",
+        headline="H",
+        image_url=None,
+        object_type="SHARE",
     )
     for index, vid, label in ((0, "v_story", "Ls"), (1, "v_feed", "Lf"), (2, "v_reels", "Lr")):
         await insert_asset_feed_spec_video(
             db, SCHEMA, creative_id="cr1", video_id=vid, index=index, label_id=label
         )
-    await insert_customization_rule(db, SCHEMA, creative_id="cr1", index=0, video_label_id="Ls",
-                                    facebook_positions=["story"])
-    await insert_customization_rule(db, SCHEMA, creative_id="cr1", index=1, video_label_id="Lf",
-                                    facebook_positions=["feed", "marketplace"])
+    await insert_customization_rule(
+        db, SCHEMA, creative_id="cr1", index=0, video_label_id="Ls", facebook_positions=["story"]
+    )
+    await insert_customization_rule(
+        db,
+        SCHEMA,
+        creative_id="cr1",
+        index=1,
+        video_label_id="Lf",
+        facebook_positions=["feed", "marketplace"],
+    )
 
     summary = await _sync_active(db, blobs, settings, org_id)
 
@@ -778,8 +855,17 @@ async def test_feed_spec_video_loader_is_empty_when_the_table_has_not_synced(db)
 async def test_dead_facebook_video_resolve_is_not_re_enqueued(db, blobs, settings, org_id):
     await create_fixture_schema(db, SCHEMA)
     await insert_campaign_ad_creative(
-        db, SCHEMA, campaign_id="c1", account_id="999", adset_id="as1", ad_id="ad1",
-        creative_id="cr1", name="n", headline="H", image_url=None, object_type="SHARE",
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="ad1",
+        creative_id="cr1",
+        name="n",
+        headline="H",
+        image_url=None,
+        object_type="SHARE",
     )
     await insert_asset_feed_spec_video(db, SCHEMA, creative_id="cr1", video_id="v1")
     await _sync_active(db, blobs, settings, org_id)
@@ -952,7 +1038,8 @@ async def test_asset_feed_spec_video_membership_classifies_as_video(db, blobs, s
     assert (row["format"], row["format_source"]) == ("unresolved", "unresolved")
     job = await db.fetchrow("SELECT payload FROM job WHERE job_type='meta.resolve_facebook_video'")
     assert (job["payload"]["format"], job["payload"]["format_source"]) == (
-        "video", "asset_feed_spec_video"
+        "video",
+        "asset_feed_spec_video",
     )
 
 
@@ -961,8 +1048,17 @@ async def test_resync_keeps_the_label_of_a_creative_whose_file_is_stored(
 ):
     await create_fixture_schema(db, SCHEMA)
     await insert_campaign_ad_creative(
-        db, SCHEMA, campaign_id="c1", account_id="999", adset_id="as1", ad_id="ad1",
-        creative_id="cr1", name="n", headline="H", image_url=None, object_type="SHARE",
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="ad1",
+        creative_id="cr1",
+        name="n",
+        headline="H",
+        image_url=None,
+        object_type="SHARE",
     )
     await insert_asset_feed_spec_video(db, SCHEMA, creative_id="cr1", video_id="v1")
     await _sync_active(db, blobs, settings, org_id)
@@ -983,8 +1079,17 @@ async def test_resync_keeps_the_label_of_a_creative_whose_file_is_stored(
 async def test_resync_does_not_count_a_file_of_the_wrong_kind(db, blobs, settings, org_id):
     await create_fixture_schema(db, SCHEMA)
     await insert_campaign_ad_creative(
-        db, SCHEMA, campaign_id="c1", account_id="999", adset_id="as1", ad_id="ad1",
-        creative_id="cr1", name="n", headline="H", image_url=None, object_type="SHARE",
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="ad1",
+        creative_id="cr1",
+        name="n",
+        headline="H",
+        image_url=None,
+        object_type="SHARE",
     )
     await insert_asset_feed_spec_video(db, SCHEMA, creative_id="cr1", video_id="v1")
     await _sync_active(db, blobs, settings, org_id)

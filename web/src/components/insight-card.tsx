@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { TrendingDown, TrendingUp } from 'lucide-react';
-import { buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from 'cn';
 import type { Insight } from '@/lib/types';
@@ -40,11 +39,6 @@ export function InsightCard({ insight: i }: { insight: Insight }) {
         <p>
           <span className="font-medium">Next test:</span> {i.suggested_test}
         </p>
-        {!isFatigue && (
-          <Link href={`/generate?insight=${i.id}`} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'mt-1')}>
-            Generate from this
-          </Link>
-        )}
       </CardContent>
     </Card>
   );

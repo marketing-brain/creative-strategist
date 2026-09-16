@@ -206,9 +206,15 @@ UNRESOLVED = ("unresolved", "unresolved")
 
 def _row(old, verdict, *, asset_url="https://cdn/full.jpg", primary_kind=None):
     return ReclassifyRow(
-        creative_id=uuid4(), platform_creative_id="cr1", impressions=0,
-        old_format=old[0], old_source=old[1], verdict_format=verdict[0],
-        verdict_source=verdict[1], asset_url=asset_url, primary_asset_kind=primary_kind,
+        creative_id=uuid4(),
+        platform_creative_id="cr1",
+        impressions=0,
+        old_format=old[0],
+        old_source=old[1],
+        verdict_format=verdict[0],
+        verdict_source=verdict[1],
+        asset_url=asset_url,
+        primary_asset_kind=primary_kind,
     )
 
 
@@ -238,8 +244,12 @@ def test_a_video_without_its_file_is_stored_unresolved():
 
 
 def test_a_video_with_its_file_keeps_the_label():
-    row = _row(("video", "meta_object_type"), ("video", "meta_object_type"), asset_url=None,
-               primary_kind="original_video")
+    row = _row(
+        ("video", "meta_object_type"),
+        ("video", "meta_object_type"),
+        asset_url=None,
+        primary_kind="original_video",
+    )
     assert (row.new_format, row.new_source) == ("video", "meta_object_type")
     assert not row.changed
 
@@ -248,8 +258,17 @@ async def _thumbnail_image_creative(db, blobs, settings, org_id):
     """A placement creative stored the old way: an image from its cropped thumbnail, tagged."""
     await create_fixture_schema(db, SCHEMA)
     await insert_campaign_ad_creative(
-        db, SCHEMA, campaign_id="c1", account_id="999", adset_id="as1", ad_id="ad1",
-        creative_id="cr1", name="n", headline="H", image_url=None, object_type="SHARE",
+        db,
+        SCHEMA,
+        campaign_id="c1",
+        account_id="999",
+        adset_id="as1",
+        ad_id="ad1",
+        creative_id="cr1",
+        name="n",
+        headline="H",
+        image_url=None,
+        object_type="SHARE",
     )
     await insert_feed_spec_image(db, SCHEMA, creative_id="cr1", index=0, hash="h1", label_id="L1")
     await insert_library_image(db, SCHEMA, hash="h1", url="https://cdn/full-1080.jpg")
@@ -278,12 +297,18 @@ async def _thumbnail_image_creative(db, blobs, settings, org_id):
     await db.execute(
         "INSERT INTO tag_run (id, org_id, creative_id, taxonomy_version_id, model, status)"
         " VALUES ($1, $2, $3, $4, 'image-model', 'done')",
-        run_id, org_id, creative_id, taxonomy_id,
+        run_id,
+        org_id,
+        creative_id,
+        taxonomy_id,
     )
     await db.execute(
         "INSERT INTO tag (id, org_id, tag_run_id, creative_id, dimension, value, confidence)"
         " VALUES ($1, $2, $3, $4, 'dim', 'val', 0.9)",
-        new_id(), org_id, run_id, creative_id,
+        new_id(),
+        org_id,
+        run_id,
+        creative_id,
     )
     await db.execute("DELETE FROM job WHERE org_id=$1", org_id)
     return creative_id
@@ -299,7 +324,9 @@ async def test_plan_upgrades_a_thumbnail_image_to_its_full_size_feed_spec_image(
     (row,) = plan.rows
     assert row.creative_id == creative_id
     assert (row.verdict_format, row.verdict_source, row.asset_url) == (
-        "image", "asset_feed_spec_image", "https://cdn/full-1080.jpg"
+        "image",
+        "asset_feed_spec_image",
+        "https://cdn/full-1080.jpg",
     )
     assert row.needs_image_download
 
@@ -322,6 +349,7 @@ async def test_apply_replaces_the_thumbnail_file_and_its_tags_with_a_full_size_d
     assert await db.fetchval("SELECT count(*) FROM tag_run WHERE creative_id=$1", creative_id) == 0
     job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.download_creative'")
     assert (job["payload"]["asset_url"], job["payload"]["kind"]) == (
-        "https://cdn/full-1080.jpg", "original_image"
+        "https://cdn/full-1080.jpg",
+        "original_image",
     )
     assert (job["payload"]["format"], job["payload"]["format_source"]) == FEED_IMAGE

@@ -29,34 +29,3 @@ async def test_finish_tag_run_is_idempotent_on_retry(db, org_id, settings):
     )  # simulates a reclaimed/retried job
     rows = await db.fetch("SELECT dimension, value FROM tag WHERE tag_run_id=$1", rid)
     assert len(rows) == 1
-
-
-async def test_untagged_creative_ids_excludes_unresolved_by_default(db, org_id, settings):
-    acct = await ingest_repo.upsert_ad_account(db, org_id, "1", "M", "USD")
-    img_id, _ = await ingest_repo.upsert_creative(
-        db,
-        org_id,
-        acct,
-        PlatformCreative("img", "image", "H", "P", None, None, "u", None, None, {}),
-        "raw",
-        format_source="meta_object_type",
-    )
-    unresolved_id, _ = await ingest_repo.upsert_creative(
-        db,
-        org_id,
-        acct,
-        PlatformCreative("unresolved", "unresolved", "H", "P", None, None, "u", None, None, {}),
-        "raw",
-        format_source="unresolved",
-    )
-    # Give both a primary asset so the exclusion below is provably about `format`,
-    # not the separate `primary_asset_id IS NOT NULL` guard in the same query.
-    for cid in (img_id, unresolved_id):
-        asset_id = await ingest_repo.insert_asset(
-            db, org_id, cid, "original_image", f"p/{cid}.png", "sha", "image/png"
-        )
-        await ingest_repo.set_primary_asset(db, org_id, cid, asset_id)
-
-    tv = await repo.ensure_taxonomy_version(db, load_taxonomy())
-    ids = await repo.untagged_creative_ids(db, org_id, tv, "fake-model", 50)
-    assert ids == [img_id]
