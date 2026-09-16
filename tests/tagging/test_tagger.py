@@ -80,5 +80,5 @@ async def test_gemini_tagger_handles_refusal(settings):
 def test_prompt_builders():
     t = load_taxonomy()
     text = user_text(t, "video", {"headline": "H", "primary_text": "P"})
-    assert "pacing" in text and "H" in text and "P" in text
+    assert "messenger" in text and "H" in text and "P" in text
     assert len(prompt_sha(SYSTEM, text, {"a": 1})) == 64

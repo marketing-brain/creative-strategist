@@ -1,72 +1,69 @@
-version: "1.0"
+version: "2.0"
+# Formats whose model call returns the nested v2 profile (spec §2). Every other format
+# keeps the legacy flat {"tags": [...]} schema.
+nested_formats: [video]
 dimensions:
-  # ---- hook ----
+  # =====================================================================================
+  # image / carousel -- legacy dimensions, unchanged for those formats
+  # =====================================================================================
   - name: hook_type
     group: hook
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: [problem_statement, question, bold_claim, statistic, social_proof, before_after, curiosity_gap, offer_led, demo_first, ugc_reaction, other]
     description: The attention device used in the first moment (first frame / first 3 seconds / headline).
-  - name: first_3s_content
-    group: hook
-    applies_to: [video]
-    values: [product_closeup, person_talking, text_overlay, problem_scene, result_scene, brand_logo, other]
-    description: What dominates the first three seconds of the video.
   - name: hook_text_present
     group: hook
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: ["yes", "no"]
     description: Whether on-asset text functions as a hook.
-  # ---- message ----
   - name: message_angle
     group: message
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: [pain_relief, aspiration, convenience, savings, quality, status, fear_of_missing_out, community, health, novelty, other]
     description: The primary persuasive angle.
   - name: offer_type
     group: message
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: [none, discount_percent, discount_amount, free_trial, free_shipping, bundle, limited_time, gift, other]
     description: The explicit offer, if any.
   - name: urgency
     group: message
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: [none, mild, strong]
     description: Degree of urgency or scarcity language.
   - name: proof_type
     group: message
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: [none, testimonial, review_stars, expert, press, numbers, comparison, guarantee, other]
     description: Kind of proof shown.
   - name: claim_specificity
     group: message
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: [vague, moderate, specific]
     description: How concrete the main claim is.
-  # ---- cta ----
   - name: cta_style
     group: cta
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: [none, button_only, spoken, on_asset_text, spoken_and_text, other]
     description: How the call to action is delivered.
   - name: cta_verb
     group: cta
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: [shop, learn, try, get, start, sign_up, download, book, other, none]
     description: The imperative verb of the CTA.
-  # ---- visual ----
   - name: visual_style
     group: visual
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: [ugc, studio_product, lifestyle, animation, screenshot_ui, text_only, meme, collage, illustration, other]
     description: The overall production style.
   - name: color_palette
     group: visual
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: [bright, muted, dark, monochrome, brand_colors, pastel, high_contrast, other]
     description: Dominant palette.
   - name: text_density
     group: visual
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: [none, low, medium, high]
     description: Amount of on-asset text.
   - name: layout
@@ -78,99 +75,231 @@ dimensions:
     group: visual
     applies_to: [image, video, carousel]
     values: [none, subtle, prominent]
-    description: Logo/brand visibility.
+    description: Logo, packaging or brand name visibility.
   - name: product_visible
     group: visual
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: ["yes", "no"]
     description: Whether the product itself is shown.
-  - name: product_timing
-    group: visual
-    applies_to: [video]
-    values: [first_3s, 3_to_10s, after_10s, never]
-    description: When the product first appears.
-  # ---- people ----
   - name: people_present
     group: people
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: [none, one, two_plus]
     description: Number of people visible.
   - name: face_closeup
     group: people
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: ["yes", "no"]
     description: A face fills a large share of the frame at some point.
-  - name: presenter_type
-    group: people
-    applies_to: [video]
-    values: [none, creator_ugc, founder, actor, customer, expert, other]
-    description: Who presents, if anyone.
   - name: demographic_signal
     group: people
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: [none, young_adult, adult, senior, family, other]
     description: Apparent target demographic shown.
-  # ---- tone ----
   - name: tone
     group: tone
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: [playful, serious, urgent, warm, authoritative, humorous, inspirational, neutral, other]
     description: Emotional register.
   - name: humor_present
     group: tone
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: ["yes", "no"]
     description: Any humor.
-  # ---- format ----
   - name: aspect_ratio
     group: format
     applies_to: [image, video, carousel]
     values: ["1:1", "4:5", "9:16", "16:9", other]
+    # For video this is computed from ffprobe width/height in code (spec §1 layer 0) and
+    # never asked of the model; images and carousels still ask the model as before.
+    computed_for: [video]
     description: Aspect ratio of the asset.
   - name: format_subtype
     group: format
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: [static, gif_like, talking_head, montage, tutorial, unboxing, testimonial, comparison, listicle, other]
     description: Recognizable ad sub-format.
-  # ---- video only ----
-  - name: pacing
-    group: video
-    applies_to: [video]
-    values: [slow, medium, fast]
-    description: Cut frequency and motion.
-  - name: music_present
-    group: video
-    applies_to: [video]
-    values: ["yes", "no", unknown]
-    description: Whether music is audible in the transcript/audio.
-  - name: voiceover
-    group: video
-    applies_to: [video]
-    values: [none, on_camera, off_camera, both]
-    description: Spoken narration type.
-  - name: caption_style
-    group: video
-    applies_to: [video]
-    values: [none, subtitles, kinetic_text, headline_cards, mixed]
-    description: On-screen text treatment.
-  - name: storyline
-    group: video
-    applies_to: [video]
-    values: [problem_solution, day_in_life, testimonial, demo, before_after, listicle, narrative, other]
-    description: Overall story structure.
-  - name: ending
-    group: video
-    applies_to: [video]
-    values: [cta_card, product_shot, logo, loop, abrupt, other]
-    description: How the video ends.
-  # ---- free text summaries ----
   - name: hook_summary
     group: summary
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: null
     description: One sentence describing the hook verbatim or paraphrased.
   - name: message_summary
     group: summary
-    applies_to: [image, video, carousel]
+    applies_to: [image, carousel]
     values: null
     description: One sentence describing the main message.
+
+  # =====================================================================================
+  # video -- taxonomy v2 (spec §1). Layer 0 is computed in code.
+  # =====================================================================================
+  - name: duration_s
+    group: form
+    kind: numeric
+    applies_to: [video]
+    description: Length in seconds, from ffprobe.
+  - name: cuts_per_10s
+    group: form
+    kind: numeric
+    applies_to: [video]
+    description: Scene cuts per 10 seconds, from ffmpeg scene detection at threshold 0.3.
+
+  # ---- layer 1: closed single-value ----
+  - name: messenger
+    group: messenger
+    kind: single
+    applies_to: [video]
+    values: [none, creator_on_camera, creator_off_camera, expert_on_camera, founder_on_camera, actor_scripted, multiple_people, graphic_only]
+    description: Who carries the message. expert_on_camera only when a credential is stated on screen or in speech; creator_off_camera means hands, POV or body without a face; graphic_only when no person appears and the content is text or graphics.
+  - name: narration
+    group: messenger
+    kind: single
+    applies_to: [video]
+    values: [none, on_camera_speech, voiceover, mixed]
+    description: How speech is delivered, if any.
+  - name: captions
+    group: form
+    kind: single
+    applies_to: [video]
+    values: [none, subtitles, text_cards, both]
+    description: On-screen text treatment. subtitles transcribe speech; text_cards are headline overlays that are not a transcript.
+  - name: opening_shot
+    group: structure
+    kind: single
+    applies_to: [video]
+    values: [text_card, face_to_camera, product_in_hand, product_only, scene_broll, screen_recording]
+    description: What dominates the first three seconds.
+  - name: production
+    group: form
+    kind: single
+    applies_to: [video]
+    values: [phone_ugc, polished_studio, motion_graphics, mixed_ugc_broll, screen_capture]
+    description: Production style of the footage.
+  - name: setting
+    group: form
+    kind: single
+    applies_to: [video]
+    values: [home, outdoor, studio_or_neutral, screen, none]
+    description: Where the footage is shot; screen for recordings; none when there is no live footage.
+  - name: product_reveal
+    group: structure
+    kind: single
+    applies_to: [video]
+    values: [first_3s, 3_to_10s, after_10s, never]
+    description: When the product or its packaging first appears. A generic pill, gummy or capsule shown in hand counts as the product.
+  - name: ending
+    group: structure
+    kind: single
+    applies_to: [video]
+    values: [cta_card, product_shot, speaker_signoff, hard_cut, loop]
+    description: How the video ends.
+  - name: music
+    group: form
+    kind: single
+    applies_to: [video]
+    values: [none, present]
+    description: Whether music is audible at any point.
+
+  # ---- layer 2: closed multi-value ----
+  - name: hook_devices
+    group: hook
+    kind: multi
+    timestamped: true
+    applies_to: [video]
+    values: [audience_callout, comparison_vs_alternative, warning_or_risk, confession_or_mistake, question, bold_claim, statistic, curiosity_gap, offer_lead, product_demo, result_reveal, listicle_promise, visual_pattern_interrupt]
+    description: Every attention device used in the first five seconds, each with the second it starts.
+  - name: proof_devices
+    group: message
+    kind: multi
+    timestamped: true
+    applies_to: [video]
+    values: [personal_testimonial, expert_credential, study_or_citation, review_screenshot, lab_report_or_certificate, before_after, live_demo, comparison_table, guarantee, press_mention]
+    description: Every kind of proof shown or spoken, each with the second it starts. expert_credential requires a stated credential.
+  - name: angles
+    group: message
+    kind: multi
+    applies_to: [video]
+    values: [symptom_relief, risk_avoidance, natural_alternative, convenience, savings, quality_or_purity, social_proof, novelty, aspiration, identity]
+    description: Every persuasive angle the ad leans on.
+  - name: offer_elements
+    group: message
+    kind: multi
+    timestamped: true
+    applies_to: [video]
+    values: [discount_percent, discount_amount, free_shipping, bundle, limited_time, guarantee, gift, subscribe_and_save]
+    description: Every explicit offer element shown or spoken, each with the second it starts.
+  - name: cta_modes
+    group: cta
+    kind: multi
+    timestamped: true
+    applies_to: [video]
+    values: [spoken, on_screen_text, end_card]
+    description: Every way the call to action is delivered, each with the second it starts.
+  - name: registers
+    group: message
+    kind: multi
+    applies_to: [video]
+    values: [fear, relief, humor, warmth, authority, urgency, curiosity, aspiration]
+    description: Every emotional register the ad uses.
+  - name: beats
+    group: structure
+    kind: ordered
+    applies_to: [video]
+    values: [hook, problem, agitation, mechanism, solution_intro, demo, proof, offer, cta, signoff]
+    description: The ad's sections in order of appearance with the second each starts. Every ad has at least hook. A beat may recur.
+
+  # ---- layer 3: open vocabulary ----
+  - name: concept_tags
+    group: concept
+    kind: open
+    max_values: 6
+    vocab_hint: 40
+    applies_to: [video]
+    description: The creative idea in a strategist's words, two to six short slugs (e.g. pharmacist_warning, benadryl_swap). Never a brand name.
+  - name: topics
+    group: concept
+    kind: open
+    vocab_hint: 40
+    applies_to: [video]
+    description: Subjects the ad discusses (e.g. sleep, magnesium, muscle_spasms).
+  - name: comparison_targets
+    group: concept
+    kind: open
+    vocab_hint: 40
+    applies_to: [video]
+    description: Named alternatives the ad positions against (e.g. benadryl, melatonin, otc_sleep_aids).
+  - name: audience_callouts
+    group: concept
+    kind: open
+    vocab_hint: 40
+    applies_to: [video]
+    description: Who the ad explicitly addresses (e.g. benadryl_users, women_group_chat, over_50).
+  - name: claims
+    group: concept
+    kind: open
+    vocab_hint: 40
+    applies_to: [video]
+    description: Specific benefit claims made (e.g. fall_asleep_naturally, wake_clear_headed, third_party_tested).
+  - name: visual_motifs
+    group: concept
+    kind: open
+    vocab_hint: 40
+    applies_to: [video]
+    description: Recognisable visual elements (e.g. kitchen, hand_holding_gummy, pharmacy_coat, lab_report_screenshot).
+
+  # ---- layer 4: text ----
+  - name: hook_verbatim
+    group: text
+    kind: text
+    applies_to: [video]
+    description: The exact first on-screen text, then the first spoken sentence, separated by " / ". Either part may be absent.
+  - name: concept_summary
+    group: text
+    kind: text
+    applies_to: [video]
+    description: Two sentences. What the ad is, then what it says.
+  - name: transcript
+    group: text
+    kind: text
+    applies_to: [video]
+    description: Verbatim speech with no timestamps. Empty string when there is no speech.
