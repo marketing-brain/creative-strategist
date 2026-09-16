@@ -27,8 +27,11 @@ async def _seed(db, org_id, *, with_retention=True):
     )
     await db.execute(f"""
         INSERT INTO "{SCHEMA}".basic_ad_actions VALUES
-        ('ad1', '2026-09-01', 'omni_purchase', 0, 2),
-        ('ad1', '2026-09-01', 'purchase', 0, 2),
+        ('ad1', '2026-09-01', 'omni_purchase', 0, 2, 1, 1),
+        ('ad1', '2026-09-01', 'purchase', 0, 2, 1, 1)
+    """)
+    await db.execute(f"""
+        INSERT INTO "{SCHEMA}".basic_ad_actions VALUES
         ('ad1', '2026-09-01', 'video_view', 0, 30),
         ('ad1', '2026-09-01', 'omni_landing_page_view', 0, 15),
         ('ad1', '2026-09-01', 'landing_page_view', 0, 15),
@@ -42,7 +45,7 @@ async def _seed(db, org_id, *, with_retention=True):
     """)
     await db.execute(f"""
         INSERT INTO "{SCHEMA}".basic_ad_action_values VALUES
-        ('ad1', '2026-09-01', 'omni_purchase', 0, 100)
+        ('ad1', '2026-09-01', 'omni_purchase', 0, 100, 80, 20)
     """)
     if with_retention:
         await insert_retention(
@@ -80,7 +83,9 @@ async def test_sync_insights_folds_action_breakdowns_into_metric_daily(db, blobs
     ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
 
     summary = await fivetran_insights.sync_insights(ctx, org_id, connection)
-    assert summary == {"written": 1, "skipped": 0, "retention_tables": True}
+    assert summary == {
+        "written": 1, "skipped": 0, "retention_tables": True, "attribution_windows": True,
+    }
 
     rows = await db.fetch("SELECT * FROM metric_daily WHERE org_id=$1", org_id)
     assert len(rows) == 1
@@ -103,6 +108,28 @@ async def test_sync_insights_folds_action_breakdowns_into_metric_daily(db, blobs
     assert row["video_thruplay"] == 90
     # avg_time_watched is a per-day average; stored as avg * plays so it sums across days.
     assert float(row["video_watch_seconds"]) == pytest.approx(7.1 * 400)
+    # Purchases by attribution window, from the same action rows (click + view == value).
+    assert row["purchases_click_7d"] == 1 and row["purchases_view_1d"] == 1
+    assert row["purchase_value_click_7d"] == 80 and row["purchase_value_view_1d"] == 20
+
+
+async def test_attribution_split_is_zero_when_a_window_column_is_null(
+    db, blobs, settings, org_id
+):
+    """Meta leaves _1_d_view NULL when an ad had no view-through purchases that day
+    (org 2 has such rows): NULL is zero, not a missing split."""
+    await _seed(db, org_id, with_retention=False)
+    await db.execute(
+        f'UPDATE "{SCHEMA}".basic_ad_actions SET _1_d_view = NULL, _7_d_click = 2 '
+        "WHERE action_type IN ('omni_purchase', 'purchase')"
+    )
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    await fivetran_insights.sync_insights(ctx, org_id, connection)
+    row = await db.fetchrow("SELECT * FROM metric_daily WHERE org_id=$1", org_id)
+    assert row["purchases_click_7d"] == 2 and row["purchases_view_1d"] == 0
 
 
 async def test_sync_insights_without_retention_report_writes_zeros(db, blobs, settings, org_id):
@@ -114,7 +141,9 @@ async def test_sync_insights_without_retention_report_writes_zeros(db, blobs, se
     ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
 
     summary = await fivetran_insights.sync_insights(ctx, org_id, connection)
-    assert summary == {"written": 1, "skipped": 0, "retention_tables": False}
+    assert summary == {
+        "written": 1, "skipped": 0, "retention_tables": False, "attribution_windows": True,
+    }
     row = await db.fetchrow("SELECT * FROM metric_daily WHERE org_id=$1", org_id)
     assert row["video_3s_views"] == 30 and row["purchases"] == 2
     assert row["video_plays"] == 0 and row["video_p25"] == 0 and row["video_thruplay"] == 0
@@ -161,6 +190,9 @@ async def test_bigint_ad_id_still_joins_against_our_text_ad_table(db, blobs, set
 
     summary = await fivetran_insights.sync_insights(ctx, org_id, connection)
     assert summary["written"] == 1 and summary["skipped"] == 0
+    # These action tables carry no attribution-window columns: the split stays zero.
+    assert summary["attribution_windows"] is False
 
     row = await db.fetchrow("SELECT * FROM metric_daily WHERE org_id=$1", org_id)
     assert row["ad_account_id"] == acct and row["spend"] == 10
+    assert row["purchases_click_7d"] == 0 and row["purchase_value_view_1d"] == 0

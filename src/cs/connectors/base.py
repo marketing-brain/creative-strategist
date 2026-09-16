@@ -65,3 +65,8 @@ class MetricRow:
     post_reactions: int = 0
     comments: int = 0
     saves: int = 0
+    # Purchases by Meta attribution window (7-day click vs 1-day view).
+    purchases_click_7d: int = 0
+    purchases_view_1d: int = 0
+    purchase_value_click_7d: Decimal = Decimal(0)
+    purchase_value_view_1d: Decimal = Decimal(0)

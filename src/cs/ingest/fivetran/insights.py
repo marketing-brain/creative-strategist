@@ -94,6 +94,41 @@ async def _column_exists(db, schema: str, table: str, column: str) -> bool:
     )
 
 
+ATTRIBUTION_WINDOW_COLUMNS = ("_7_d_click", "_1_d_view")
+
+WindowTotals = dict[tuple[str, date], dict[str, tuple[Decimal, Decimal]]]
+
+
+async def _window_totals(db, schema: str, table: str) -> WindowTotals | None:
+    """Per (ad_id, day, action_type): (7-day-click, 1-day-view) totals. Fivetran lands
+    these as columns on the action tables under the connector's default attribution
+    windows; a schema without both columns yields None and the split stays zero."""
+    for column in ATTRIBUTION_WINDOW_COLUMNS:
+        if not await _column_exists(db, schema, table, column):
+            return None
+    rows = await db.fetch(f"""
+        SELECT ad_id, date, action_type,
+               coalesce(sum(_7_d_click), 0) AS click_7d, coalesce(sum(_1_d_view), 0) AS view_1d
+        FROM {_q(schema, table)} GROUP BY ad_id, date, action_type
+    """)
+    out: WindowTotals = {}
+    for r in rows:
+        bucket = out.setdefault((_pid(r["ad_id"]), r["date"]), {})
+        bucket[r["action_type"]] = (Decimal(str(r["click_7d"])), Decimal(str(r["view_1d"])))
+    return out
+
+
+def _window_split(
+    by_type: dict[str, tuple[Decimal, Decimal]] | None, types: tuple[str, ...]
+) -> tuple[Decimal, Decimal]:
+    if not by_type:
+        return Decimal(0), Decimal(0)
+    for t in types:
+        if t in by_type:
+            return by_type[t]
+    return Decimal(0), Decimal(0)
+
+
 async def _retention_totals(db, schema: str) -> dict[tuple[str, date], dict[str, float]] | None:
     """Per (ad_id, day) totals from the video_retention_ad child tables, or None when the
     custom report has not been configured for this connector (org 1 today)."""
@@ -135,6 +170,8 @@ async def sync_insights(
     actions = await _action_totals(db, schema, BASIC_AD_ACTIONS)
     action_values = await _action_totals(db, schema, BASIC_AD_ACTION_VALUES)
     retention = await _retention_totals(db, schema)
+    action_windows = await _window_totals(db, schema, BASIC_AD_ACTIONS)
+    value_windows = await _window_totals(db, schema, BASIC_AD_ACTION_VALUES)
     has_reach = await _column_exists(db, schema, BASIC_AD, "reach")
 
     base_rows = await db.fetch(f"SELECT * FROM {_q(schema, BASIC_AD)}")
@@ -145,6 +182,10 @@ async def sync_insights(
         acts = actions.get(key)
         ret = (retention or {}).get(key, {})
         plays = int(ret.get("video_plays", 0))
+        purchases_click, purchases_view = _window_split(
+            (action_windows or {}).get(key), PURCHASE_TYPES
+        )
+        value_click, value_view = _window_split((value_windows or {}).get(key), PURCHASE_TYPES)
         metric_rows.append(
             MetricRow(
                 platform_ad_id=_pid(r["ad_id"]),
@@ -179,6 +220,10 @@ async def sync_insights(
                 post_reactions=_count(acts, POST_REACTION_TYPES),
                 comments=_count(acts, COMMENT_TYPES),
                 saves=_count(acts, SAVE_TYPES),
+                purchases_click_7d=int(purchases_click),
+                purchases_view_1d=int(purchases_view),
+                purchase_value_click_7d=value_click,
+                purchase_value_view_1d=value_view,
             )
         )
 
@@ -198,4 +243,9 @@ async def sync_insights(
         written += w
         skipped += s
     skipped += len(metric_rows) - sum(len(v) for v in by_account.values())
-    return {"written": written, "skipped": skipped, "retention_tables": retention is not None}
+    return {
+        "written": written,
+        "skipped": skipped,
+        "retention_tables": retention is not None,
+        "attribution_windows": action_windows is not None,
+    }

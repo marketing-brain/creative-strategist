@@ -14,9 +14,10 @@ _UPSERT_METRIC_SQL = """
         video_3s_views, video_thruplay, video_p50, video_p100, raw,
         reach, video_plays, video_p25, video_p75, video_p95, video_watch_seconds,
         landing_page_views, content_views, add_to_carts, checkouts, purchases,
-        post_reactions, comments, saves)
+        post_reactions, comments, saves,
+        purchases_click_7d, purchases_view_1d, purchase_value_click_7d, purchase_value_view_1d)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
-            $18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
+            $18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35)
     ON CONFLICT (creative_id, ad_id, day, placement) DO UPDATE SET
         spend=EXCLUDED.spend, impressions=EXCLUDED.impressions, clicks=EXCLUDED.clicks,
         link_clicks=EXCLUDED.link_clicks, conversions=EXCLUDED.conversions,
@@ -29,7 +30,11 @@ _UPSERT_METRIC_SQL = """
         landing_page_views=EXCLUDED.landing_page_views, content_views=EXCLUDED.content_views,
         add_to_carts=EXCLUDED.add_to_carts, checkouts=EXCLUDED.checkouts,
         purchases=EXCLUDED.purchases, post_reactions=EXCLUDED.post_reactions,
-        comments=EXCLUDED.comments, saves=EXCLUDED.saves
+        comments=EXCLUDED.comments, saves=EXCLUDED.saves,
+        purchases_click_7d=EXCLUDED.purchases_click_7d,
+        purchases_view_1d=EXCLUDED.purchases_view_1d,
+        purchase_value_click_7d=EXCLUDED.purchase_value_click_7d,
+        purchase_value_view_1d=EXCLUDED.purchase_value_view_1d
 """
 
 
@@ -89,6 +94,10 @@ async def upsert_metrics(
                 r.post_reactions,
                 r.comments,
                 r.saves,
+                r.purchases_click_7d,
+                r.purchases_view_1d,
+                r.purchase_value_click_7d,
+                r.purchase_value_view_1d,
             )
         )
     if not params:
