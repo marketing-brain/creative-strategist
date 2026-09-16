@@ -29,7 +29,7 @@ const real: Diagnosis = {
         { key: 'hook_rate', label: 'Hook rate', value: 0.58, baseline: 0.396, lift: 0.4646, note: '3s views ÷ impressions · 412,000 impressions' },
         { key: 'link_ctr', label: 'Link CTR', value: 0.033, baseline: 0.036, lift: -0.083, note: 'link clicks ÷ impressions' },
       ],
-      curve: null, steps: null, placements: null, audience: null,
+      curve: null, steps: null, placements: null, audience: null, comparison: null,
     },
     {
       tier: 2, key: 'retention', name: 'Retention', question: 'Where in the video does attention drop?', status: 'weak',
@@ -42,7 +42,7 @@ const real: Diagnosis = {
         ],
         drop_segment: [25, 50], avg_watch_s: 7.3, duration_s: 24, baseline_label: '12 other videos 15–30s long',
       },
-      steps: null, placements: null, audience: null,
+      steps: null, placements: null, audience: null, comparison: null,
     },
     {
       tier: 3, key: 'conversion', name: 'Conversion', question: 'Which funnel step under-delivers?', status: 'on_par',
@@ -55,7 +55,7 @@ const real: Diagnosis = {
         { key: 'checkout', label: '→ Checkout', rate: 0.102, baseline_rate: 0.112, lift: -0.089, numerator: 551, denominator: 5400, readable: true },
         { key: 'purchase', label: '→ Purchase', rate: 0.378, baseline_rate: 0.352, lift: 0.074, numerator: 208, denominator: 551, readable: true },
       ],
-      placements: null, audience: null,
+      placements: null, audience: null, comparison: null,
     },
     {
       tier: 4, key: 'fatigue', name: 'Fatigue', question: 'Is this creative wearing out?', status: 'on_par',
@@ -65,18 +65,19 @@ const real: Diagnosis = {
         { key: 'hook_rate', label: 'Hook rate trend', value: 0.589, baseline: 0.614, lift: -0.04, note: 'same windows' },
         { key: 'engagement_rate', label: 'Engagement rate', value: 0.005, baseline: 0.007, lift: -0.27, note: 'reactions, comments, saves ÷ impressions' },
       ],
-      curve: null, steps: null, placements: null, audience: null,
+      curve: null, steps: null, placements: null, audience: null, comparison: null,
     },
     {
       tier: 5, key: 'context', name: 'Context', question: 'Does it need a native recut per placement?', status: 'weak',
-      decision: "Facebook · Feed carries 31% of delivery and its hook rate runs 34% below the account's Facebook · Feed average. Recut a native version for that placement, or exclude it from the ad set.",
+      decision: "Facebook · Feed takes 31% of delivery, and the ad's hook rate there runs 34% below its own placement average -- a gap 6 other creatives in the same ad set do not have. Supply a native Facebook · Feed cut instead of the master.",
       reason: null,
+      comparison: '6 other creatives in the same ad set',
       metrics: [], curve: null, steps: null,
       placements: [
-        { platform: 'instagram', position: 'instagram_reels', label: 'Instagram · Reels', impressions: 214000, share: 0.52, hook_rate: 0.61, hook_lift: 0.18, link_ctr: 0.035, ctr_lift: 0.06, readable: true },
-        { platform: 'facebook', position: 'feed', label: 'Facebook · Feed', impressions: 127000, share: 0.31, hook_rate: 0.39, hook_lift: -0.34, link_ctr: 0.021, ctr_lift: -0.19, readable: true },
-        { platform: 'instagram', position: 'instagram_stories', label: 'Instagram · Stories', impressions: 61000, share: 0.15, hook_rate: 0.55, hook_lift: 0.04, link_ctr: 0.029, ctr_lift: -0.02, readable: true },
-        { platform: 'facebook', position: 'marketplace', label: 'Facebook · Marketplace', impressions: 800, share: 0.02, hook_rate: null, hook_lift: null, link_ctr: null, ctr_lift: null, readable: false },
+        { platform: 'instagram', position: 'instagram_reels', label: 'Instagram · Reels', impressions: 214000, share: 0.52, hook_rate: 0.61, hook_fit: 0.18, link_ctr: 0.035, ctr_fit: 0.06, readable: true },
+        { platform: 'facebook', position: 'feed', label: 'Facebook · Feed', impressions: 127000, share: 0.31, hook_rate: 0.39, hook_fit: -0.34, link_ctr: 0.021, ctr_fit: -0.19, readable: true },
+        { platform: 'instagram', position: 'instagram_stories', label: 'Instagram · Stories', impressions: 61000, share: 0.15, hook_rate: 0.55, hook_fit: 0.04, link_ctr: 0.029, ctr_fit: -0.02, readable: true },
+        { platform: 'facebook', position: 'marketplace', label: 'Facebook · Marketplace', impressions: 800, share: 0.02, hook_rate: null, hook_fit: null, link_ctr: null, ctr_fit: null, readable: false },
       ],
       audience: [
         { label: '25-34 female', age: '25-34', gender: 'female', share: 0.41, baseline_share: 0.29 },

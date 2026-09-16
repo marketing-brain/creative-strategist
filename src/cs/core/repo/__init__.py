@@ -26,8 +26,8 @@ from cs.core.repo.connections import (
     upsert_meta_connection,
 )
 from cs.core.repo.creatives import (
-    baseline_audience_sums,
-    baseline_placement_sums,
+    MIN_SIBLINGS,
+    SIBLING_SCOPES,
     baseline_window_sums,
     count_creatives,
     creative_audience_sums,
@@ -39,14 +39,17 @@ from cs.core.repo.creatives import (
     list_creatives,
     primary_asset_kind,
     set_creative_format,
+    sibling_audience_sums,
+    sibling_creative_ids,
+    sibling_placement_sums,
     upsert_creative,
 )
 from cs.core.repo.metrics import upsert_audience, upsert_metrics, upsert_placement
 from cs.core.repo.partitions import ensure_metric_partition
 
 __all__ = [
-    "baseline_audience_sums",
-    "baseline_placement_sums",
+    "MIN_SIBLINGS",
+    "SIBLING_SCOPES",
     "baseline_window_sums",
     "count_creatives",
     "creative_has_asset",
@@ -72,6 +75,9 @@ __all__ = [
     "primary_asset_kind",
     "set_ad_account_status",
     "set_creative_format",
+    "sibling_audience_sums",
+    "sibling_creative_ids",
+    "sibling_placement_sums",
     "set_meta_connection_status",
     "set_asset_duration",
     "set_primary_asset",

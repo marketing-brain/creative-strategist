@@ -12,6 +12,7 @@ const tier = (over: Partial<DiagnosisTier> & Pick<DiagnosisTier, 'tier' | 'key' 
   steps: null,
   placements: null,
   audience: null,
+  comparison: null,
   ...over,
 });
 
@@ -148,11 +149,12 @@ describe('DiagnosisPanel', () => {
               ...t,
               status: 'weak' as const,
               reason: null,
-              decision: 'Facebook · Feed carries 31% of delivery and its hook rate runs 34% below.',
+              decision: "Facebook · Feed takes 31% of delivery, and the ad's hook rate there runs 34% below its own placement average.",
+              comparison: '6 other creatives in the same ad set',
               placements: [
-                { platform: 'instagram', position: 'instagram_reels', label: 'Instagram · Reels', impressions: 214000, share: 0.52, hook_rate: 0.61, hook_lift: 0.18, link_ctr: 0.035, ctr_lift: 0.06, readable: true },
-                { platform: 'facebook', position: 'feed', label: 'Facebook · Feed', impressions: 127000, share: 0.31, hook_rate: 0.39, hook_lift: -0.34, link_ctr: 0.021, ctr_lift: -0.19, readable: true },
-                { platform: 'facebook', position: 'marketplace', label: 'Facebook · Marketplace', impressions: 800, share: 0.02, hook_rate: null, hook_lift: null, link_ctr: null, ctr_lift: null, readable: false },
+                { platform: 'instagram', position: 'instagram_reels', label: 'Instagram · Reels', impressions: 214000, share: 0.52, hook_rate: 0.61, hook_fit: 0.18, link_ctr: 0.035, ctr_fit: 0.06, readable: true },
+                { platform: 'facebook', position: 'feed', label: 'Facebook · Feed', impressions: 127000, share: 0.31, hook_rate: 0.39, hook_fit: -0.34, link_ctr: 0.021, ctr_fit: -0.19, readable: true },
+                { platform: 'facebook', position: 'marketplace', label: 'Facebook · Marketplace', impressions: 800, share: 0.02, hook_rate: null, hook_fit: null, link_ctr: null, ctr_fit: null, readable: false },
               ],
               audience: [{ label: '25-34 female', age: '25-34', gender: 'female', share: 0.41, baseline_share: 0.29 }],
             }
@@ -162,8 +164,10 @@ describe('DiagnosisPanel', () => {
     render(<DiagnosisPanel diagnosis={withContext} />);
     expect(screen.getByText('Instagram · Reels')).toBeInTheDocument();
     expect(screen.getByText('−34%')).toBeInTheDocument();
-    expect(screen.getByText('too little volume')).toBeInTheDocument();
+    expect(screen.getByText(/Facebook · Marketplace/)).toBeInTheDocument();
+    expect(screen.getByText('· thin')).toBeInTheDocument();
+    expect(screen.getByText(/Fit is measured against 6 other creatives in the same ad set/)).toBeInTheDocument();
     expect(screen.getByText(/25-34 female 41%/)).toBeInTheDocument();
-    expect(screen.getByText(/account 29%/)).toBeInTheDocument();
+    expect(screen.getByText(/peers 29%/)).toBeInTheDocument();
   });
 });

@@ -286,22 +286,31 @@ def _layer_lines(tier: Tier, d: DiagnosedCreative, duration_ms: int | None) -> l
     if tier.key == "fatigue" and d.days_live is not None:
         lines.append(f"live for {d.days_live} days")
     if tier.key == "context":
-        lines.append("per placement, this ad vs the account's average for that same placement:")
+        lines.append(
+            "Meta's optimiser chose this placement mix and audience, not the advertiser. "
+            f"Compared with {tier.comparison}."
+        )
+        lines.append(
+            "per placement: share of delivery, the rate, and fit -- how far the rate sits from "
+            "this ad's own placement average once the comparison set's pattern for that "
+            "placement is removed. Fit is zero-sum, so read it as travel, not performance:"
+        )
         for p in tier.placements or []:
             share = f"{p.share * 100:.0f}% of delivery" if p.share is not None else "unknown share"
-            if not p.readable:
-                lines.append(f"  {p.label}: {share}, too little volume to compare")
-                continue
             parts = []
-            if p.hook_rate is not None and p.hook_lift is not None:
-                parts.append(f"hook {_pct(p.hook_rate, 1)} ({_signed(p.hook_lift)})")
-            if p.link_ctr is not None and p.ctr_lift is not None:
-                parts.append(f"link CTR {_pct(p.link_ctr, 2)} ({_signed(p.ctr_lift)})")
-            lines.append(f"  {p.label}: {share} · " + ", ".join(parts))
+            if p.hook_rate is not None:
+                fit = f", fit {_signed(p.hook_fit)}" if p.hook_fit is not None else ""
+                parts.append(f"hook {_pct(p.hook_rate, 1)}{fit}")
+            if p.link_ctr is not None:
+                fit = f", fit {_signed(p.ctr_fit)}" if p.ctr_fit is not None else ""
+                parts.append(f"link CTR {_pct(p.link_ctr, 2)}{fit}")
+            if not p.readable:
+                parts.append("too little volume to rate")
+            lines.append(f"  {p.label}: {share} · " + "; ".join(parts))
         for s in tier.audience or []:
             lines.append(
-                f"  audience {s.label}: {_pct(s.share, 0)} of this ad's impressions vs "
-                f"{_pct(s.baseline_share, 0)} of the account's"
+                f"  audience Meta found {s.label}: {_pct(s.share, 0)} of this ad's impressions "
+                f"vs {_pct(s.baseline_share, 0)} for the comparison set"
             )
     return lines
 

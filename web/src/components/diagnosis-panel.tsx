@@ -158,14 +158,25 @@ function StepChain({ steps }: { steps: DiagnosisStep[] }) {
   );
 }
 
-function liftText(x: number | null): string {
+function fitText(x: number | null): string {
   if (x == null) return 'text-muted-foreground';
   return x >= 0.15 ? 'text-success' : x <= -0.15 ? 'text-destructive' : 'text-muted-foreground';
 }
 
-// Each placement reads against the account's average for that same placement, so the lift
-// column is the point of the table; the share column says how much of the ad's delivery it
-// speaks for.
+function Rate({ rate, fit, places }: { rate: number | null; fit: number | null; places: 0 | 1 }) {
+  if (rate == null) return <span className="text-muted-foreground">—</span>;
+  return (
+    <>
+      {places === 0 ? pct(rate) : pct1(rate)}{' '}
+      {fit != null ? <span className={cn('font-semibold', fitText(fit))}>{signed(fit)}</span> : <span className="text-muted-foreground">·</span>}
+    </>
+  );
+}
+
+// Fit, not lift: how far the rate sits from this creative's own placement average once the
+// comparison set's pattern for that placement is removed. Meta chose the mix, so a level
+// comparison would partly measure the optimiser's allocation. Fit is zero-sum across a
+// creative's placements -- it says where the creative travels, never how well it performed.
 function PlacementTable({ placements, format }: { placements: DiagnosisPlacement[]; format: Diagnosis['format'] }) {
   const video = format === 'video';
   return (
@@ -175,35 +186,25 @@ function PlacementTable({ placements, format }: { placements: DiagnosisPlacement
           <tr className="text-muted-foreground">
             <th className="py-1 pr-4 text-left font-normal">Placement</th>
             <th className="py-1 pr-4 text-right font-normal">Delivery</th>
-            {video && <th className="py-1 pr-4 text-right font-normal">Hook rate</th>}
-            <th className="py-1 text-right font-normal">Link CTR</th>
+            {video && <th className="py-1 pr-4 text-right font-normal">Hook rate · fit</th>}
+            <th className="py-1 text-right font-normal">Link CTR · fit</th>
           </tr>
         </thead>
         <tbody>
           {placements.map((p) => (
             <tr key={`${p.platform}/${p.position}`} className="border-t border-border">
-              <td className="py-1.5 pr-4">{p.label}</td>
+              <td className="py-1.5 pr-4">
+                {p.label}
+                {!p.readable && <span className="text-muted-foreground"> · thin</span>}
+              </td>
               <td className="py-1.5 pr-4 text-right tabular-nums">{p.share != null ? pct(p.share) : '—'}</td>
               {video && (
                 <td className="py-1.5 pr-4 text-right tabular-nums">
-                  {p.readable && p.hook_rate != null ? (
-                    <>
-                      {pct(p.hook_rate)}{' '}
-                      <span className={cn('font-semibold', liftText(p.hook_lift))}>{p.hook_lift != null ? signed(p.hook_lift) : ''}</span>
-                    </>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
+                  <Rate rate={p.hook_rate} fit={p.hook_fit} places={0} />
                 </td>
               )}
               <td className="py-1.5 text-right tabular-nums">
-                {p.readable && p.link_ctr != null ? (
-                  <>
-                    {pct1(p.link_ctr)} <span className={cn('font-semibold', liftText(p.ctr_lift))}>{p.ctr_lift != null ? signed(p.ctr_lift) : ''}</span>
-                  </>
-                ) : (
-                  <span className="text-muted-foreground">too little volume</span>
-                )}
+                <Rate rate={p.link_ctr} fit={p.ctr_fit} places={1} />
               </td>
             </tr>
           ))}
@@ -216,12 +217,12 @@ function PlacementTable({ placements, format }: { placements: DiagnosisPlacement
 function AudienceLine({ audience }: { audience: DiagnosisAudienceSlice[] }) {
   return (
     <p className="text-sm text-muted-foreground">
-      {'Audience: '}
+      {'Audience Meta found: '}
       {audience.map((s, i) => (
         <span key={s.label}>
           {i > 0 && ' · '}
           {`${s.label} ${pct(s.share)}`}
-          <span className="text-muted-foreground/70">{` (account ${pct(s.baseline_share)})`}</span>
+          <span className="text-muted-foreground/70">{` (peers ${pct(s.baseline_share)})`}</span>
         </span>
       ))}
     </p>
@@ -259,6 +260,9 @@ function TierRow({ tier, broken, last, format }: { tier: DiagnosisTier; broken: 
         )}
         {tier.curve && <RetentionCurve curve={tier.curve} />}
         {tier.steps && tier.steps.length > 0 && <StepChain steps={tier.steps} />}
+        {tier.comparison && tier.placements && tier.placements.length > 0 && (
+          <span className="text-sm text-muted-foreground">{`Meta chose this mix. Fit is measured against ${tier.comparison}.`}</span>
+        )}
         {tier.placements && tier.placements.length > 0 && <PlacementTable placements={tier.placements} format={format} />}
         {tier.audience && tier.audience.length > 0 && <AudienceLine audience={tier.audience} />}
       </div>

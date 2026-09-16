@@ -282,27 +282,103 @@ async def creative_placement_sums(
     )
 
 
-async def baseline_placement_sums(
+SIBLING_SCOPES = ("ad set", "campaign", "account")
+MIN_SIBLINGS = 3
+
+
+async def sibling_creative_ids(
     db: Database,
     org_id: UUID,
     ad_account_id: UUID,
+    creative_id: UUID,
     fmt: str,
-    exclude_creative_id: UUID,
     since: date,
     until: date,
-) -> list[asyncpg.Record]:
-    """The account's per-placement totals over every *other* creative of the same format."""
-    return await db.fetch(
-        f"SELECT p.publisher_platform, p.platform_position, {_PLACEMENT_SUMS_SQL} "
-        "FROM metric_placement p JOIN creative c ON c.id = p.creative_id "
-        "WHERE p.org_id=$1 AND p.ad_account_id=$2 AND c.format=$3 AND p.creative_id <> $6 "
-        f"AND {_week_overlap(4, 5)} GROUP BY 1, 2",
+    scope: str,
+) -> list[UUID]:
+    """Creatives of the same format to measure this one against, within one scope.
+
+    Meta's optimiser, not the advertiser, decides a creative's placement mix and audience, so
+    the comparison has to hold targeting fixed. Comparing against the whole account mixes in
+    campaigns with their own age or gender caps, which shows up as a demographic skew that
+    belongs to the campaign rather than to the creative. The caller walks the scopes from
+    narrowest out (see SIBLING_SCOPES) and takes the first with enough delivery to compare.
+
+    Peers only count when they have placement rows in the window; otherwise a narrow scope
+    would win on paper and contribute nothing to compare with."""
+    if scope == "account":
+        return await _peers_in_account(db, org_id, ad_account_id, creative_id, fmt, since, until)
+    column = "adset_id" if scope == "ad set" else "campaign_id"
+    return await _peers_sharing(db, org_id, creative_id, fmt, since, until, column)
+
+
+_HAS_PLACEMENT_ROWS = f"""
+    EXISTS (SELECT 1 FROM metric_placement p
+            WHERE p.creative_id = c.id AND {_week_overlap(4, 5)})
+"""
+
+
+async def _peers_sharing(
+    db: Database, org_id: UUID, creative_id: UUID, fmt: str, since: date, until: date, column: str
+) -> list[UUID]:
+    """Other creatives of the same format that ran in an ad set (or campaign) this one ran in."""
+    rows = await db.fetch(
+        f"""
+        SELECT DISTINCT c.id FROM ad mine
+        JOIN ad peer ON peer.org_id = mine.org_id AND peer.{column} = mine.{column}
+        JOIN creative c ON c.id = peer.creative_id
+        WHERE mine.org_id = $1 AND mine.creative_id = $2 AND mine.{column} IS NOT NULL
+          AND c.id <> $2 AND c.format = $3 AND {_HAS_PLACEMENT_ROWS}
+        """,
         org_id,
-        ad_account_id,
+        creative_id,
         fmt,
         since,
         until,
-        exclude_creative_id,
+    )
+    return [r["id"] for r in rows]
+
+
+async def _peers_in_account(
+    db: Database,
+    org_id: UUID,
+    ad_account_id: UUID,
+    creative_id: UUID,
+    fmt: str,
+    since: date,
+    until: date,
+) -> list[UUID]:
+    rows = await db.fetch(
+        f"""
+        SELECT c.id FROM creative c
+        WHERE c.org_id = $1 AND c.ad_account_id = $6 AND c.id <> $2 AND c.format = $3
+          AND {_HAS_PLACEMENT_ROWS}
+        """,
+        org_id,
+        creative_id,
+        fmt,
+        since,
+        until,
+        ad_account_id,
+    )
+    return [r["id"] for r in rows]
+
+
+async def sibling_placement_sums(
+    db: Database, org_id: UUID, creative_ids: list[UUID], since: date, until: date
+) -> list[asyncpg.Record]:
+    """Pooled per-placement totals over the sibling set."""
+    if not creative_ids:
+        return []
+    return await db.fetch(
+        f"SELECT p.publisher_platform, p.platform_position, {_PLACEMENT_SUMS_SQL} "
+        "FROM metric_placement p "
+        f"WHERE p.org_id=$1 AND p.creative_id = ANY($2) AND {_week_overlap(3, 4)} "
+        "GROUP BY 1, 2",
+        org_id,
+        creative_ids,
+        since,
+        until,
     )
 
 
@@ -324,26 +400,18 @@ async def creative_audience_sums(
     )
 
 
-async def baseline_audience_sums(
-    db: Database,
-    org_id: UUID,
-    ad_account_id: UUID,
-    fmt: str,
-    exclude_creative_id: UUID,
-    since: date,
-    until: date,
+async def sibling_audience_sums(
+    db: Database, org_id: UUID, creative_ids: list[UUID], since: date, until: date
 ) -> list[asyncpg.Record]:
+    if not creative_ids:
+        return []
     return await db.fetch(
         "SELECT a.age, a.gender, sum(a.impressions) AS impressions FROM metric_audience a "
-        "JOIN creative c ON c.id = a.creative_id "
-        "WHERE a.org_id=$1 AND a.ad_account_id=$2 AND c.format=$3 AND a.creative_id <> $6 "
-        f"AND {_month_overlap(4, 5)} GROUP BY 1, 2",
+        f"WHERE a.org_id=$1 AND a.creative_id = ANY($2) AND {_month_overlap(3, 4)} GROUP BY 1, 2",
         org_id,
-        ad_account_id,
-        fmt,
+        creative_ids,
         since,
         until,
-        exclude_creative_id,
     )
 
 

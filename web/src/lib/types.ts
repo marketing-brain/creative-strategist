@@ -19,9 +19,9 @@ export type DiagnosisPlacement = {
   impressions: number;
   share: number | null;
   hook_rate: number | null;
-  hook_lift: number | null;
+  hook_fit: number | null;
   link_ctr: number | null;
-  ctr_lift: number | null;
+  ctr_fit: number | null;
   readable: boolean;
 };
 export type DiagnosisAudienceSlice = { label: string; age: string; gender: string; share: number; baseline_share: number };
@@ -38,6 +38,7 @@ export type DiagnosisTier = {
   steps: DiagnosisStep[] | null;
   placements: DiagnosisPlacement[] | null;
   audience: DiagnosisAudienceSlice[] | null;
+  comparison: string | null;
 };
 export type Diagnosis = {
   window_start: string;
