@@ -247,11 +247,11 @@ Nothing is persisted. The report is pasted into the PR. Dimensions below 0.8 on 
 
 - `tests/tagging/test_taxonomy.py`: v2 file loads; kinds parse; `json_schema('video')` nests and enforces every enum; `json_schema('image')` is unchanged from today's output; `validate` flattens each kind; beats out of order reject; open dedup on canonical.
 - `tests/tagging/test_vocab.py`: normalize cases; canonicalize inserts new and reuses existing; hints order.
-- `tests/tagging/test_video.py`: `probe_video` on the fixture clip returns duration, dimensions and a cut count; aspect mapping table.
+- `tests/tagging/test_video.py`: `probe_video` on a synthetic ffmpeg clip (the existing fixture pattern) with two distinct scenes returns duration, dimensions and a cut count of 1; aspect mapping table.
 - `tests/tagging/test_runner.py`: video path with a fake tagger writes computed rows, canonical open rows, ordered beats; image path unchanged.
 - `tests/tagging/test_repo.py`: new columns round-trip; `latest_tags` returns multi rows.
 - API tests for the transcript endpoint and open values endpoint.
-- Web: `tag-list` renders each kind (existing component test pattern).
+- Web: there is no component test harness; `tag-list` is checked by rendering a v2-tagged creative in the running app.
 
 ## Out of scope
 
