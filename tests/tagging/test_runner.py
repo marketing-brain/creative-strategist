@@ -12,8 +12,9 @@ from cs.core import repo as ingest_repo
 from cs.core.queue import Job
 from cs.jobs.registry import JobContext
 from cs.tagging import jobs as tagging_jobs
-from cs.tagging import repo, runner
-from cs.tagging.fakes import FakeTagger
+from cs.tagging import repo, runner, vocab
+from cs.tagging.fakes import DEFAULT_V2_PAYLOAD, FakeTagger
+from cs.tagging.prompts import SYSTEM_V2
 
 
 def _png():
@@ -106,10 +107,11 @@ async def _make_video_creative(db, blobs, settings, org_id, tmp_path):
         db,
         org_id,
         acct,
-        PlatformCreative("v1", "video", "H", "P", None, None, "u", None, None, {}),
+        PlatformCreative(f"v1-{tmp_path.name}", "video", "H", "P", None, None, "u", None, None, {}),
         "raw",
         format_source="manual_review",
     )
+    tmp_path.mkdir(parents=True, exist_ok=True)
     p = tmp_path / "v.mp4"
     subprocess.run(
         [
@@ -227,3 +229,86 @@ async def test_tag_carousel_creative_uses_all_cards(db, blobs, settings, org_id,
         _ctx(db, blobs, settings, org_id, {}), carousel_creative, tagger
     )
     assert run_id is not None and tagger.calls[0]["n_images"] == 3
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+async def test_tag_video_creative_writes_the_v2_profile(db, blobs, settings, org_id, tmp_path):
+    cid = await _make_video_creative(db, blobs, settings, org_id, tmp_path)
+    tagger = FakeTagger()
+    run_id = await runner.tag_creative(_ctx(db, blobs, settings, org_id, {}), cid, tagger)
+    assert run_id is not None
+    call = tagger.calls[0]
+    assert call["has_video"] and call["n_images"] == 0 and call["system"] == SYSTEM_V2
+    assert "single" in call["schema"]["properties"]
+
+    rows = [dict(r) for r in await repo.latest_tags(db, org_id, cid)]
+    by_dim: dict[str, list[dict]] = {}
+    for r in rows:
+        by_dim.setdefault(r["dimension"], []).append(r)
+
+    # layer 0 computed in code, never from the model
+    assert 3.5 <= float(by_dim["duration_s"][0]["value"]) <= 4.5
+    assert by_dim["duration_s"][0]["kind"] == "numeric"
+    assert by_dim["aspect_ratio"][0]["value"] == "other"  # 320x240 is 4:3
+    assert by_dim["aspect_ratio"][0]["evidence"] == "computed"
+    assert float(by_dim["cuts_per_10s"][0]["value"]) >= 0.0
+    # single / multi / ordered
+    assert by_dim["messenger"][0]["value"] == "expert_on_camera"
+    assert [r["value"] for r in by_dim["hook_devices"]] == ["warning_or_risk", "audience_callout"]
+    beats = [(r["value"], r["ordinal"]) for r in by_dim["beats"]]
+    assert beats[:2] == [("hook", 0), ("problem", 1)]
+    # open: normalized, canonicalized, counted
+    concept = {r["value"]: r["raw_value"] for r in by_dim["concept_tags"]}
+    assert concept == {
+        "pharmacist_warning": "Pharmacist Warning",
+        "otc_sleep_aid_risks": "otc_sleep_aid_risks",
+    }
+    assert await vocab.hints(db, org_id, "concept_tags", 10) == [
+        ("otc_sleep_aid_risks", 1),
+        ("pharmacist_warning", 1),
+    ]
+    assert by_dim["visual_motifs"][0]["value"] == "lab_report_screenshot"
+    # text
+    assert by_dim["transcript"][0]["value"].startswith("As a pharmacist")
+    run = await db.fetchrow("SELECT status, model, input_tokens FROM tag_run WHERE id=$1", run_id)
+    assert run["status"] == "done" and run["model"] == settings.video_tagging_model
+    assert run["input_tokens"] == 100
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+async def test_second_video_sees_vocabulary_hints_and_reuses_canonical(
+    db, blobs, settings, org_id, tmp_path
+):
+    first = await _make_video_creative(db, blobs, settings, org_id, tmp_path / "a")
+    await runner.tag_creative(_ctx(db, blobs, settings, org_id, {}), first, FakeTagger())
+    # merge one slug by hand, as an operator would (spec §4)
+    await db.execute(
+        "UPDATE tag_vocab SET canonical_slug='pharmacist_warning' "
+        "WHERE org_id=$1 AND dimension='concept_tags' AND slug='otc_sleep_aid_risks'",
+        org_id,
+    )
+    second = await _make_video_creative(db, blobs, settings, org_id, tmp_path / "b")
+    tagger = FakeTagger()
+    await runner.tag_creative(_ctx(db, blobs, settings, org_id, {}), second, tagger)
+    text = tagger.calls[0]["user_text"]
+    assert (
+        "Existing slugs (count): pharmacist_warning (1)"
+        in text.split("- concept_tags")[1].split("- topics")[0]
+    )
+    rows = await repo.latest_tags(db, org_id, second)
+    concept = [(r["value"], r["raw_value"]) for r in rows if r["dimension"] == "concept_tags"]
+    assert concept == [("pharmacist_warning", "Pharmacist Warning")]
+    assert await vocab.hints(db, org_id, "concept_tags", 10) == [("pharmacist_warning", 2)]
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+async def test_video_profile_rule_break_fails_the_run(db, blobs, settings, org_id, tmp_path):
+    cid = await _make_video_creative(db, blobs, settings, org_id, tmp_path)
+    bad = {**DEFAULT_V2_PAYLOAD, "ordered": {"beats": []}}
+    with pytest.raises(ValueError, match="beats"):
+        await runner.tag_creative(
+            _ctx(db, blobs, settings, org_id, {}), cid, FakeTagger(payloads_by_call=[bad])
+        )
+    run = await db.fetchrow("SELECT status, error FROM tag_run")
+    assert run["status"] == "failed" and "beats" in run["error"]
+    assert await db.fetchval("SELECT count(*) FROM tag_vocab") == 0
