@@ -15,6 +15,7 @@ from cs.tagging import jobs as tagging_jobs
 from cs.tagging import repo, runner, vocab
 from cs.tagging.fakes import DEFAULT_V2_PAYLOAD, FakeTagger
 from cs.tagging.prompts import SYSTEM_V2
+from cs.tagging.taxonomy import load_taxonomy
 
 
 def _png():
@@ -311,4 +312,27 @@ async def test_video_profile_rule_break_fails_the_run(db, blobs, settings, org_i
         )
     run = await db.fetchrow("SELECT status, error FROM tag_run")
     assert run["status"] == "failed" and "beats" in run["error"]
+    assert await db.fetchval("SELECT count(*) FROM tag_vocab") == 0
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+async def test_profile_video_writes_nothing_and_leaves_open_slugs_uncanonicalized(
+    db, blobs, settings, org_id, tmp_path
+):
+    cid = await _make_video_creative(db, blobs, settings, org_id, tmp_path)
+    creative = await ingest_repo.get_creative(db, org_id, cid)
+    taxonomy = load_taxonomy()
+    rows, result, text, schema = await runner.profile_video(
+        _ctx(db, blobs, settings, org_id, {}), creative, taxonomy, FakeTagger(), {}
+    )
+    assert result.input_tokens == 100 and "single" in schema["properties"]
+    assert "Profile fields:" in text
+    concept = [(r["value"], r["raw_value"]) for r in rows if r["dimension"] == "concept_tags"]
+    assert concept == [
+        ("pharmacist_warning", "Pharmacist Warning"),
+        ("otc_sleep_aid_risks", "otc_sleep_aid_risks"),
+    ]
+    assert {r["dimension"] for r in rows} >= {"duration_s", "cuts_per_10s", "aspect_ratio"}
+    assert await db.fetchval("SELECT count(*) FROM tag_run") == 0
+    assert await db.fetchval("SELECT count(*) FROM tag") == 0
     assert await db.fetchval("SELECT count(*) FROM tag_vocab") == 0
