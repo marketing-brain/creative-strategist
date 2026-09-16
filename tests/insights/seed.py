@@ -26,7 +26,7 @@ async def seed_creative(
     account_id,
     name,
     fmt,
-    tags: dict[str, str],
+    tags: dict[str, str | list[str]],
     daily: list[tuple[date, Decimal, int, int, Decimal, Decimal]],
 ) -> UUID:
     cid, _ = await ingest_repo.upsert_creative(
@@ -46,7 +46,11 @@ async def seed_creative(
         db,
         org_id,
         rid,
-        [{"dimension": k, "value": v, "confidence": 0.9, "evidence": ""} for k, v in tags.items()],
+        [
+            {"dimension": k, "value": v, "confidence": 0.9, "evidence": ""}
+            for k, vs in tags.items()
+            for v in ([vs] if isinstance(vs, str) else vs)
+        ],
         "s",
         1,
         1,

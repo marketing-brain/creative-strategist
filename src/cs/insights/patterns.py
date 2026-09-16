@@ -40,11 +40,17 @@ async def compute_pattern_insights(
         ), base AS (
           SELECT sum(spend) AS spend, sum(imp) AS imp, sum(clicks) AS clicks, sum(conv) AS conv,
                  sum(val) AS val FROM m
+        ), lt AS (
+          -- One row per (creative, dimension, value): an ordered dimension such as `beats`
+          -- can carry the same value twice, which would otherwise count that creative's
+          -- spend once per occurrence inside the cell.
+          SELECT org_id, creative_id, dimension, value, max(confidence) AS confidence
+          FROM creative_latest_tag GROUP BY org_id, creative_id, dimension, value
         ), seg AS (
           SELECT lt.dimension, lt.value, count(DISTINCT m.creative_id) AS n,
                  sum(m.spend) AS spend, sum(m.imp) AS imp,
                  sum(m.clicks) AS clicks, sum(m.conv) AS conv, sum(m.val) AS val
-          FROM m JOIN creative_latest_tag lt ON lt.creative_id = m.creative_id AND lt.org_id = $1
+          FROM m JOIN lt ON lt.creative_id = m.creative_id AND lt.org_id = $1
           WHERE lt.confidence >= $7
           GROUP BY lt.dimension, lt.value
         )

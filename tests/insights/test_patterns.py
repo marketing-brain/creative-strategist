@@ -66,3 +66,45 @@ async def test_pattern_respects_thresholds(db, org_id, settings):
             [(start, Decimal("10"), 100, 5, Decimal("0"), Decimal("0"))],
         )
     assert await compute_pattern_insights(db, org_id, acct, start, start + timedelta(days=30)) == []
+
+
+async def test_pattern_counts_a_creative_once_when_a_value_recurs(db, org_id, settings):
+    """`beats` is ordered, so one creative can carry `hook` twice; the segment must still
+    count that creative's spend once."""
+    acct = await seed_account(db, org_id, settings)
+    start = date(2026, 8, 1)
+    first = None
+    for i in range(5):  # hook recurs: two identical (creative, beats, hook) rows
+        cid = await seed_creative(
+            db,
+            org_id,
+            acct,
+            f"h{i}",
+            "video",
+            {"beats": ["hook", "problem", "hook"]},
+            [(start, Decimal("400"), 1000, 30, Decimal("1"), Decimal("50"))],
+        )
+        first = first or cid
+    for i in range(5):
+        await seed_creative(
+            db,
+            org_id,
+            acct,
+            f"p{i}",
+            "video",
+            {"beats": ["problem"]},
+            [(start, Decimal("400"), 1000, 10, Decimal("1"), Decimal("50"))],
+        )
+    # One creative's two `hook` rows carry different confidences, so deduplication has to
+    # collapse them on (creative, dimension, value) rather than on the whole row.
+    await db.execute(
+        "UPDATE tag SET confidence=0.7 WHERE id=(SELECT id FROM tag WHERE org_id=$1 AND "
+        "creative_id=$2 AND dimension='beats' AND value='hook' LIMIT 1)",
+        org_id,
+        first,
+    )
+    drafts = await compute_pattern_insights(db, org_id, acct, start, start + timedelta(days=30))
+    hook = {(d.dimension, d.value, d.metric): d for d in drafts}[("beats", "hook", "ctr")]
+    assert hook.sample_creatives == 5
+    assert hook.sample_spend == Decimal("2000")  # 5 x 400, not 10 x 400
+    assert round(hook.observed, 3) == 0.03 and round(hook.baseline, 3) == 0.02
