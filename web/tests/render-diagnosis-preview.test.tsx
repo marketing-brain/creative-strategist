@@ -83,6 +83,8 @@ const real: Diagnosis = {
         { label: '25-34 female', age: '25-34', gender: 'female', share: 0.41, baseline_share: 0.29 },
         { label: '35-44 female', age: '35-44', gender: 'female', share: 0.27, baseline_share: 0.24 },
         { label: '45-54 female', age: '45-54', gender: 'female', share: 0.14, baseline_share: 0.19 },
+        { label: '35-44 male', age: '35-44', gender: 'male', share: 0.08, baseline_share: 0.11 },
+        { label: 'Everyone else', age: 'other', gender: 'other', share: 0.1, baseline_share: 0.17 },
       ],
     },
   ],

@@ -214,18 +214,41 @@ function PlacementTable({ placements, format }: { placements: DiagnosisPlacement
   );
 }
 
-function AudienceLine({ audience }: { audience: DiagnosisAudienceSlice[] }) {
+// Shares, so the gap against peers is in percentage points, never a percentage of a
+// percentage. Same three columns as the placement table: what it is, how much of the ad's
+// delivery it took, and how that compares with the peer group.
+const points = (x: number) => `${x >= 0 ? '+' : '−'}${Math.round(Math.abs(x) * 100)} pts`;
+
+function pointsText(x: number): string {
+  return Math.abs(x) < 0.05 ? 'text-muted-foreground' : x > 0 ? 'text-foreground' : 'text-muted-foreground';
+}
+
+function AudienceTable({ audience }: { audience: DiagnosisAudienceSlice[] }) {
   return (
-    <p className="text-sm text-muted-foreground">
-      {'Audience Meta found: '}
-      {audience.map((s, i) => (
-        <span key={s.label}>
-          {i > 0 && ' · '}
-          {`${s.label} ${pct(s.share)}`}
-          <span className="text-muted-foreground/70">{` (peers ${pct(s.baseline_share)})`}</span>
-        </span>
-      ))}
-    </p>
+    <div className="w-full overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-muted-foreground">
+            <th className="py-1 pr-4 text-left font-normal">Age and gender</th>
+            <th className="py-1 pr-4 text-right font-normal">Delivery</th>
+            <th className="py-1 pr-4 text-right font-normal">Peers</th>
+            <th className="py-1 text-right font-normal">Gap</th>
+          </tr>
+        </thead>
+        <tbody>
+          {audience.map((s) => (
+            <tr key={s.label} className="border-t border-border">
+              <td className={cn('py-1.5 pr-4', s.age === 'other' && 'text-muted-foreground')}>{s.label}</td>
+              <td className="py-1.5 pr-4 text-right tabular-nums">{pct(s.share)}</td>
+              <td className="py-1.5 pr-4 text-right tabular-nums text-muted-foreground">{pct(s.baseline_share)}</td>
+              <td className={cn('py-1.5 text-right font-semibold tabular-nums', pointsText(s.share - s.baseline_share))}>
+                {points(s.share - s.baseline_share)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -264,7 +287,12 @@ function TierRow({ tier, broken, last, format }: { tier: DiagnosisTier; broken: 
           <span className="text-sm text-muted-foreground">{`Meta chose this mix. Fit is measured against ${tier.comparison}.`}</span>
         )}
         {tier.placements && tier.placements.length > 0 && <PlacementTable placements={tier.placements} format={format} />}
-        {tier.audience && tier.audience.length > 0 && <AudienceLine audience={tier.audience} />}
+        {tier.audience && tier.audience.length > 0 && (
+          <>
+            <span className="text-sm text-muted-foreground">Who Meta found, not who was targeted.</span>
+            <AudienceTable audience={tier.audience} />
+          </>
+        )}
       </div>
     </div>
   );

@@ -30,7 +30,9 @@ LENGTH_BUCKETS_S: tuple[tuple[int, int | None], ...] = ((0, 15), (15, 30), (30, 
 # floor there; only placements carrying a real share of delivery can break the tier.
 PLACEMENT_FLOOR = 1_000
 PLACEMENT_SHARE_FLOOR = 0.20
-AUDIENCE_SLICES = 3
+AUDIENCE_SLICES = 6
+# Below this the remainder is not worth a row of its own.
+AUDIENCE_REMAINDER_FLOOR = 0.005
 
 _PLATFORM_LABELS = {
     "facebook": "Facebook",
@@ -700,7 +702,10 @@ def _placement_rows(
 
 
 def _audience_slices(audience: AudienceSums, siblings: AudienceSums) -> list[AudienceSlice]:
-    """The ad's age x gender mix against its siblings', largest slices first."""
+    """The ad's age x gender mix beside its siblings', largest slices first, with whatever the
+    listed rows leave out gathered into a final row so both columns still read as a full 100%.
+
+    Like the placement mix, this is where Meta took the creative, not who anyone targeted."""
     total = sum(audience.values())
     sib_total = sum(siblings.values())
     if not total or not sib_total:
@@ -716,7 +721,14 @@ def _audience_slices(audience: AudienceSums, siblings: AudienceSums) -> list[Aud
         for (age, gender), impressions in audience.items()
     ]
     slices.sort(key=lambda s: s.share, reverse=True)
-    return slices[:AUDIENCE_SLICES]
+    shown = slices[:AUDIENCE_SLICES]
+    rest = 1 - sum(s.share for s in shown)
+    sib_rest = 1 - sum(s.baseline_share for s in shown)
+    if rest > AUDIENCE_REMAINDER_FLOOR or sib_rest > AUDIENCE_REMAINDER_FLOOR:
+        shown.append(
+            AudienceSlice("Everyone else", "other", "other", max(rest, 0), max(sib_rest, 0))
+        )
+    return shown
 
 
 def context_tier(

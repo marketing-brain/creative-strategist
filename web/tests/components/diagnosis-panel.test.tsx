@@ -156,7 +156,11 @@ describe('DiagnosisPanel', () => {
                 { platform: 'facebook', position: 'feed', label: 'Facebook · Feed', impressions: 127000, share: 0.31, hook_rate: 0.39, hook_fit: -0.34, link_ctr: 0.021, ctr_fit: -0.19, readable: true },
                 { platform: 'facebook', position: 'marketplace', label: 'Facebook · Marketplace', impressions: 800, share: 0.02, hook_rate: null, hook_fit: null, link_ctr: null, ctr_fit: null, readable: false },
               ],
-              audience: [{ label: '25-34 female', age: '25-34', gender: 'female', share: 0.41, baseline_share: 0.29 }],
+              audience: [
+                { label: '25-34 female', age: '25-34', gender: 'female', share: 0.41, baseline_share: 0.29 },
+                { label: '35-44 female', age: '35-44', gender: 'female', share: 0.27, baseline_share: 0.3 },
+                { label: 'Everyone else', age: 'other', gender: 'other', share: 0.32, baseline_share: 0.41 },
+              ],
             }
           : t
       ),
@@ -167,7 +171,10 @@ describe('DiagnosisPanel', () => {
     expect(screen.getByText(/Facebook · Marketplace/)).toBeInTheDocument();
     expect(screen.getByText('· thin')).toBeInTheDocument();
     expect(screen.getByText(/Fit is measured against 6 other creatives in the same ad set/)).toBeInTheDocument();
-    expect(screen.getByText(/25-34 female 41%/)).toBeInTheDocument();
-    expect(screen.getByText(/peers 29%/)).toBeInTheDocument();
+    expect(screen.getByText('25-34 female')).toBeInTheDocument();
+    expect(screen.getByText('Everyone else')).toBeInTheDocument();
+    expect(screen.getByText('+12 pts')).toBeInTheDocument();
+    expect(screen.getByText('−3 pts')).toBeInTheDocument();
+    expect(screen.getByText(/Who Meta found, not who was targeted/)).toBeInTheDocument();
   });
 });

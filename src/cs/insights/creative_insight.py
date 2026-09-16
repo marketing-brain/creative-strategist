@@ -307,11 +307,14 @@ def _layer_lines(tier: Tier, d: DiagnosedCreative, duration_ms: int | None) -> l
             if not p.readable:
                 parts.append("too little volume to rate")
             lines.append(f"  {p.label}: {share} · " + "; ".join(parts))
-        for s in tier.audience or []:
-            lines.append(
-                f"  audience Meta found {s.label}: {_pct(s.share, 0)} of this ad's impressions "
-                f"vs {_pct(s.baseline_share, 0)} for the comparison set"
-            )
+        if tier.audience:
+            lines.append("who Meta found, not who was targeted (share of impressions):")
+            for s in tier.audience:
+                gap = (s.share - s.baseline_share) * 100
+                lines.append(
+                    f"  {s.label}: {_pct(s.share, 0)} vs {_pct(s.baseline_share, 0)} for the "
+                    f"comparison set ({'+' if gap >= 0 else '-'}{abs(gap):.0f} points)"
+                )
     return lines
 
 

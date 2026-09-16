@@ -5,6 +5,7 @@ from decimal import Decimal
 import pytest
 
 from cs.insights.diagnosis import (
+    AUDIENCE_SLICES,
     LIFT_THRESHOLD,
     PLACEMENT_SHARE_FLOOR,
     Siblings,
@@ -385,6 +386,34 @@ def test_audience_mix_is_measured_against_siblings_and_never_sets_the_status():
         ("25-34 female", 0.75, 0.5),
         ("35-44 female", 0.25, 0.5),
     ]
+
+
+def test_audience_gathers_what_the_listed_rows_leave_out():
+    """Both columns have to read as a whole 100%, or a reader cannot tell a concentrated
+    audience from a long tail that simply was not listed."""
+    window = {
+        REELS: sums(impressions=8_000, link_clicks=80, video_3s_views=2_000),
+        FEED: sums(impressions=4_000, link_clicks=40, video_3s_views=1_000),
+    }
+    ages = ("18-24", "25-34", "35-44", "45-54", "55-64", "65+", "13-17")
+    mine = {(age, "female"): 1_000 - i * 100 for i, age in enumerate(ages)}
+    peers = {(age, "female"): 1_000 for age in ages}
+    t = context_tier("video", window, _sibs(), SIX, mine, peers)
+    assert len(t.audience) == AUDIENCE_SLICES + 1
+    rest = t.audience[-1]
+    assert rest.label == "Everyone else" and rest.age == "other"
+    assert sum(s.share for s in t.audience) == pytest.approx(1.0)
+    assert sum(s.baseline_share for s in t.audience) == pytest.approx(1.0)
+
+
+def test_audience_has_no_remainder_row_when_every_slice_is_listed():
+    window = {
+        REELS: sums(impressions=8_000, link_clicks=80, video_3s_views=2_000),
+        FEED: sums(impressions=4_000, link_clicks=40, video_3s_views=1_000),
+    }
+    mine = {("25-34", "female"): 6_000, ("35-44", "female"): 4_000}
+    t = context_tier("video", window, _sibs(), SIX, mine, mine)
+    assert [s.label for s in t.audience] == ["25-34 female", "35-44 female"]
 
 
 def test_context_never_becomes_the_broken_layer():
