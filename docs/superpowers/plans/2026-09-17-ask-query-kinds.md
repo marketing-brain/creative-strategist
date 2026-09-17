@@ -1951,3 +1951,37 @@ git commit -m "docs(plan): ask query kinds, org 3 real-data gate results
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
+
+## Completion note
+
+Ran `scripts/ask_probe.py` against org 3's video ad account (`01a09811-497e-7000-989e-4ffdf8aff83d`, latest done run, 56 units) with all fifteen reference questions and paraphrases, live map and writer, `draws=300`. One run only; no reference question misrouted, so `MAP_SYSTEM` was not touched and there was no second attempt.
+
+- **Unmappable:** 1 of 15 (`Which part of the wrong-supplement reveal concept is carrying it?` — the map correctly chose `recipe` with a named anchor, but no unit's headline, concept summary or concept tags contains "wrong-supplement reveal", so anchor resolution reported unmappable. This is a legitimate no-match, not a routing failure — the paraphrase invents a concept that does not exist among org 3's tagged creatives.)
+- **Misrouted (wrong kind):** 0. All fourteen mappable questions, including all five reference questions, landed on the intended kind.
+- **Answers that contradicted their own facts:** none found. Spot-checked two answers number-by-number against their printed facts: the spend_gap answer to "Where is our money going versus where the evidence points?" reproduces all seven percentages (8%, 39%, 42%, 12%, 15%, 47%, 73%, 20%, 14%) exactly as printed in F1–F7; the recipe answer to "Which single ingredient is doing the work in our best recipe?" reproduces all six cited percentages (53%, 18%, 72%, 35%, 28%, 27%) exactly as printed in F2/F3/F6/F20/F22/F29. No fabricated numbers in either.
+- **Org 3 verdicts for the five reference questions:**
+  1. "Where is our money going versus where the evidence points?" — spend_gap, answerable
+  2. "Which proven ingredients have we never combined?" — untried, answerable
+  3. "What separates our best CPA video from the ads most like it that failed?" — nearest, answerable
+  4. "Is the expert effect real, or just where we spent the money?" — controlled, directional
+  5. "Which single ingredient is doing the work in our best recipe?" — recipe, answerable
+
+| # | Question | Kind chosen | Verdict | Judgement |
+|---|---|---|---|---|
+| 1 | Where is our money going versus where the evidence points? | spend_gap | answerable | right |
+| 2 | Which proven ingredients have we never combined? | untried | answerable | right |
+| 3 | What separates our best CPA video from the ads most like it that failed? | nearest | answerable | right |
+| 4 | Is the expert effect real, or just where we spent the money? | controlled | directional | right |
+| 5 | Which single ingredient is doing the work in our best recipe? | recipe | answerable | right |
+| 6 | Are we overspending on anything the data says doesn't work? | spend_gap | answerable | right |
+| 7 | What's cheap and working that we should put more budget behind? | spend_gap | directional | right |
+| 8 | What should the next video look like, based on what's proven? | untried | answerable | right |
+| 9 | Give me a combination of winning elements we haven't shot yet | untried | answerable | right |
+| 10 | Why do the ads that look like our top converter underperform it? | nearest | answerable | right |
+| 11 | Compare the pharmacist ad to its closest lookalikes | nearest | answerable | right |
+| 12 | Does expert on camera still win once you control for how much we spent on it? | controlled | directional | right |
+| 13 | Is the long-video advantage just a spend artefact? | controlled | answerable | right |
+| 14 | What makes our biggest-spend ad work? | recipe | answerable | right |
+| 15 | Which part of the wrong-supplement reveal concept is carrying it? | unmappable | — | right |
+
+Notes for the record, not fixes: (a) question 14 maps "biggest-spend ad" to the best-CPA anchor per `MAP_SYSTEM`'s existing "our biggest ad" -> `{"best": "cpa"}` example (Task 7, prior work) — the resulting anchor ($2,317 spend) is not literally the account's highest spender ($146k+ elsewhere in the run); the `read as` line discloses the best-CPA interpretation honestly, so this is a design choice already baked into the map prompt, not a Task 10 routing bug, and out of this task's scope to change. (b) the recipe answers occasionally narrate a dimension's "within" clause loosely (e.g. attributing a `visual_motifs=platform_caption_style | within products_mentioned=ashwagandha` interaction to "ashwagandha" in prose) while still citing the correct grounded number — a wording nuance, not a wrong number or wrong citation.
