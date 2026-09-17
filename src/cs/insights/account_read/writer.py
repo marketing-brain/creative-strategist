@@ -21,6 +21,9 @@ METRIC_NAME = {
     "cpa": "CPA",
 }
 MAX_MAIN_UNFLAGGED, MAX_MAIN_FLAGGED, MAX_UNITS_LISTED = 60, 20, 60
+# Interactions are numerous; the brief carries the sharpest lines per group, strongest groups first.
+MAX_GROUPS, MAX_LINES_PER_GROUP = 20, 10
+GRADE_ORDER = {"strong": 0, "suggestive": 1, "directional": 2}
 
 
 def fmt_val(metric: str, v: float) -> str:
@@ -90,16 +93,22 @@ def build_brief(run: RunResult) -> str:
     unflagged = [with_units(t) for t in main if not t.confounds][:MAX_MAIN_UNFLAGGED]
     flagged = [with_units(t) for t in main if t.confounds][:MAX_MAIN_FLAGGED]
 
-    inter: dict[str, list[str]] = {}
+    by_group: dict[str, list[Test]] = {}
     for t in run.tests:
         if t.group is not None and t.grade != "thin":
-            inter.setdefault(t.group, []).append("  " + pattern_line(ids[id(t)], t))
-    inter_text = (
-        "\n".join(
-            f"\nwithin {g.replace('_', ' ')}:\n" + "\n".join(lines) for g, lines in inter.items()
+            by_group.setdefault(t.group, []).append(t)
+    groups = sorted(by_group.items(), key=lambda kv: -len(kv[1]))[:MAX_GROUPS]
+    inter_blocks = []
+    for g, ts in groups:
+        ts = sorted(ts, key=lambda t: (GRADE_ORDER.get(t.grade, 3), len(t.confounds), t.p))
+        lines = ["  " + pattern_line(ids[id(t)], t) for t in ts[:MAX_LINES_PER_GROUP]]
+        more = len(ts) - len(lines)
+        if more > 0:
+            lines.append(f"  (+{more} weaker lines omitted)")
+        inter_blocks.append(
+            f"\nwithin {g.replace('_', ' ')} ({len(ts)} graded lines):\n" + "\n".join(lines)
         )
-        or "\n  none"
-    )
+    inter_text = "\n".join(inter_blocks) or "\n  none"
 
     ov = [
         f"  {o['a'][0].replace('_', ' ')} = {o['a'][1]}  and  "
