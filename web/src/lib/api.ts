@@ -39,8 +39,6 @@ export const api = {
   dimensions: () => apiFetch<import('./types').Dimension[]>('/tags/dimensions'),
   dimensionValues: (name: string) => apiFetch<import('./types').DimensionValue[]>(`/tags/dimensions/${encodeURIComponent(name)}/values`),
   creativeTranscript: (id: string) => apiFetch<{ transcript: string | null }>(`/creatives/${id}/transcript`),
-  insights: (kind: string, offset = 0) =>
-    apiFetch<import('./types').Paginated<import('./types').Insight>>(`/insights?kind=${kind}&offset=${offset}`),
   fatigue: (offset = 0) =>
     apiFetch<import('./types').Paginated<import('./types').Insight>>(`/fatigue?offset=${offset}`),
   briefs: () => apiFetch<import('./types').Brief[]>('/briefs'),
