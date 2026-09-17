@@ -232,3 +232,41 @@ def test_untried_empty_with_one_candidate():
     assert out.empty_reason == (
         "Fewer than two attributes have clean positive evidence on these metrics."
     )
+
+
+def test_nearest_finds_underperforming_lookalikes_and_the_diff():
+    base = [("messenger", "creator_on_camera"), ("angles", "symptom_relief"), ("setting", "home")]
+    d = ("proof_devices", "expert_credential")
+    e = ("registers", "urgency")
+    anchor = _unit("w", base + [d], link_clicks=1200, headline="Winner")
+    better = _unit("z", base + [d], link_clicks=1500)  # outperforms: excluded
+    near = [_unit(f"n{i}", base + [e], link_clicks=400) for i in range(6)]  # six, keep five
+    far = [_unit(f"f{i}", [("messenger", "graphic_only")], link_clicks=300) for i in range(2)]
+    tests = [
+        _test(*d, change=0.5, cell_shas=["w", "z"]),
+        _test(*d, change=0.9, metric="cpa", cell_shas=["w", "z"]),  # not in layer, ignored
+    ]
+    out = az.nearest([anchor, better] + near + far, tests, anchor, "link_ctr", ("link_ctr",))
+    assert out.empty_reason is None
+    assert out.facts[0] == 'anchor | "Winner" | $1,000 spend | 0 copies | link CTR 6.0%'
+    neighbours = [f for f in out.facts if f.startswith("neighbour |")]
+    assert len(neighbours) == 5
+    # Anchor {3 base, d} against neighbour {3 base, e}: 3 shared of 5 -> 60%.
+    assert all(f.endswith("| 60% facet overlap") for f in neighbours)
+    assert "anchor has, neighbours lack | proof devices = expert credential (P1)" in out.facts
+    assert "neighbours have, anchor lacks | registers = urgency" in out.facts
+    assert out.tests == [tests[0]]
+
+
+def test_nearest_ignores_numeric_tercile_facets_in_similarity():
+    a = _unit("a", [("duration_s", "high"), ("messenger", "creator_on_camera")], link_clicks=900)
+    b = _unit("b", [("duration_s", "low"), ("messenger", "creator_on_camera")], link_clicks=400)
+    out = az.nearest([a, b], [], a, "link_ctr", ("link_ctr",))
+    assert any(f.endswith("| 100% facet overlap") for f in out.facts)
+
+
+def test_nearest_empty_when_nothing_underperforms():
+    a = _unit("a", [("setting", "home")], link_clicks=400)
+    b = _unit("b", [("setting", "home")], link_clicks=900)
+    out = az.nearest([a, b], [], a, "link_ctr", ("link_ctr",))
+    assert out.empty_reason == 'No file does worse than "Ad a" on link CTR.'

@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from itertools import combinations
 
+from cs.insights.account_read.facets import NUMERIC_DIMS
 from cs.insights.account_read.stats import MIN_PURCHASES, pooled, unit_rates
 from cs.insights.account_read.types import LOWER_IS_BETTER, METRICS, RATE_METRICS, Test, Unit
 from cs.insights.account_read.writer import METRIC_NAME, fmt_val, label
@@ -176,4 +177,77 @@ def untried(
         out.empty_reason = (
             "Every compatible pair of proven attributes is already carried by at least two files."
         )
+    return out
+
+
+NEIGHBOURS = 5
+DIFF_MIN = 3  # a facet joins the diff when at least this many neighbours disagree with the anchor
+
+
+def _choices(u: Unit) -> set[tuple[str, str]]:
+    """Facets a maker chose; tercile bins are outcomes of the run, not choices."""
+    return {f for f in u.facets if f[0] not in NUMERIC_DIMS}
+
+
+def nearest(
+    units: list[Unit], tests: list[Test], anchor: Unit, metric: str, metrics: tuple[str, ...]
+) -> Analysis:
+    """The files most like the anchor by facet overlap that do worse than it on the metric,
+    and the facets that separate them."""
+    av = unit_metric(anchor, metric)
+    if av is None:
+        return Analysis(
+            empty_reason=f'"{anchor.headline}" is below the floor for {METRIC_NAME[metric]}.'
+        )
+    choice = _choices(anchor)
+    scored: list[tuple[float, float, Unit]] = []
+    for u in units:
+        if u.sha256 == anchor.sha256:
+            continue
+        v = unit_metric(u, metric)
+        if v is None:
+            continue
+        worse = v > av if metric in LOWER_IS_BETTER else v < av
+        if not worse:
+            continue
+        uf = _choices(u)
+        j = len(choice & uf) / len(choice | uf) if (choice | uf) else 0.0
+        scored.append((j, v, u))
+    scored.sort(key=lambda x: (-x[0], x[2].sha256))
+    near = scored[:NEIGHBOURS]
+    if not near:
+        return Analysis(
+            empty_reason=f'No file does worse than "{anchor.headline}" on {METRIC_NAME[metric]}.'
+        )
+    out = Analysis()
+    out.facts.append(f"anchor | {unit_line(anchor, metric)}")
+    for j, _, u in near:
+        out.facts.append(f"neighbour | {unit_line(u, metric)} | {j * 100:.0f}% facet overlap")
+    sets = [_choices(u) for _, _, u in near]
+    need = min(DIFF_MIN, len(near))
+    only_anchor = sorted(f for f in choice if sum(1 for s in sets if f not in s) >= need)
+    only_near = sorted(
+        f for f in set().union(*sets) - choice if sum(1 for s in sets if f in s) >= need
+    )
+    best: dict[tuple[str, str], Test] = {}
+    for t in tests:
+        if t.group is None and t.metric in metrics:
+            k = (t.dimension, t.value)
+            if k not in best or t.p < best[k].p:
+                best[k] = t
+
+    def cite(f: tuple[str, str]) -> str:
+        t = best.get(f)
+        if t is None:
+            return ""
+        if t not in out.tests:
+            out.tests.append(t)
+        return f" (P{out.tests.index(t) + 1})"
+
+    for f in only_anchor:
+        out.facts.append(f"anchor has, neighbours lack | {facet_words(f)}{cite(f)}")
+    for f in only_near:
+        out.facts.append(f"neighbours have, anchor lacks | {facet_words(f)}{cite(f)}")
+    if not only_anchor and not only_near:
+        out.facts.append("no facet separates the anchor from its neighbours")
     return out
