@@ -11,10 +11,19 @@ from cs.tagging.vocab_merge import (
     JUDGE_SYSTEM,
     FakeJudge,
     GatewayJudge,
+    Merge,
     Pair,
     SlugContext,
+    Verdict,
+    apply_merges,
+    decide_review,
     judge_schema,
     judge_user_text,
+    list_review,
+    plan_merges,
+    record_rejections,
+    record_review,
+    revert,
     slug_context,
 )
 
@@ -209,3 +218,173 @@ async def test_fake_judge():
     pairs = [Pair("a_slug", "b_slug", 0.9), Pair("c_slug", "d_slug", 0.8)]
     verdicts = await FakeJudge({("b_slug", "a_slug")}).judge("topics", "d", pairs, {})
     assert [v.same_concept for v in verdicts] == [True, False]
+
+
+def _v(a, b, cos, same):
+    return Verdict(Pair(*sorted((a, b)), cos), same, "r")
+
+
+def test_plan_merges_union_find_canonical_by_count_then_length():
+    counts = {
+        "benadryl_swap": 3,
+        "benadryl_sleep_alternative": 3,
+        "benadryl_alternative": 1,
+        "melatonin": 5,
+    }
+    verdicts = [
+        _v("benadryl_swap", "benadryl_sleep_alternative", 0.85, True),
+        _v("benadryl_alternative", "benadryl_sleep_alternative", 0.90, True),
+        _v("melatonin", "benadryl_swap", 0.75, False),
+    ]
+    plan = plan_merges(verdicts, counts)
+    # tie on count 3 -> shortest slug wins
+    assert sorted((m.slug, m.into_slug) for m in plan.apply) == [
+        ("benadryl_alternative", "benadryl_swap"),
+        ("benadryl_sleep_alternative", "benadryl_swap"),
+    ]
+    assert plan.review == [] and [v.pair.a for v in plan.rejected] == ["benadryl_swap"]
+
+
+def test_plan_merges_routes_low_cosine_groups_to_review():
+    counts = {"gummy": 2, "easy_gummy_format": 4}
+    plan = plan_merges([_v("gummy", "easy_gummy_format", 0.74, True)], counts)
+    assert plan.apply == [] and [(m.slug, m.into_slug) for m in plan.review] == [
+        ("gummy", "easy_gummy_format")
+    ]
+
+
+def test_plan_merges_same_concept_false_is_rejected_even_when_similar():
+    plan = plan_merges(
+        [_v("magnesium", "magnesium_glycinate", 0.86, False)],
+        {"magnesium": 5, "magnesium_glycinate": 1},
+    )
+    assert plan.apply == [] and plan.review == [] and len(plan.rejected) == 1
+
+
+async def test_apply_merges_rewrites_vocab_and_open_tag_values_but_not_raw(db, org_id):
+    await _seed_vocab(db, org_id, "features_mentioned", {"glycinate": 2, "magnesium_glycinate": 1})
+    await _open_rows(
+        db,
+        org_id,
+        "features_mentioned",
+        [("glycinate", "e1"), ("magnesium_glycinate", "e2")],
+    )
+    await apply_merges(
+        db,
+        org_id,
+        "features_mentioned",
+        [Merge("magnesium_glycinate", "glycinate", 0.92, "same compound")],
+        source="auto",
+    )
+    vocab_rows = {
+        r["slug"]: (r["canonical_slug"], r["count"])
+        for r in await db.fetch(
+            "SELECT slug, canonical_slug, count FROM tag_vocab WHERE org_id=$1", org_id
+        )
+    }
+    assert vocab_rows == {"glycinate": ("glycinate", 3), "magnesium_glycinate": ("glycinate", 0)}
+    tags = await db.fetch(
+        "SELECT value, raw_value FROM tag "
+        "WHERE org_id=$1 AND dimension='features_mentioned' ORDER BY raw_value",
+        org_id,
+    )
+    assert [(t["value"], t["raw_value"]) for t in tags] == [
+        ("glycinate", "glycinate"),
+        ("glycinate", "magnesium_glycinate"),
+    ]
+    log = await db.fetchrow(
+        "SELECT slug, into_slug, status, source, reason FROM tag_vocab_merge WHERE org_id=$1",
+        org_id,
+    )
+    assert tuple(log) == ("magnesium_glycinate", "glycinate", "applied", "auto", "same compound")
+    # hints now show the merged count on the canonical only
+    assert await vocab.hints(db, org_id, "features_mentioned", 10) == [("glycinate", 3)]
+
+
+async def test_review_records_approve_and_reject(db, org_id):
+    await _seed_vocab(db, org_id, "concept_tags", {"gummy": 2, "easy_gummy_format": 4})
+    await _open_rows(db, org_id, "concept_tags", [("gummy", "e")])
+    await record_review(
+        db, org_id, "concept_tags", [Merge("gummy", "easy_gummy_format", 0.74, "maybe")]
+    )
+    await record_rejections(db, org_id, "concept_tags", [_v("gummy", "melatonin", 0.7, False)])
+    pending = await list_review(db, org_id)
+    assert [(r["slug"], r["into_slug"], r["status"]) for r in pending] == [
+        ("gummy", "easy_gummy_format", "review")
+    ]
+    await decide_review(db, pending[0]["id"], approve=True)
+    row = await db.fetchrow(
+        "SELECT status, source, decided_at FROM tag_vocab_merge WHERE id=$1", pending[0]["id"]
+    )
+    assert (
+        row["status"] == "applied" and row["source"] == "manual" and row["decided_at"] is not None
+    )
+    assert (
+        await db.fetchval(
+            "SELECT canonical_slug FROM tag_vocab "
+            "WHERE org_id=$1 AND dimension='concept_tags' AND slug='gummy'",
+            org_id,
+        )
+        == "easy_gummy_format"
+    )
+    assert (
+        await db.fetchval(
+            "SELECT value FROM tag WHERE org_id=$1 AND dimension='concept_tags'", org_id
+        )
+        == "easy_gummy_format"
+    )
+    assert await list_review(db, org_id) == []
+    rejected = await db.fetchval(
+        "SELECT count(*) FROM tag_vocab_merge WHERE org_id=$1 AND status='rejected'", org_id
+    )
+    assert rejected == 1
+
+
+async def test_decide_review_reject_and_revert(db, org_id):
+    await _seed_vocab(db, org_id, "concept_tags", {"gummy": 2, "easy_gummy_format": 4})
+    await _open_rows(db, org_id, "concept_tags", [("gummy", "e"), ("easy_gummy_format", "f")])
+    await record_review(
+        db, org_id, "concept_tags", [Merge("gummy", "easy_gummy_format", 0.74, "maybe")]
+    )
+    (pending,) = await list_review(db, org_id)
+    await decide_review(db, pending["id"], approve=False)
+    assert (
+        await db.fetchval("SELECT status FROM tag_vocab_merge WHERE id=$1", pending["id"])
+        == "rejected"
+    )
+    # a rejected pair no longer surfaces as a candidate (Task 2 contract)
+    await vocab_merge.embed_missing(db, FakeEmbedder(), org_id, "concept_tags", MODEL)
+    assert await vocab_merge.candidate_pairs(db, org_id, "concept_tags", MODEL, floor=-1.0) == []
+    # apply then revert restores vocab and tag values from raw_value
+    await apply_merges(
+        db, org_id, "concept_tags", [Merge("gummy", "easy_gummy_format", 0.9, "r")], source="manual"
+    )
+    await revert(db, org_id, "concept_tags", "gummy")
+    assert (
+        await db.fetchval(
+            "SELECT canonical_slug FROM tag_vocab "
+            "WHERE org_id=$1 AND dimension='concept_tags' AND slug='gummy'",
+            org_id,
+        )
+        == "gummy"
+    )
+    values = sorted(
+        r["value"]
+        for r in await db.fetch(
+            "SELECT value FROM tag WHERE org_id=$1 AND dimension='concept_tags'", org_id
+        )
+    )
+    assert values == ["easy_gummy_format", "gummy"]
+    counts = {
+        r["slug"]: r["count"]
+        for r in await db.fetch("SELECT slug, count FROM tag_vocab WHERE org_id=$1", org_id)
+    }
+    assert counts == {"gummy": 1, "easy_gummy_format": 1}  # recomputed: one run carries each
+    assert (
+        await db.fetchval(
+            "SELECT status FROM tag_vocab_merge "
+            "WHERE org_id=$1 AND slug='gummy' AND status='reverted'",
+            org_id,
+        )
+        == "reverted"
+    )
