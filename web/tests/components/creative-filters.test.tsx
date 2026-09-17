@@ -47,6 +47,35 @@ describe('CreativeFilters', () => {
     expect(push).toHaveBeenCalledWith('/creatives?dimension=hook_type&value=question');
   });
 
+  it('pushes the sort metric, and drops it again for the newest-first default', async () => {
+    render(<CreativeFilters accounts={[]} dimensions={[]} />);
+    await userEvent.click(screen.getByLabelText(/sort by/i));
+    await userEvent.click(await screen.findByRole('option', { name: 'Spend (30d)' }));
+    expect(push).toHaveBeenCalledWith('/creatives?sort=spend');
+
+    params = new URLSearchParams('sort=spend');
+    cleanup();
+    render(<CreativeFilters accounts={[]} dimensions={[]} />);
+    await userEvent.click(screen.getByLabelText(/sort by/i));
+    await userEvent.click(await screen.findByRole('option', { name: 'Newest' }));
+    expect(push).toHaveBeenCalledWith('/creatives');
+  });
+
+  it('toggles sort direction and keeps the chosen metric', async () => {
+    params = new URLSearchParams('sort=ctr');
+    render(<CreativeFilters accounts={[]} dimensions={[]} />);
+    await userEvent.click(screen.getByLabelText(/high to low/i));
+    expect(push).toHaveBeenCalledWith('/creatives?sort=ctr&order=asc');
+  });
+
+  it('returns to page 1 when the sort changes', async () => {
+    params = new URLSearchParams('sort=spend&page=4');
+    render(<CreativeFilters accounts={[]} dimensions={[]} />);
+    await userEvent.click(screen.getByLabelText(/sort by/i));
+    await userEvent.click(await screen.findByRole('option', { name: 'CTR (30d)' }));
+    expect(push).toHaveBeenCalledWith('/creatives?sort=ctr');
+  });
+
   it('clears a stale value when the dimension changes', async () => {
     params = new URLSearchParams('dimension=hook_type&value=question');
     render(<CreativeFilters accounts={[]} dimensions={dimensions} />);

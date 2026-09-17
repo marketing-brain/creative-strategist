@@ -49,6 +49,8 @@ async def list_creatives(
     value: str | None = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    sort: str = Query("recent", pattern="^(recent|spend|impressions|ctr)$"),
+    order: str = Query("desc", pattern="^(desc|asc)$"),
     auth: AuthContext = Depends(current_auth),
     db: Database = Depends(get_db),
     blobs: BlobStore = Depends(get_blobs),
@@ -56,7 +58,7 @@ async def list_creatives(
     if bool(dimension) != bool(value):
         raise HTTPException(422, "dimension and value must be provided together")
     rows = await repo.list_creatives(
-        db, auth.org_id, account_id, format, limit, offset, dimension, value
+        db, auth.org_id, account_id, format, limit, offset, dimension, value, sort, order
     )
     out = []
     for r in rows:

@@ -271,3 +271,111 @@ async def test_creative_metrics_counts_are_integers(client, db, settings):
         assert isinstance(row[field], int), field
     assert row["impressions"] == 1000 and row["clicks"] == 20
     assert row["spend"] == 10.0
+
+
+async def _seed_spender(db, org_id, acct, slug, spend, impressions, clicks):
+    """A creative with one recent metric row, or none at all when spend is None."""
+    cid, _ = await repo.upsert_creative(
+        db,
+        org_id,
+        acct,
+        PlatformCreative(slug, "image", "H", "P", None, "SHOP_NOW", "https://x", None, None, {}),
+        "raw",
+        format_source="manual_review",
+    )
+    if spend is None:
+        return cid
+    await repo.upsert_ad(
+        db, org_id, acct, PlatformAd(f"ad_{slug}", "A", "ACTIVE", None, None, slug), cid
+    )
+    await repo.upsert_metrics(
+        db,
+        org_id,
+        acct,
+        [
+            MetricRow(
+                f"ad_{slug}",
+                date.today() - timedelta(days=5),
+                "facebook:feed",
+                Decimal(spend),
+                impressions,
+                clicks,
+                clicks,
+                Decimal("0"),
+                Decimal("0"),
+                0,
+                0,
+                0,
+                0,
+                {},
+            )
+        ],
+    )
+    return cid
+
+
+async def _sorted_ids(client, query, limit=200):
+    body = (await client.get(f"/creatives?limit={limit}&{query}", headers=H)).json()
+    return [i["id"] for i in body["items"]]
+
+
+async def test_creatives_sort_by_spend(client, db, settings):
+    org_id, acct, seeded, _ = await _seed(db, settings, client)
+    big = await _seed_spender(db, org_id, acct, "c_big", "500", 5000, 50)
+    small = await _seed_spender(db, org_id, acct, "c_small", "5", 100, 1)
+
+    desc = await _sorted_ids(client, "sort=spend&order=desc")
+    assert desc[0] == str(big)
+    assert desc.index(str(big)) < desc.index(str(small))
+
+    asc = await _sorted_ids(client, "sort=spend&order=asc")
+    assert asc.index(str(small)) < asc.index(str(big))
+    assert asc[-1] == str(big)
+
+
+async def test_creatives_sort_by_impressions(client, db, settings):
+    org_id, acct, _, _ = await _seed(db, settings, client)
+    many = await _seed_spender(db, org_id, acct, "c_many", "1", 9000, 10)
+    few = await _seed_spender(db, org_id, acct, "c_few", "900", 10, 1)
+
+    desc = await _sorted_ids(client, "sort=impressions&order=desc")
+    assert desc[0] == str(many)
+    assert desc.index(str(many)) < desc.index(str(few))
+
+
+async def test_creatives_sort_by_ctr_keeps_undelivered_last_both_ways(client, db, settings):
+    org_id, acct, _, _ = await _seed(db, settings, client)
+    high = await _seed_spender(db, org_id, acct, "c_high", "10", 1000, 100)  # 10% CTR
+    low = await _seed_spender(db, org_id, acct, "c_low", "10", 1000, 5)  # 0.5% CTR
+    none = await _seed_spender(db, org_id, acct, "c_none", None, 0, 0)  # no metrics -> NULL CTR
+
+    desc = await _sorted_ids(client, "sort=ctr&order=desc")
+    assert desc[0] == str(high)
+    assert desc.index(str(high)) < desc.index(str(low)) < desc.index(str(none))
+
+    # Ascending means worst real CTR first, not "never delivered" first.
+    asc = await _sorted_ids(client, "sort=ctr&order=asc")
+    assert asc.index(str(low)) < asc.index(str(high)) < asc.index(str(none))
+    assert asc[-1] == str(none)
+
+
+async def test_creatives_sort_is_validated(client, db, settings):
+    await _seed(db, settings, client)
+    assert (await client.get("/creatives?sort=spend; DROP TABLE", headers=H)).status_code == 422
+    assert (await client.get("/creatives?sort=clicks", headers=H)).status_code == 422
+    assert (await client.get("/creatives?order=sideways", headers=H)).status_code == 422
+    assert (await client.get("/creatives?sort=ctr&order=asc", headers=H)).status_code == 200
+
+
+async def test_creatives_paging_is_stable_across_tied_rows(client, db, settings):
+    """Every creative ties at spend 0, so only the id tiebreak keeps paging from repeating rows."""
+    org_id, acct, _, _ = await _seed(db, settings, client)
+    for i in range(6):
+        await _seed_spender(db, org_id, acct, f"c_tied{i}", None, 0, 0)
+
+    seen = []
+    for offset in (0, 3, 6):
+        page = await _sorted_ids(client, f"sort=spend&order=desc&offset={offset}", limit=3)
+        seen.extend(page)
+    # _seed adds one creative with spend, plus the six tied ones.
+    assert len(seen) == len(set(seen)) == 7

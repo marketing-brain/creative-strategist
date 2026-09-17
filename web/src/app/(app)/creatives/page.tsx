@@ -25,10 +25,13 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
       q.set('dimension', sp.dimension);
       q.set('value', sp.value);
     }
+    if (sp.sort) q.set('sort', sp.sort);
+    if (sp.order) q.set('order', sp.order);
     q.set('limit', String(PAGE_SIZE));
     q.set('offset', String((p - 1) * PAGE_SIZE));
     return q;
   };
+  // Pagination links carry the sort too, or page 2 would silently revert to newest-first.
   const makeHref = (p: number) => {
     const q = new URLSearchParams();
     if (sp.account_id) q.set('account_id', sp.account_id);
@@ -37,6 +40,8 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
       q.set('dimension', sp.dimension);
       q.set('value', sp.value);
     }
+    if (sp.sort) q.set('sort', sp.sort);
+    if (sp.order) q.set('order', sp.order);
     if (p > 1) q.set('page', String(p));
     const s = q.toString();
     return `/creatives${s ? `?${s}` : ''}`;

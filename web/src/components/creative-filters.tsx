@@ -1,5 +1,7 @@
 'use client';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { ArrowDown, ArrowUp } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { Dimension } from '@/lib/types';
 
@@ -8,6 +10,13 @@ const formats = [
   { value: 'video', label: 'Video' },
   { value: 'carousel', label: 'Carousel' },
   { value: 'unresolved', label: 'Unresolved' },
+];
+
+const sorts = [
+  { value: 'recent', label: 'Newest' },
+  { value: 'spend', label: 'Spend (30d)' },
+  { value: 'impressions', label: 'Impressions (30d)' },
+  { value: 'ctr', label: 'CTR (30d)' },
 ];
 
 export function CreativeFilters({
@@ -33,6 +42,8 @@ export function CreativeFilters({
     router.push(`/creatives${s ? `?${s}` : ''}`);
   };
 
+  const sort = params.get('sort') ?? 'recent';
+  const order = params.get('order') ?? 'desc';
   const filterableDimensions = dimensions.filter((d) => d.values || d.kind === 'open');
   const selectedDimension = params.get('dimension') ?? '';
   const selected = filterableDimensions.find((d) => d.name === selectedDimension);
@@ -93,6 +104,26 @@ export function CreativeFilters({
           </SelectContent>
         </Select>
       )}
+      <Select value={sort} onValueChange={(v) => update({ sort: v === 'recent' ? null : v })}>
+        <SelectTrigger aria-label="Sort by" className="w-44">
+          <SelectValue>{(v: string) => sorts.find((s) => s.value === v)?.label ?? 'Newest'}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {sorts.map((s) => (
+            <SelectItem key={s.value} value={s.value}>
+              {s.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Button
+        variant="outline"
+        size="icon"
+        aria-label={order === 'desc' ? 'Sorted high to low, switch to low to high' : 'Sorted low to high, switch to high to low'}
+        onClick={() => update({ order: order === 'desc' ? 'asc' : null })}
+      >
+        {order === 'desc' ? <ArrowDown aria-hidden="true" /> : <ArrowUp aria-hidden="true" />}
+      </Button>
     </div>
   );
 }

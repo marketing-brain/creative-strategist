@@ -93,6 +93,33 @@ def _tag_filter_sql(dim_param: str, value_param: str) -> str:
 """
 
 
+# Sort keys the API accepts, mapped to the expression they order by. The caller must pass a
+# key from this dict: it is interpolated into the query, so it can never be user text.
+# CTR is NULL where nothing was delivered, which is why every sort runs NULLS LAST below.
+CREATIVE_SORTS = {
+    "recent": "c.first_seen_at",
+    "spend": "COALESCE(m.spend, 0)",
+    "impressions": "COALESCE(m.impressions, 0)",
+    "ctr": "m.clicks::numeric / NULLIF(m.impressions, 0)",
+}
+CREATIVE_ORDERS = ("desc", "asc")
+
+
+def _order_by(sort: str, order: str) -> str:
+    """ORDER BY for the creative list.
+
+    NULLS LAST in both directions: a creative with no impressions has no CTR, and ascending
+    CTR should mean "worst real CTR first", not "everything that never ran first".
+
+    c.id breaks ties so paging is stable. Zero-spend creatives all tie at 0, and without a
+    unique tiebreak Postgres may order a tied group differently per query, which duplicates
+    and skips rows across pages.
+    """
+    if sort not in CREATIVE_SORTS or order not in CREATIVE_ORDERS:
+        raise ValueError(f"bad sort {sort!r}/{order!r}")
+    return f"{CREATIVE_SORTS[sort]} {order.upper()} NULLS LAST, c.id"
+
+
 async def list_creatives(
     db: Database,
     org_id: UUID,
@@ -102,6 +129,8 @@ async def list_creatives(
     offset: int = 0,
     dimension: str | None = None,
     value: str | None = None,
+    sort: str = "recent",
+    order: str = "desc",
 ) -> list[asyncpg.Record]:
     return await db.fetch(
         f"""
@@ -124,7 +153,7 @@ async def list_creatives(
         WHERE c.org_id = $1 AND ($2::uuid IS NULL OR c.ad_account_id = $2)
           AND ($3::text IS NULL OR c.format = $3)
           {_tag_filter_sql("$6", "$7")}
-        ORDER BY c.first_seen_at DESC LIMIT $4 OFFSET $5
+        ORDER BY {_order_by(sort, order)} LIMIT $4 OFFSET $5
         """,
         org_id,
         ad_account_id,
