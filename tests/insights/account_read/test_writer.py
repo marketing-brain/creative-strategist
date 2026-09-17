@@ -165,11 +165,11 @@ def test_check_read_requires_naming_a_collapsing_entanglement():
         "'entangled' must name the pair whose effects cannot be separated: "
         "'proof devices = expert credential'"
     ]
-    # the entangled paragraph names it but the finding does not: the finding is flagged
+    # the entangled paragraph naming it satisfies the finding-level check too
     problems = check_read(
         _read(entangled="Warning hooks ride on expert credential files."), brief, 1, collapses
     )
-    assert len(problems) == 1 and problems[0].startswith("finding ")
+    assert problems == []
     both = _read(findings=[f], entangled="Warning hooks ride on expert credential files.")
     assert check_read(both, brief, 1, collapses) == []
 

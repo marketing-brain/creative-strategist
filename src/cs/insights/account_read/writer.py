@@ -283,6 +283,20 @@ def _mentions(text: str, partner_label: str) -> bool:
     return value in low or value.replace(" ", "_") in low
 
 
+def _headline_in_brief(exemplar: str, brief: str) -> bool:
+    """Exemplars must be headlines quoted in the brief. Tolerate trailing whitespace and the
+    90-character truncation the unit record applies: a quoted headline that the exemplar
+    starts with, or that starts with the exemplar (30+ chars), counts."""
+    ex = " ".join(exemplar.split()).strip().lower()
+    if not ex:
+        return False
+    for m in re.finditer(r'"([^"\n]{3,})"', brief):
+        h = " ".join(m.group(1).split()).strip().lower()
+        if h == ex or (len(ex) >= 30 and (h.startswith(ex) or ex.startswith(h))):
+            return True
+    return False
+
+
 def check_read(
     read: Read, brief: str, n_tests: int, collapses: dict[str, str] | None = None
 ) -> list[str]:
@@ -307,7 +321,7 @@ def check_read(
         if missing:
             problems.append(f"finding '{f.title}': unknown pattern ids {missing}")
         for ex in f.exemplars:
-            if f'"{ex}"' not in brief:
+            if not _headline_in_brief(ex, brief):
                 problems.append(f"finding '{f.title}': exemplar not in the brief: {ex!r}")
         if not f.exemplars:
             problems.append(f"finding '{f.title}': no exemplars")
