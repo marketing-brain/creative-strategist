@@ -82,7 +82,8 @@ def parse_query(body: dict) -> dict:
     """The model's map JSON -> a parsed query, or {"unmappable": reason}."""
     if "unmappable" in body:
         return {"unmappable": str(body["unmappable"])}
-    layer = body.get("layer") if body.get("layer") in LAYER_METRICS else "all"
+    raw_layer = body.get("layer")
+    layer = raw_layer if isinstance(raw_layer, str) and raw_layer in LAYER_METRICS else "all"
     kind = body.get("kind")
     if kind not in KINDS:
         kind = "compare" if body.get("targets") else None

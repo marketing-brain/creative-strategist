@@ -140,6 +140,12 @@ def test_parse_query_unknown_kind_falls_back_to_compare_or_unmappable():
     assert "unmappable" in parse_query({})
 
 
+def test_parse_query_defaults_a_malformed_layer_to_all():
+    assert parse_query({"kind": "spend_gap", "layer": ["click"]})["layer"] == "all"
+    assert parse_query({"kind": "untried", "layer": {"x": 1}})["layer"] == "all"
+    assert parse_query({"kind": "untried", "layer": 7})["layer"] == "all"
+
+
 def test_read_as_per_kind():
     assert (
         read_as(
