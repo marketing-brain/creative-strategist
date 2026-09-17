@@ -1,33 +1,53 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { cn } from 'cn';
 import { api } from '@/lib/api';
 import { EvidenceList, Mark, markClass } from '@/components/account-read-evidence';
 import type { AccountReadAnswer, AccountReadTest, AccountReadUnit } from '@/lib/types';
 
+type Entry = { id: number; question: string; answer?: AccountReadAnswer; error?: string };
+
 export function AccountReadAsk({ accountId, tests, units }: { accountId: string; tests: AccountReadTest[]; units: AccountReadUnit[] }) {
   const [q, setQ] = useState('');
-  const [answer, setAnswer] = useState<AccountReadAnswer | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [entries, setEntries] = useState<Entry[]>([]);
   const [pending, setPending] = useState(false);
+  const nextId = useRef(0);
+  const endRef = useRef<HTMLDivElement>(null);
+
+  // An answer takes ~15s, so the newest entry is often below the fold by the time it lands.
+  useEffect(() => {
+    if (entries.length) endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [entries]);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!q.trim() || pending) return;
-    setError(null);
+    const question = q.trim();
+    if (!question || pending) return;
+    const id = nextId.current++;
+    setEntries((prev) => [...prev, { id, question }]);
+    setQ('');
     setPending(true);
     try {
-      setAnswer(await api.accountReadAsk(accountId, q.trim()));
+      const answer = await api.accountReadAsk(accountId, question);
+      setEntries((prev) => prev.map((x) => (x.id === id ? { ...x, answer } : x)));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'The question could not be answered.');
+      // Attached to its own entry, never page-level: one failed question must not
+      // wipe the answers above it.
+      const error = err instanceof Error ? err.message : 'The question could not be answered.';
+      setEntries((prev) => prev.map((x) => (x.id === id ? { ...x, error } : x)));
     } finally {
       setPending(false);
     }
   };
-  const answerTests = answer?.tests ?? [];
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-8">
+      {entries.map((entry) => (
+        <Exchange key={entry.id} entry={entry} tests={tests} units={units} />
+      ))}
+      <div ref={endRef} />
       <form onSubmit={submit} className="group flex items-center gap-3 border-b border-border py-1 transition-colors focus-within:border-foreground">
         <label htmlFor="account-read-question" className="sr-only">
           Ask this account a question
@@ -36,7 +56,11 @@ export function AccountReadAsk({ accountId, tests, units }: { accountId: string;
           id="account-read-question"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Ask this account a question, e.g. which messenger works for people who already take magnesium?"
+          placeholder={
+            entries.length
+              ? 'Ask another…'
+              : 'Ask this account a question, e.g. which messenger works for people who already take magnesium?'
+          }
           className="min-w-0 flex-1 bg-transparent py-2 text-[15px] text-foreground placeholder:text-muted-foreground/70 focus:outline-none"
         />
         <button
@@ -52,7 +76,18 @@ export function AccountReadAsk({ accountId, tests, units }: { accountId: string;
           <ArrowRight className="size-4" aria-hidden="true" />
         </button>
       </form>
-      {pending && <p className="text-sm text-muted-foreground">Reading the account…</p>}
+    </div>
+  );
+}
+
+function Exchange({ entry, tests, units }: { entry: Entry; tests: AccountReadTest[]; units: AccountReadUnit[] }) {
+  const { question, answer, error } = entry;
+  const answerTests = answer?.tests ?? [];
+  const settled = Boolean(answer || error);
+  return (
+    <div className="space-y-3">
+      <p className="max-w-[68ch] text-[15px] leading-7 font-medium text-pretty">{question}</p>
+      {!settled && <p className="text-sm text-muted-foreground">Reading the account…</p>}
       {error && <p className="text-sm text-destructive">{error}</p>}
       {answer?.unmappable && <p className="text-sm text-muted-foreground">{answer.unmappable}</p>}
       {answer && !answer.unmappable && (

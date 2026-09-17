@@ -25,13 +25,13 @@ const done: AccountRead = {
 
 describe('AccountReadSection', () => {
   it('renders the insufficient state with the unit count', () => {
-    render(<AccountReadSection data={{ ...done, status: 'insufficient', n_units: 4, read: null }} accountId="x" />);
+    render(<AccountReadSection data={{ ...done, status: 'insufficient', n_units: 4, read: null }} />);
     expect(screen.getByText(/needs 10 tagged video files/i)).toBeInTheDocument();
     expect(screen.getByText(/has 4/i)).toBeInTheDocument();
   });
 
   it('renders findings with mechanism and expands evidence on the evidence toggle', () => {
-    render(<AccountReadSection data={done} accountId="x" />);
+    render(<AccountReadSection data={done} />);
     expect(screen.getByText('Warning hooks earn the click')).toBeInTheDocument();
     expect(screen.getByText(/frames the category as risky/)).toBeInTheDocument();
     expect(screen.getByText(/Every warning ad is also a pharmacist/)).toBeInTheDocument();

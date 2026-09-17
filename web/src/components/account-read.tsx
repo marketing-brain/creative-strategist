@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { cn } from 'cn';
 import type { AccountRead, AccountReadFinding } from '@/lib/types';
-import { AccountReadAsk } from '@/components/account-read-ask';
 import { EvidenceList, Mark, markClass } from '@/components/account-read-evidence';
 
 function Cited({ text, onOpen }: { text: string; onOpen: () => void }) {
@@ -104,7 +103,7 @@ function Note({ title, body, items, ordered }: { title: string; body?: string; i
   );
 }
 
-export function AccountReadSection({ data, accountId }: { data: AccountRead; accountId: string }) {
+export function AccountReadSection({ data }: { data: AccountRead }) {
   const [open, setOpen] = useState<Record<number, boolean>>({});
   if (data.status === 'none' || data.status === 'insufficient') {
     return (
@@ -132,7 +131,7 @@ export function AccountReadSection({ data, accountId }: { data: AccountRead; acc
           <p className="max-w-[62ch] text-lg leading-8 text-pretty md:text-[19px]">{read.overview}</p>
         ) : (
           <p className="max-w-[62ch] text-[15px] leading-7 text-muted-foreground">
-            The prose read failed its checks on the last run{data.error ? `: ${data.error}` : ''}. The patterns are still current; ask a question below.
+            The prose read failed its checks on the last run{data.error ? `: ${data.error}` : ''}. The patterns are still current — put a question to them on the Ask tab.
           </p>
         )}
         <p className="font-mono text-xs tabular-nums text-muted-foreground">
@@ -149,8 +148,6 @@ export function AccountReadSection({ data, accountId }: { data: AccountRead; acc
           </p>
         )}
       </header>
-
-      <AccountReadAsk accountId={accountId} tests={tests} units={units} />
 
       {read && (
         <>

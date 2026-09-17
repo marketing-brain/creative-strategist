@@ -7,6 +7,7 @@ import {
   BatteryWarning,
   FileText,
   LayoutGrid,
+  MessageCircleQuestion,
   Settings,
   Sparkles,
   TrendingUp,
@@ -23,6 +24,7 @@ const groups: { label: string; items: NavItem[] }[] = [
     items: [
       { href: '/creatives', label: 'Creatives', icon: LayoutGrid },
       { href: '/insights', label: 'Insights', icon: TrendingUp },
+      { href: '/ask', label: 'Ask', icon: MessageCircleQuestion },
       { href: '/fatigue', label: 'Fatigue', icon: BatteryWarning },
       { href: '/briefs', label: 'Briefs', icon: FileText },
     ],

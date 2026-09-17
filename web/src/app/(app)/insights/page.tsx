@@ -17,7 +17,7 @@ export default async function Insights() {
         <p className="text-sm text-muted-foreground">What this account&apos;s video creative does, what works, and why.</p>
       </div>
       {active && accountRead ? (
-        <AccountReadSection data={accountRead} accountId={active.id} />
+        <AccountReadSection data={accountRead} />
       ) : (
         <div className="rounded-xl border border-dashed border-border px-6 py-8 text-center text-sm text-muted-foreground">
           Connect an ad account to get an account read.
