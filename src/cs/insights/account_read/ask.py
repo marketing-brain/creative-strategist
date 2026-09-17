@@ -8,8 +8,13 @@ import re
 
 from cs.core.config import Settings
 from cs.insights.account_read.stats import benjamini_hochberg, compare, grade
-from cs.insights.account_read.types import Test, Unit, to_json, unit_from_json
-from cs.insights.account_read.writer import GeminiGatewayAccountReadWriter, _numbers, pattern_line
+from cs.insights.account_read.types import METRICS, Test, Unit, to_json, unit_from_json
+from cs.insights.account_read.writer import (
+    METRIC_NAME,
+    GeminiGatewayAccountReadWriter,
+    _numbers,
+    pattern_line,
+)
 
 LAYER_METRICS = {
     "attention": ("hook_rate",),
@@ -19,6 +24,16 @@ LAYER_METRICS = {
     "all": ("hook_rate", "thruplay_rate", "link_ctr", "purchases_per_1k", "cpa"),
 }
 _FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.S)
+
+KINDS = ("compare", "spend_gap", "untried", "nearest", "controlled", "recipe")
+LAYER_WORDS = {
+    "attention": "attention metrics",
+    "retention": "retention metrics",
+    "click": "click metrics",
+    "conversion": "conversion metrics",
+    "all": "all metrics",
+}
+_UNMAPPABLE = "That asks about something the tags do not capture yet."
 
 
 def _default_writer(settings: Settings):
@@ -46,14 +61,109 @@ def _vocab(units: list[Unit]) -> dict[str, list[str]]:
     return vocab
 
 
+def rank_metric_for_layer(layer: str) -> str:
+    return "cpa" if layer == "all" else LAYER_METRICS[layer][0]
+
+
+def _facet(v) -> tuple[str, str] | None:
+    return (str(v[0]), str(v[1])) if isinstance(v, list | tuple) and len(v) == 2 else None
+
+
+def _anchor(a, layer: str) -> dict:
+    if isinstance(a, dict):
+        if a.get("named"):
+            return {"named": str(a["named"])}
+        if a.get("best") in METRICS:
+            return {"best": str(a["best"])}
+    return {"best": rank_metric_for_layer(layer)}
+
+
+def parse_query(body: dict) -> dict:
+    """The model's map JSON -> a parsed query, or {"unmappable": reason}."""
+    if "unmappable" in body:
+        return {"unmappable": str(body["unmappable"])}
+    layer = body.get("layer") if body.get("layer") in LAYER_METRICS else "all"
+    kind = body.get("kind")
+    if kind not in KINDS:
+        kind = "compare" if body.get("targets") else None
+    if kind is None:
+        return {"unmappable": _UNMAPPABLE}
+    if kind == "compare":
+        if not body.get("targets"):
+            return {"unmappable": _UNMAPPABLE}
+        targets = [tuple(t) if isinstance(t, list) else str(t) for t in body["targets"]]
+        return {
+            "kind": kind,
+            "targets": targets,
+            "group": _facet(body.get("group")),
+            "layer": layer,
+        }
+    if kind in ("spend_gap", "untried"):
+        return {"kind": kind, "layer": layer}
+    if kind in ("nearest", "recipe"):
+        return {"kind": kind, "anchor": _anchor(body.get("anchor"), layer), "layer": layer}
+    target = _facet(body.get("target"))
+    if target is None:
+        return {"unmappable": "The attribute to re-test was not named."}
+    control = body.get("control")
+    parsed_control = "spend" if control == "spend" else (_facet(control) or "spend")
+    return {"kind": "controlled", "target": target, "control": parsed_control, "layer": layer}
+
+
+def _words(f) -> str:
+    if isinstance(f, tuple):
+        return f"{f[0].replace('_', ' ')} = {str(f[1]).replace('_', ' ')}"
+    return f"every value of {str(f).replace('_', ' ')}"
+
+
+def _anchor_words(a: dict) -> str:
+    if "best" in a:
+        return f"the best-{METRIC_NAME[a['best']]} file"
+    return f'the file matching "{a["named"]}"'
+
+
+def read_as(query: dict) -> str:
+    """How the question was read, rendered from the parsed query so it cannot drift from what
+    actually ran."""
+    on = LAYER_WORDS[query["layer"]]
+    kind = query["kind"]
+    if kind == "compare":
+        targets = ", ".join(_words(t) for t in query["targets"])
+        within = f" within {_words(query['group'])}" if query.get("group") else ""
+        return f"{targets} against everything else{within}, on {on}"
+    if kind == "spend_gap":
+        return f"spend share of every graded attribute against its effect, on {on}"
+    if kind == "untried":
+        return (
+            f"pairs and triples of attributes with clean positive effects on {on} that no file "
+            "carries together"
+        )
+    if kind == "nearest":
+        return (
+            f"the five files most like {_anchor_words(query['anchor'])} that do worse than it, "
+            f"on {on}"
+        )
+    if kind == "controlled":
+        c = query["control"]
+        where = "within each spend tercile" if c == "spend" else f"inside and outside {_words(c)}"
+        return f"{_words(query['target'])} re-tested {where}, on {on}"
+    return (
+        f"the ingredients of {_anchor_words(query['anchor'])}, ranked by their graded effects "
+        f"on {on}"
+    )
+
+
 MAP_SYSTEM = """\
-You translate a strategist's question about an ad account into a query over tagged creative attributes.
-You are given the attribute dimensions and the values that exist with enough data. Return JSON:
-{"targets": [<dimension> or [<dimension>, <value>], ...], "group": [<dimension>, <value>] or null, "layer": "attention" | "retention" | "click" | "conversion" | "all"}
-- targets: the attribute(s) the question asks about. A bare dimension means "compare every value of it".
-- group: when the question says "for each X" or "within X", the attribute that defines the group; else null. Use one concrete value that exists; if the question names a persona or audience, map it to the closest audience_callouts value.
-- layer: "trust" or "hold" -> retention; "attention" or "hook" -> attention; "clicks" -> click; "CAC", "CPA", "conversions", "purchases" -> conversion; otherwise all.
-If the question asks about something that is not a tagged attribute, return {"unmappable": "<what is missing, in one sentence>"}. Return valid JSON only.
+You translate a strategist's question about an ad account into one query over its tagged creative attributes and stored comparisons. You are given the attribute dimensions and the values that exist with enough data. Return JSON with a "kind" and that kind's fields:
+- {"kind": "compare", "targets": [<dimension> or [<dimension>, <value>], ...], "group": [<dimension>, <value>] or null, "layer": L}. The default: "do X videos convert better", "which messenger works for magnesium users". targets: the attribute(s) asked about; a bare dimension means "compare every value of it". group: for "for each X" or "within X", one concrete value that exists; a persona or audience maps to the closest audience_callouts value; else null.
+- {"kind": "spend_gap", "layer": L}: where the money goes versus where the evidence points; over- or under-funded attributes; budget allocation.
+- {"kind": "untried", "layer": L}: proven attributes never combined; what to make next; gaps; untested combinations.
+- {"kind": "nearest", "anchor": A, "layer": L}: what separates a winner from the ads most like it; why a lookalike failed; nearest neighbours of one video.
+- {"kind": "controlled", "target": [<dimension>, <value>], "control": [<dimension>, <value>] or "spend", "layer": L}: is an effect real or explained by spend or by another attribute; "after controlling for"; "or is it just because we spent more".
+- {"kind": "recipe", "anchor": A, "layer": L}: which ingredient of one video does the work; what makes our best ad work.
+A (anchor) is {"best": <metric>} with metric one of hook_rate, thruplay_rate, link_ctr, purchases_per_1k, cpa, or {"named": "<the words in the question that identify the video>"}. "best CPA video" -> {"best": "cpa"}; "the pharmacist ad" -> {"named": "pharmacist"}; "our biggest ad" -> {"best": "cpa"}.
+L (layer): "trust" or "hold" -> retention; "attention" or "hook" -> attention; "clicks" -> click; "CAC", "CPA", "conversions", "purchases" -> conversion; otherwise all.
+If the question asks about something none of these kinds can answer from tagged attributes, return {"unmappable": "<what is missing, in one sentence>"}. Return valid JSON only.
 """  # noqa: E501
 
 ANSWER_SYSTEM = """\
@@ -71,14 +181,7 @@ async def map_question(question: str, result_json: dict, writer) -> dict:
         + f"\n\nQUESTION: {question}"
     )
     text, _, _ = await writer.complete(MAP_SYSTEM, user)
-    body = _loads(text)
-    if "unmappable" in body or not body.get("targets"):
-        reason = body.get("unmappable") or "That asks about something the tags do not capture yet."
-        return {"unmappable": str(reason)}
-    targets = [tuple(t) if isinstance(t, list) else str(t) for t in body["targets"]]
-    group = tuple(body["group"]) if body.get("group") else None
-    layer = body.get("layer") if body.get("layer") in LAYER_METRICS else "all"
-    return {"targets": targets, "group": group, "layer": layer}
+    return parse_query(_loads(text))
 
 
 def targeted_tests(query: dict, units: list[Unit], draws: int) -> list[Test]:
