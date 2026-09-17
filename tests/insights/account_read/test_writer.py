@@ -153,21 +153,25 @@ async def test_write_read_retries_once_then_rejects():
 def test_check_read_requires_naming_a_collapsing_entanglement():
     brief = build_brief(_run())
     collapses = {"P1": "proof devices = expert credential"}
-    silent = _read()
-    problems = check_read(silent, brief, 1, collapses)
+    problems = check_read(_read(), brief, 1, collapses)
     assert any("entangle" in p and "expert credential" in p for p in problems)
-    # naming the partner anywhere in the finding or in the entangled paragraph satisfies it
+    # the finding names the partner but the entangled paragraph does not: one problem left
     f = _finding()
     f.exception = (
         "The same files carry the expert credential proof, so the two cannot be separated."
     )
-    assert check_read(_read(findings=[f]), brief, 1, collapses) == []
-    assert (
-        check_read(
-            _read(entangled="Warning hooks ride on expert credential files."), brief, 1, collapses
-        )
-        == []
+    problems = check_read(_read(findings=[f]), brief, 1, collapses)
+    assert problems == [
+        "'entangled' must name the pair whose effects cannot be separated: "
+        "'proof devices = expert credential'"
+    ]
+    # the entangled paragraph names it but the finding does not: the finding is flagged
+    problems = check_read(
+        _read(entangled="Warning hooks ride on expert credential files."), brief, 1, collapses
     )
+    assert len(problems) == 1 and problems[0].startswith("finding ")
+    both = _read(findings=[f], entangled="Warning hooks ride on expert credential files.")
+    assert check_read(both, brief, 1, collapses) == []
 
 
 def test_entanglement_collapses_detects_vanishing_effect():
@@ -193,3 +197,21 @@ def test_entanglement_collapses_detects_vanishing_effect():
         },
     ]
     assert entanglement_collapses(run) == {"P1": "proof devices = expert credential"}
+
+
+def test_generic_partner_values_need_the_dimension_name_and_entangled_must_name_pairs():
+    brief = build_brief(_run())
+    collapses = {"P1": "duration s = high"}
+    f = _finding()
+    f.paragraph = "A high-consideration product; link CTR 4.5% with vs 3.0% without (P1)."
+    # "high" alone is an accident of prose, not a mention of the duration tercile
+    problems = check_read(_read(findings=[f]), brief, 1, collapses)
+    assert any("entangle" in p for p in problems)
+    f.exception = "The same files are the long videos (duration high), so the two cannot be split."
+    problems = check_read(_read(findings=[f]), brief, 1, collapses)
+    # the finding now names it, but the entangled paragraph still does not
+    assert problems == [
+        "'entangled' must name the pair whose effects cannot be separated: 'duration s = high'"
+    ]
+    ok = _read(findings=[f], entangled="Warning hooks and duration (long videos) share files.")
+    assert check_read(ok, brief, 1, collapses) == []

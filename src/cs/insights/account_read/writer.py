@@ -269,9 +269,18 @@ def entanglement_collapses(run: RunResult) -> dict[str, str]:
     return out
 
 
+GENERIC_VALUES = {"low", "mid", "high", "none", "other", "mixed", "yes", "no"}
+
+
 def _mentions(text: str, partner_label: str) -> bool:
-    value = partner_label.split(" = ", 1)[-1].lower()
-    return value in text.lower() or value.replace(" ", "_") in text.lower()
+    """Does the text name the partner attribute? A generic tercile or enum value ('high',
+    'none') only counts together with its dimension's first word ('duration')."""
+    dim, _, value = partner_label.partition(" = ")
+    low, value = text.lower(), value.lower()
+    dim_word = dim.lower().split()[0] if dim else ""
+    if value in GENERIC_VALUES:
+        return bool(dim_word) and dim_word in low
+    return value in low or value.replace(" ", "_") in low
 
 
 def check_read(
@@ -316,6 +325,17 @@ def check_read(
                     f"'{partner}' is held constant; name that entanglement in the finding or "
                     "in 'entangled'"
                 )
+    for partner in sorted(set((collapses or {}).values())):
+        cited = any(
+            pid in f.pattern_ids
+            for f in read.findings
+            for pid in (collapses or {})
+            if (collapses or {})[pid] == partner
+        )
+        if cited and not _mentions(read.entangled, partner):
+            problems.append(
+                f"'entangled' must name the pair whose effects cannot be separated: '{partner}'"
+            )
     if not read.findings:
         problems.append("no findings")
     return problems
