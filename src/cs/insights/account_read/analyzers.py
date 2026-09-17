@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from itertools import combinations
 
 from cs.insights.account_read.stats import MIN_PURCHASES, pooled, unit_rates
 from cs.insights.account_read.types import LOWER_IS_BETTER, METRICS, RATE_METRICS, Test, Unit
@@ -108,5 +109,68 @@ def spend_gap(units: list[Unit], tests: list[Test], metrics: tuple[str, ...]) ->
     if not rows:
         out.empty_reason = (
             "No graded attribute is over- or under-funded relative to its share of files."
+        )
+    return out
+
+
+MAX_COMBOS = 5
+MAX_CARRIERS = 1  # a combo counts as untried when at most this many files carry it
+
+
+def single_dims(units: list[Unit]) -> set[str]:
+    """Dimensions no unit carries two values of: their values are alternatives, not additions."""
+    dims = {d for u in units for d, _ in u.facets}
+    return {d for d in dims if all(sum(1 for dd, _ in u.facets if dd == d) <= 1 for u in units)}
+
+
+def untried(
+    units: list[Unit], tests: list[Test], overlaps: list[dict], metrics: tuple[str, ...]
+) -> Analysis:
+    """Pairs and triples of attributes with clean positive evidence that no file, or one file,
+    carries together. Two values of one single-valued dimension and entangled pairs are skipped."""
+    cands: dict[tuple[str, str], Test] = {}
+    for t in clean_main_effects(tests, metrics):
+        if not is_good(t):
+            continue
+        key = (t.dimension, t.value)
+        if key not in cands or t.p < cands[key].p:
+            cands[key] = t
+    if len(cands) < 2:
+        return Analysis(
+            empty_reason="Fewer than two attributes have clean positive evidence on these metrics."
+        )
+    entangled = {frozenset((tuple(o["a"]), tuple(o["b"]))) for o in overlaps}
+    single = single_dims(units)
+
+    def compatible(a: tuple[str, str], b: tuple[str, str]) -> bool:
+        if a[0] == b[0] and a[0] in single:
+            return False
+        return frozenset((a, b)) not in entangled
+
+    scored: list[tuple[float, int, tuple[tuple[str, str], ...]]] = []
+    for r in (2, 3):
+        for combo in combinations(sorted(cands), r):
+            if not all(compatible(a, b) for a, b in combinations(combo, 2)):
+                continue
+            carriers = sum(1 for u in units if all(u.has(*k) for k in combo))
+            if carriers <= MAX_CARRIERS:
+                scored.append((sum(abs(cands[k].change) for k in combo), carriers, combo))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    out = Analysis()
+    for _, carriers, combo in scored[:MAX_COMBOS]:
+        pids = []
+        for k in combo:
+            t = cands[k]
+            if t not in out.tests:
+                out.tests.append(t)
+            pids.append(f"P{out.tests.index(t) + 1}")
+        names = " + ".join(label(cands[k]) for k in combo)
+        out.facts.append(
+            f"{names} | {carriers} of {len(units)} files carry all {len(combo)} | "
+            f"ingredients {', '.join(pids)}"
+        )
+    if not out.facts:
+        out.empty_reason = (
+            "Every compatible pair of proven attributes is already carried by at least two files."
         )
     return out

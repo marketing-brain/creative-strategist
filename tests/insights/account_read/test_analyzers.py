@@ -173,3 +173,62 @@ def test_spend_gap_empty_when_nothing_is_skewed():
     out = az.spend_gap(units, [t], ("link_ctr",))
     assert out.tests == [] and out.facts == []
     assert out.empty_reason.startswith("No graded attribute")
+
+
+def test_single_dims_are_dimensions_no_unit_carries_twice():
+    units = [
+        _unit(
+            "a",
+            [("opening_shot", "face_to_camera"), ("registers", "fear"), ("registers", "relief")],
+        ),
+        _unit("b", [("opening_shot", "scene_broll"), ("registers", "warmth")]),
+    ]
+    assert az.single_dims(units) == {"opening_shot"}
+
+
+def test_untried_reports_zero_carrier_combos_and_skips_incompatible_pairs():
+    A = ("hook_devices", "audience_callout")
+    B = ("proof_devices", "expert_credential")
+    C = ("messenger", "expert_on_camera")  # entangled with B
+    D = ("opening_shot", "face_to_camera")
+    E = ("opening_shot", "scene_broll")  # same single-valued dimension as D
+    units = (
+        [_unit(f"a{i}", [A, D]) for i in range(3)]  # A+D already combined
+        + [_unit(f"b{i}", [B, C, E]) for i in range(3)]
+        + [_unit(f"z{i}", []) for i in range(6)]
+    )
+    tests = [
+        _test(*A, change=0.5, cell_shas=["a0", "a1", "a2"]),
+        _test(*B, change=0.4, cell_shas=["b0", "b1", "b2"]),
+        _test(*C, change=0.3, cell_shas=["b0", "b1", "b2"]),
+        _test(*D, change=0.2, cell_shas=["a0", "a1", "a2"]),
+        _test(*E, change=0.1, cell_shas=["b0", "b1", "b2"]),
+        _test(*A, change=-0.5, metric="cpa", cell_shas=["a0", "a1", "a2"]),  # not in layer
+    ]
+    overlaps = [{"a": list(B), "b": list(C), "jaccard": 1.0}]
+    out = az.untried(units, tests, overlaps, ("link_ctr",))
+    assert out.empty_reason is None
+    names = [f.split(" | ")[0] for f in out.facts]
+    assert "hook devices = audience callout + proof devices = expert credential" in names
+    assert (
+        "hook devices = audience callout + opening shot = face to camera" not in names
+    )  # 3 carry it
+    entangled_pair = "messenger = expert on camera + proof devices = expert credential"
+    assert not any(entangled_pair in n for n in names)  # entangled, skipped in pairs and triples
+    assert not any("face to camera + opening shot" in n for n in names)  # same single dim
+    # Highest summed effect first: A (0.5) + B (0.4) + D (0.2), never combined.
+    assert out.facts[0] == (
+        "hook devices = audience callout + opening shot = face to camera + "
+        "proof devices = expert credential | 0 of 12 files carry all 3 | ingredients P1, P2, P3"
+    )
+    assert [(t.dimension, t.value) for t in out.tests[:3]] == [A, D, B]
+    assert all(t.metric == "link_ctr" for t in out.tests)
+
+
+def test_untried_empty_with_one_candidate():
+    units = [_unit(f"u{i}", [("angles", "novelty")]) for i in range(6)]
+    t = _test("angles", "novelty", change=0.4, cell_shas=[u.sha256 for u in units])
+    out = az.untried(units, [t], [], ("link_ctr",))
+    assert out.empty_reason == (
+        "Fewer than two attributes have clean positive evidence on these metrics."
+    )
