@@ -378,3 +378,27 @@ async def test_answer_facts_are_numbered_in_the_prompt_and_cap_ignores_f_ids():
     assert out["facts"][0]["id"] == "F1" and out["facts"][0]["text"].startswith("starved |")
     assert out["pattern_ids"] == ["F1"]  # P9 does not exist; F1 is kept
     assert out["verdict"] == "not yet"  # F-ids never raise the verdict
+
+
+async def test_answer_ranks_nearest_by_the_named_anchor_metric():
+    result = _result_json()
+    for u in result["units"]:
+        u["spend"] = 500 if u["sha256"] == "u0" else 1000  # u0 is the best-CPA file
+    w = FakeAccountReadWriter(
+        [
+            json.dumps({"kind": "nearest", "anchor": {"best": "cpa"}, "layer": "conversion"}),
+            json.dumps(
+                {
+                    "verdict": "directional",
+                    "answer": "The lookalikes cost more per purchase.",
+                    "pattern_ids": [],
+                    "what_would_settle_it": "n/a",
+                }
+            ),
+        ]
+    )
+    out = await answer("what separates our best CPA video from its lookalikes?", result, w)
+    assert out["kind"] == "nearest"
+    assert out["facts"][0].startswith('anchor | "Ad 0"')
+    assert "CPA $17" in out["facts"][0]
+    assert len([f for f in out["facts"] if f.startswith("neighbour |")]) == 5

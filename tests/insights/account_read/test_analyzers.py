@@ -412,3 +412,13 @@ def test_run_rejects_an_unknown_kind():
     units = [_unit("u0", [("angles", "novelty")])]
     with pytest.raises(ValueError, match="unknown ask kind 'wat'"):
         az.run({"kind": "wat"}, units, [], [], ("link_ctr",), 50, anchor=units[0])
+
+
+def test_run_passes_the_anchor_metric_through_to_nearest():
+    a = _unit("a", [("setting", "home")], spend=3000, purchases=100)  # cpa 30, ppk 5
+    b = _unit("b", [("setting", "home")], spend=4000, purchases=100)  # cpa 40, ppk 5
+    metrics = ("purchases_per_1k", "cpa")
+    by_cpa = az.run({"kind": "nearest"}, [a, b], [], [], metrics, 50, anchor=a, metric="cpa")
+    assert by_cpa.empty_reason is None  # b is worse on cpa
+    by_default = az.run({"kind": "nearest"}, [a, b], [], [], metrics, 50, anchor=a)
+    assert by_default.empty_reason  # equal purchases per 1k: nothing is worse

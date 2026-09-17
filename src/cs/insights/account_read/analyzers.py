@@ -366,9 +366,11 @@ def run(
     metrics: tuple[str, ...],
     draws: int,
     anchor: Unit | None = None,
+    metric: str | None = None,
 ) -> Analysis:
     """Dispatch a parsed non-compare query. `anchor` must be resolved by the caller for the
-    nearest and recipe kinds."""
+    nearest and recipe kinds, and `metric` is the metric that chose it; it defaults to the layer's
+    rank metric."""
     kind = query["kind"]
     if kind == "spend_gap":
         return spend_gap(units, tests, metrics)
@@ -378,7 +380,7 @@ def run(
         return controlled(units, tests, tuple(query["target"]), query["control"], metrics, draws)
     if anchor is None:
         return Analysis(empty_reason="No file matches that description.")
-    metric = rank_metric(metrics)
+    metric = metric or rank_metric(metrics)
     if kind == "nearest":
         return nearest(units, tests, anchor, metric, metrics)
     if kind == "recipe":

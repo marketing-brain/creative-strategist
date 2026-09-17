@@ -257,6 +257,7 @@ def _analyse(query: dict, result_json: dict, draws: int) -> analyzers.Analysis |
     overlaps = result_json.get("overlaps", [])
     metrics = LAYER_METRICS[query["layer"]]
     anchor = None
+    metric = None
     if query["kind"] in ("nearest", "recipe"):
         a = query["anchor"]
         metric = a.get("best") or analyzers.rank_metric(metrics)
@@ -271,7 +272,9 @@ def _analyse(query: dict, result_json: dict, draws: int) -> analyzers.Analysis |
         cd, cv = query["control"]
         if not any(u.has(cd, cv) for u in units):
             return {"unmappable": f"No file carries {_words((cd, cv))}."}
-    return analyzers.run(query, units, tests, overlaps, metrics, draws, anchor=anchor)
+    return analyzers.run(
+        query, units, tests, overlaps, metrics, draws, anchor=anchor, metric=metric
+    )
 
 
 async def answer(question: str, result_json: dict, writer, draws: int = 300) -> dict:
