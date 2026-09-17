@@ -141,6 +141,7 @@ def untried(
         )
     entangled = {frozenset((tuple(o["a"]), tuple(o["b"]))) for o in overlaps}
     single = single_dims(units)
+    carriers_by_key = {k: {u.sha256 for u in units if u.has(*k)} for k in cands}
 
     def compatible(a: tuple[str, str], b: tuple[str, str]) -> bool:
         if a[0] == b[0] and a[0] in single:
@@ -152,9 +153,11 @@ def untried(
         for combo in combinations(sorted(cands), r):
             if not all(compatible(a, b) for a, b in combinations(combo, 2)):
                 continue
-            carriers = sum(1 for u in units if all(u.has(*k) for k in combo))
+            carriers = len(set.intersection(*(carriers_by_key[k] for k in combo)))
             if carriers <= MAX_CARRIERS:
                 scored.append((sum(abs(cands[k].change) for k in combo), carriers, combo))
+    # Sort by highest summed effect first (descending), then by fewest carriers (ascending)
+    # so a zero-carrier combo ranks ahead of a one-carrier combo with the same effect.
     scored.sort(key=lambda x: (-x[0], x[1]))
     out = Analysis()
     for _, carriers, combo in scored[:MAX_COMBOS]:
