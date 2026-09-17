@@ -292,3 +292,54 @@ def test_nearest_diff_needs_every_neighbour_when_fewer_than_three():
     assert "anchor has, neighbours lack | registers = fear" not in out.facts  # n2 has it
     assert "neighbours have, anchor lacks | registers = urgency" not in out.facts  # only n1
     assert out.facts[-1] == "no facet separates the anchor from its neighbours"
+
+
+def test_controlled_by_spend_yields_one_test_per_tercile_plus_the_overall_reference():
+    target = ("messenger", "expert_on_camera")
+    units = []
+    for i in range(30):
+        has = i % 2 == 0
+        units.append(
+            _unit(
+                f"u{i:02d}",
+                [target] if has else [],
+                spend=100 * (i + 1),  # terciles of ten files, five with and five without
+                link_clicks=900 if has else 400,
+            )
+        )
+    overall = _test(*target, change=0.6, grade="strong", cell_shas=[u.sha256 for u in units[::2]])
+    out = az.controlled(units, [overall], target, "spend", ("link_ctr",), draws=50)
+    assert out.empty_reason is None
+    assert out.facts == [
+        "spend=low | 5 files with vs 5 without",
+        "spend=mid | 5 files with vs 5 without",
+        "spend=high | 5 files with vs 5 without",
+    ]
+    assert out.tests[0] is overall
+    strata = [t.group for t in out.tests[1:]]
+    assert strata == ["spend=low", "spend=mid", "spend=high"]
+    assert all(t.metric == "link_ctr" and t.grade != "ungraded" for t in out.tests[1:])
+
+
+def test_controlled_by_partner_attribute_splits_inside_and_outside():
+    target = ("proof_devices", "expert_credential")
+    partner = ("messenger", "expert_on_camera")
+    units = [
+        _unit(f"i{i}", [target, partner] if i < 5 else [partner], link_clicks=900 if i < 5 else 400)
+        for i in range(10)
+    ] + [
+        _unit(f"o{i}", [target] if i < 5 else [], link_clicks=700 if i < 5 else 500)
+        for i in range(10)
+    ]
+    out = az.controlled(units, [], target, partner, ("link_ctr",), draws=50)
+    assert [t.group for t in out.tests] == [
+        "messenger=expert_on_camera",
+        "not messenger=expert_on_camera",
+    ]
+
+
+def test_controlled_empty_when_no_stratum_reaches_the_cell_floor():
+    target = ("messenger", "expert_on_camera")
+    units = [_unit(f"u{i}", [target] if i < 2 else [], spend=100 * i) for i in range(9)]
+    out = az.controlled(units, [], target, "spend", ("link_ctr",), draws=50)
+    assert out.empty_reason == "No stratum has 5 files on both sides."

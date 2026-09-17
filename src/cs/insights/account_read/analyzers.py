@@ -7,7 +7,15 @@ from dataclasses import dataclass, field
 from itertools import combinations
 
 from cs.insights.account_read.facets import NUMERIC_DIMS
-from cs.insights.account_read.stats import MIN_PURCHASES, pooled, unit_rates
+from cs.insights.account_read.stats import (
+    MIN_CELL,
+    MIN_PURCHASES,
+    benjamini_hochberg,
+    compare,
+    grade,
+    pooled,
+    unit_rates,
+)
 from cs.insights.account_read.types import LOWER_IS_BETTER, METRICS, RATE_METRICS, Test, Unit
 from cs.insights.account_read.writer import METRIC_NAME, fmt_val, label
 
@@ -250,4 +258,53 @@ def nearest(
         out.facts.append(f"neighbours have, anchor lacks | {facet_words(f)}{cite(f)}")
     if not only_anchor and not only_near:
         out.facts.append("no facet separates the anchor from its neighbours")
+    return out
+
+
+def _strata(units: list[Unit], control: tuple[str, str] | str) -> list[tuple[str, list[Unit]]]:
+    if control == "spend":
+        ordered = sorted(units, key=lambda u: (u.spend, u.sha256))
+        n = len(ordered)
+        return [
+            ("spend=low", ordered[: n // 3]),
+            ("spend=mid", ordered[n // 3 : (2 * n) // 3]),
+            ("spend=high", ordered[(2 * n) // 3 :]),
+        ]
+    cd, cv = control
+    return [
+        (f"{cd}={cv}", [u for u in units if u.has(cd, cv)]),
+        (f"not {cd}={cv}", [u for u in units if not u.has(cd, cv)]),
+    ]
+
+
+def controlled(
+    units: list[Unit],
+    tests: list[Test],
+    target: tuple[str, str],
+    control: tuple[str, str] | str,
+    metrics: tuple[str, ...],
+    draws: int,
+) -> Analysis:
+    """The target's comparison rerun inside each stratum of the control. The stored overall
+    main effect rides first as the reference."""
+    dim, val = target
+    out = Analysis()
+    fresh: list[Test] = []
+    for lbl, grp in _strata(units, control):
+        cell = [u for u in grp if u.has(dim, val)]
+        comp = [u for u in grp if not u.has(dim, val)]
+        out.facts.append(f"{lbl} | {len(cell)} files with vs {len(comp)} without")
+        found = compare(cell, comp, dimension=dim, value=val, group=lbl, draws=draws)
+        fresh += [t for t in found if t.metric in metrics]
+    if not fresh:
+        return Analysis(empty_reason=f"No stratum has {MIN_CELL} files on both sides.")
+    passing = benjamini_hochberg([t.p for t in fresh])
+    for i, t in enumerate(fresh):
+        t.grade = grade(t.p, t.change, i in passing)
+    overall = [
+        t
+        for t in tests
+        if t.group is None and (t.dimension, t.value) == target and t.metric in metrics
+    ]
+    out.tests = overall + fresh
     return out
