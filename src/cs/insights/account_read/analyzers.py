@@ -381,4 +381,6 @@ def run(
     metric = rank_metric(metrics)
     if kind == "nearest":
         return nearest(units, tests, anchor, metric, metrics)
-    return recipe(units, tests, anchor, metric, metrics)
+    if kind == "recipe":
+        return recipe(units, tests, anchor, metric, metrics)
+    raise ValueError(f"unknown ask kind {kind!r}")

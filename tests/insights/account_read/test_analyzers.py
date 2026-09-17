@@ -1,6 +1,8 @@
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
 from cs.insights.account_read import analyzers as az
 from cs.insights.account_read.types import Test, Unit
 
@@ -404,3 +406,9 @@ def test_run_dispatches_by_kind():
     assert out.tests == [t]
     out = az.run({"kind": "nearest"}, units, [t], [], ("link_ctr",), 50, anchor=units[0])
     assert out.empty_reason  # nothing underperforms an identical peer
+
+
+def test_run_rejects_an_unknown_kind():
+    units = [_unit("u0", [("angles", "novelty")])]
+    with pytest.raises(ValueError, match="unknown ask kind 'wat'"):
+        az.run({"kind": "wat"}, units, [], [], ("link_ctr",), 50, anchor=units[0])
