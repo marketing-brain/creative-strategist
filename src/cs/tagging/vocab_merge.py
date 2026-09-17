@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import itertools
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 from uuid import UUID
 
@@ -147,6 +147,9 @@ class Verdict:
     pair: Pair
     same_concept: bool
     reason: str
+    # False when the judge returned no entry for this pair. Such a verdict is not a
+    # decision: it must never be persisted as a rejection, which is permanent.
+    answered: bool = True
 
 
 class Judge(Protocol):
@@ -160,8 +163,17 @@ JUDGE_SYSTEM = (
     "for the purpose of grouping ads. Same concept means a strategist would treat the two "
     "as interchangeable labels, not merely related. An ingredient and a product containing "
     "it are different. A brand and a category are different. A claim and its negation are "
-    "different. A specific value and its general category are different. Answer every pair."
+    "different. A specific value and its general category are different. "
+    "A claim about falling asleep and a claim about sleep quality or waking rested are "
+    "different claims. "
+    "A generic ingredient and a branded or specific form of it (an extract, a salt, a "
+    "delivery system) are different. "
+    "When in doubt, answer false. Answer every pair."
 )
+
+# One request per 50 pairs: a dimension can produce hundreds of candidates, and a single
+# unbounded call both risks a truncated response and loses every verdict when it fails.
+JUDGE_BATCH = 50
 
 
 def judge_user_text(
@@ -203,12 +215,20 @@ def judge_schema() -> dict:
     }
 
 
+def _key(a: str, b: str) -> tuple[str, str]:
+    """Order- and case-insensitive pair key: the model echoes slugs back, sometimes
+    swapped or recased, and a near-miss there must not silently lose the verdict."""
+    return tuple(sorted((a.strip().lower(), b.strip().lower())))  # type: ignore[return-value]
+
+
 class GatewayJudge:
     def __init__(self, settings: Settings, client: openai.AsyncOpenAI | None = None):
         self.client = client or openai.AsyncOpenAI(
             api_key=settings.ai_gateway_api_key, base_url=f"{settings.ai_gateway_base_url}/v1"
         )
-        self.model = settings.tagging_model  # text-only, the cheap tier
+        self.model = settings.judge_model
+        # (prompt_tokens, completion_tokens) per call, for the run's cost line.
+        self.usage: list[tuple[int, int]] = []
 
     async def judge(
         self, dimension: str, description: str, pairs: list[Pair], context: dict[str, SlugContext]
@@ -229,16 +249,50 @@ class GatewayJudge:
                 "json_schema": {"name": "verdicts", "schema": judge_schema(), "strict": True},
             },
         )
-        text = resp.choices[0].message.content or "{}"
-        answered = {}
+        usage = getattr(resp, "usage", None)
+        if usage is not None:
+            self.usage.append(
+                (
+                    getattr(usage, "prompt_tokens", 0) or 0,
+                    getattr(usage, "completion_tokens", 0) or 0,
+                )
+            )
+        choice = resp.choices[0]
+        # A refused or truncated response carries no verdicts. Synthesising rejections from
+        # it would write permanent 'rejected' rows the next run never re-proposes, so the
+        # caller has to see the failure instead (mirrors GeminiGatewayTagger.tag).
+        if choice.finish_reason == "content_filter" or getattr(choice.message, "refusal", None):
+            raise RuntimeError("judge refused")
+        if choice.finish_reason == "length":
+            raise RuntimeError("judge response truncated (finish_reason=length)")
+        text = choice.message.content or "{}"
+        answered: dict[tuple[str, str], tuple[bool, str]] = {}
         for item in json.loads(text).get("pairs", []):
-            key = tuple(sorted((str(item.get("a", "")), str(item.get("b", "")))))
+            key = _key(str(item.get("a", "")), str(item.get("b", "")))
             answered[key] = (bool(item.get("same_concept")), str(item.get("reason", "")))
         out: list[Verdict] = []
         for p in pairs:
-            same, reason = answered.get((p.a, p.b), (False, "no verdict returned"))
-            out.append(Verdict(p, same, reason))
+            hit = answered.get(_key(p.a, p.b))
+            if hit is None:
+                out.append(Verdict(p, False, "no verdict returned", answered=False))
+            else:
+                out.append(Verdict(p, hit[0], hit[1]))
         return out
+
+
+async def judge_in_batches(
+    judge: Judge,
+    dimension: str,
+    description: str,
+    pairs: list[Pair],
+    context: dict[str, SlugContext],
+    batch: int = JUDGE_BATCH,
+) -> list[Verdict]:
+    """Judge `pairs` in fixed-size chunks, concatenating the verdicts in pair order."""
+    out: list[Verdict] = []
+    for i in range(0, len(pairs), batch):
+        out.extend(await judge.judge(dimension, description, pairs[i : i + batch], context))
+    return out
 
 
 class FakeJudge:
@@ -262,6 +316,9 @@ class MergePlan:
     apply: list[Merge]
     review: list[Merge]
     rejected: list[Verdict]
+    # Pairs the judge returned no verdict for: neither merged nor rejected, so the next
+    # run proposes them again.
+    unanswered: list[Verdict] = field(default_factory=list)
 
 
 def _canonical(group: list[str], counts: dict[str, int]) -> str:
@@ -298,7 +355,12 @@ def plan_merges(
         for slug in (v.pair.a, v.pair.b):
             if slug not in best or v.pair.cosine > best[slug][0]:
                 best[slug] = (v.pair.cosine, v.reason)
-    plan = MergePlan(apply=[], review=[], rejected=[v for v in verdicts if not v.same_concept])
+    plan = MergePlan(
+        apply=[],
+        review=[],
+        rejected=[v for v in verdicts if v.answered and not v.same_concept],
+        unanswered=[v for v in verdicts if not v.answered],
+    )
     for root, members in groups.items():
         canonical = _canonical(members, counts)
         # The group is routed by its weakest accepted pair, but each member logs the
@@ -316,14 +378,19 @@ async def _apply(tx: Database, org_id: UUID, dimension: str, merges: list[Merge]
     Writes no log rows, and must be called inside a transaction."""
     canonicals = {m.into_slug for m in merges}
     for canonical in sorted(canonicals):
+        # The target must exist AND still be its own canonical: merging into a slug that
+        # was itself merged away would leave a two-hop chain that hints() and the count
+        # recomputation (both keyed on canonical_slug) silently drop.
         known = await tx.fetchval(
-            "SELECT 1 FROM tag_vocab WHERE org_id=$1 AND dimension=$2 AND slug=$3",
+            "SELECT canonical_slug FROM tag_vocab WHERE org_id=$1 AND dimension=$2 AND slug=$3",
             org_id,
             dimension,
             canonical,
         )
         if known is None:
             raise ValueError(f"canonical {canonical!r} is not in the vocabulary")
+        if known != canonical:
+            raise ValueError(f"canonical {canonical!r} is not canonical")
     for m in merges:
         await tx.execute(
             "UPDATE tag_vocab SET canonical_slug=$4 WHERE org_id=$1 AND dimension=$2 AND slug=$3",
@@ -410,7 +477,11 @@ async def record_review(db: Database, org_id: UUID, dimension: str, merges: list
 async def record_rejections(
     db: Database, org_id: UUID, dimension: str, verdicts: list[Verdict]
 ) -> None:
+    # Only decisions are persisted: a 'rejected' row is permanent (rejected_pairs never
+    # proposes the pair again), and an unanswered pair is the absence of a decision.
     for v in verdicts:
+        if not v.answered:
+            continue
         await db.execute(
             "INSERT INTO tag_vocab_merge (id, org_id, dimension, slug, into_slug, "
             "similarity, reason, status, source, decided_at) "
@@ -446,16 +517,38 @@ async def decide_review(db: Database, merge_id: UUID, approve: bool) -> None:
         if row is None:
             raise ValueError(f"no pending review merge {merge_id}")
         if approve:
+            # The row may have sat in review while its target was merged elsewhere, so the
+            # target is resolved to its current canonical inside this transaction. Merging
+            # into the stale target would build a chain the count/hints queries drop.
+            target = await tx.fetchval(
+                "SELECT canonical_slug FROM tag_vocab "
+                "WHERE org_id=$1 AND dimension=$2 AND slug=$3 FOR UPDATE",
+                row["org_id"],
+                row["dimension"],
+                row["into_slug"],
+            )
+            if target == row["slug"]:
+                # The reverse merge already happened: approving would point the slug at
+                # itself. Record it as decided rather than corrupting the chain.
+                await tx.execute(
+                    "UPDATE tag_vocab_merge SET status='rejected', source='manual', "
+                    "reason='target merged into this slug', decided_at=now() WHERE id=$1",
+                    merge_id,
+                )
+                return
+            # An unknown target keeps the stale slug so _apply raises the vocabulary error.
+            target = target or row["into_slug"]
             await _apply(
                 tx,
                 row["org_id"],
                 row["dimension"],
-                [Merge(row["slug"], row["into_slug"], row["similarity"], row["reason"] or "")],
+                [Merge(row["slug"], target, row["similarity"], row["reason"] or "")],
             )
             await tx.execute(
-                "UPDATE tag_vocab_merge SET status='applied', source='manual', decided_at=now() "
-                "WHERE id=$1",
+                "UPDATE tag_vocab_merge SET status='applied', source='manual', into_slug=$2, "
+                "decided_at=now() WHERE id=$1",
                 merge_id,
+                target,
             )
         else:
             await tx.execute(

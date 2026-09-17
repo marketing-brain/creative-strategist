@@ -16,6 +16,8 @@ def test_settings_reads_env():
     assert s.database_url == "postgres://x"
     assert s.blob_backend == "local"
     assert s.tagging_model == "google/gemini-2.5-flash-lite"
+    # the merge judge reasons over short text but must be precise: the full flash tier
+    assert s.judge_model == "google/gemini-2.5-flash"
 
 
 def test_clerk_jwks_url_is_required(monkeypatch):

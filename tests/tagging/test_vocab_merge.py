@@ -167,6 +167,16 @@ def test_judge_prompt_and_schema():
     assert "- magnesium_glycinate (count 1): spoken at 0:40" in text
     assert "glycinate | magnesium_glycinate | cosine 0.92" in text
     assert "ingredient and a product containing it are different" in JUDGE_SYSTEM
+    # the two over-merges dry run 1 produced, and the tie-breaker for everything else
+    assert (
+        "A claim about falling asleep and a claim about sleep quality or waking rested "
+        "are different claims." in JUDGE_SYSTEM
+    )
+    assert (
+        "A generic ingredient and a branded or specific form of it (an extract, a salt, "
+        "a delivery system) are different." in JUDGE_SYSTEM
+    )
+    assert "When in doubt, answer false." in JUDGE_SYSTEM
     schema = judge_schema()
     item = schema["properties"]["pairs"]["items"]
     assert item["required"] == ["a", "b", "same_concept", "reason"]
@@ -175,20 +185,33 @@ def test_judge_prompt_and_schema():
 
 
 class _FakeCompletions:
-    def __init__(self, text):
+    def __init__(self, text, finish_reason="stop", refusal=None, usage=(11, 22)):
         self.text = text
+        self.finish_reason = finish_reason
+        self.refusal = refusal
+        self.usage = usage
         self.calls = []
 
     async def create(self, **kwargs):
         self.calls.append(kwargs)
+        usage = (
+            SimpleNamespace(prompt_tokens=self.usage[0], completion_tokens=self.usage[1])
+            if self.usage is not None
+            else None
+        )
         return SimpleNamespace(
+            usage=usage,
             choices=[
                 SimpleNamespace(
-                    finish_reason="stop",
-                    message=SimpleNamespace(content=self.text, refusal=None),
+                    finish_reason=self.finish_reason,
+                    message=SimpleNamespace(content=self.text, refusal=self.refusal),
                 )
-            ]
+            ],
         )
+
+
+def _judge(settings, fake):
+    return GatewayJudge(settings, client=SimpleNamespace(chat=SimpleNamespace(completions=fake)))
 
 
 async def test_gateway_judge_parses_verdicts_in_pair_order(settings):
@@ -198,22 +221,62 @@ async def test_gateway_judge_parses_verdicts_in_pair_order(settings):
         '{"a": "a_slug", "b": "b_slug", "same_concept": true, "reason": "same"}]}'
     )
     fake = _FakeCompletions(text)
-    judge = GatewayJudge(settings, client=SimpleNamespace(chat=SimpleNamespace(completions=fake)))
+    judge = _judge(settings, fake)
     verdicts = await judge.judge("topics", "desc", pairs, {})
-    assert [(v.pair, v.same_concept, v.reason) for v in verdicts] == [
-        (pairs[0], True, "same"),
-        (pairs[1], False, "different"),
+    assert [(v.pair, v.same_concept, v.reason, v.answered) for v in verdicts] == [
+        (pairs[0], True, "same", True),
+        (pairs[1], False, "different", True),
     ]
-    assert fake.calls[0]["model"] == settings.tagging_model
+    assert fake.calls[0]["model"] == settings.judge_model
     assert fake.calls[0]["response_format"]["json_schema"]["strict"] is True
+    # token usage is recorded per call so the caller can report what the run cost
+    assert judge.usage == [(11, 22)]
 
 
-async def test_gateway_judge_missing_pair_is_a_rejection(settings):
+async def test_gateway_judge_refusal_and_truncation_raise(settings):
+    """A truncated or refused response must raise, never be persisted as a rejection."""
     pairs = [Pair("a_slug", "b_slug", 0.9)]
-    fake = _FakeCompletions('{"pairs": []}')
-    judge = GatewayJudge(settings, client=SimpleNamespace(chat=SimpleNamespace(completions=fake)))
-    verdicts = await judge.judge("topics", "desc", pairs, {})
-    assert verdicts[0].same_concept is False and "no verdict" in verdicts[0].reason
+    with pytest.raises(RuntimeError, match="truncated"):
+        await _judge(settings, _FakeCompletions("{}", finish_reason="length")).judge(
+            "topics", "desc", pairs, {}
+        )
+    with pytest.raises(RuntimeError, match="refused"):
+        await _judge(settings, _FakeCompletions("{}", finish_reason="content_filter")).judge(
+            "topics", "desc", pairs, {}
+        )
+    with pytest.raises(RuntimeError, match="refused"):
+        await _judge(settings, _FakeCompletions("{}", refusal="I cannot help")).judge(
+            "topics", "desc", pairs, {}
+        )
+
+
+async def test_gateway_judge_unanswered_pairs_are_not_rejections(settings):
+    pairs = [Pair("a_slug", "b_slug", 0.9), Pair("c_slug", "d_slug", 0.8)]
+    # the model echoes the slugs back swapped and recased -- still the same pair
+    text = '{"pairs": [{"a": " B_Slug", "b": "A_SLUG ", "same_concept": true, "reason": "same"}]}'
+    verdicts = await _judge(settings, _FakeCompletions(text)).judge("topics", "desc", pairs, {})
+    assert (verdicts[0].same_concept, verdicts[0].answered) == (True, True)
+    assert verdicts[1].answered is False
+    assert verdicts[1].same_concept is False and "no verdict" in verdicts[1].reason
+
+
+async def test_judge_in_batches_chunks_and_keeps_pair_order():
+    pairs = [Pair(f"a{i:03d}", f"b{i:03d}", 0.9) for i in range(120)]
+
+    class _Counting:
+        def __init__(self):
+            self.sizes = []
+            self.inner = FakeJudge(set())
+
+        async def judge(self, dimension, description, pairs, context):
+            self.sizes.append(len(pairs))
+            return await self.inner.judge(dimension, description, pairs, context)
+
+    counting = _Counting()
+    verdicts = await vocab_merge.judge_in_batches(counting, "topics", "desc", pairs, {})
+    assert counting.sizes == [50, 50, 20]
+    assert [v.pair for v in verdicts] == pairs
+    assert await vocab_merge.judge_in_batches(counting, "topics", "desc", [], {}) == []
 
 
 async def test_fake_judge():
@@ -256,11 +319,17 @@ def test_plan_merges_routes_low_cosine_groups_to_review():
 
 
 def test_plan_merges_same_concept_false_is_rejected_even_when_similar():
+    # an unanswered pair is not a decision: it belongs to none of apply/review/rejected
+    unanswered = Verdict(
+        Pair("gummy", "melatonin", 0.91), False, "no verdict returned", answered=False
+    )
     plan = plan_merges(
-        [_v("magnesium", "magnesium_glycinate", 0.86, False)],
+        [_v("magnesium", "magnesium_glycinate", 0.86, False), unanswered],
         {"magnesium": 5, "magnesium_glycinate": 1},
     )
-    assert plan.apply == [] and plan.review == [] and len(plan.rejected) == 1
+    assert plan.apply == [] and plan.review == []
+    assert [v.pair.a for v in plan.rejected] == ["magnesium"]
+    assert plan.unanswered == [unanswered]
 
 
 async def test_apply_merges_rewrites_vocab_and_open_tag_values_but_not_raw(db, org_id):
@@ -485,6 +554,91 @@ async def test_revert_stops_the_pair_from_being_reproposed(db, org_id):
         org_id,
     )
     assert tuple(row) == ("reverted by operator", "manual", "easy_gummy_format")
+
+
+async def test_record_rejections_skips_unanswered_verdicts(db, org_id):
+    """A pair the judge never answered must not become a permanent rejection."""
+    await _seed_vocab(db, org_id, "concept_tags", {"gummy": 1, "melatonin": 1, "sleepy": 1})
+    await record_rejections(
+        db,
+        org_id,
+        "concept_tags",
+        [
+            _v("gummy", "melatonin", 0.7, False),
+            Verdict(Pair("gummy", "sleepy", 0.8), False, "no verdict returned", answered=False),
+        ],
+    )
+    rows = await db.fetch(
+        "SELECT slug, into_slug FROM tag_vocab_merge WHERE org_id=$1 ORDER BY into_slug", org_id
+    )
+    assert [(r["slug"], r["into_slug"]) for r in rows] == [("gummy", "melatonin")]
+
+
+async def test_decide_review_follows_a_target_that_was_merged_away(db, org_id):
+    """A review row queued before its target was itself merged must land on the current
+    canonical, not resurrect a merged-away slug as a merge target."""
+    await _seed_vocab(db, org_id, "concept_tags", {"x_slug": 1, "y_slug": 2, "z_slug": 3})
+    await _open_rows(db, org_id, "concept_tags", [("x_slug", "e"), ("y_slug", "f")])
+    await _open_rows(db, org_id, "concept_tags", [("z_slug", "g")], pcid="v2")
+    await record_review(db, org_id, "concept_tags", [Merge("x_slug", "y_slug", 0.75, "maybe")])
+    await apply_merges(
+        db, org_id, "concept_tags", [Merge("y_slug", "z_slug", 0.9, "same")], source="auto"
+    )
+    (pending,) = await list_review(db, org_id)
+    await decide_review(db, pending["id"], approve=True)
+    canon = {
+        r["slug"]: r["canonical_slug"]
+        for r in await db.fetch(
+            "SELECT slug, canonical_slug FROM tag_vocab WHERE org_id=$1", org_id
+        )
+    }
+    assert canon == {"x_slug": "z_slug", "y_slug": "z_slug", "z_slug": "z_slug"}
+    values = sorted(
+        r["value"]
+        for r in await db.fetch(
+            "SELECT value FROM tag WHERE org_id=$1 AND dimension='concept_tags'", org_id
+        )
+    )
+    assert values == ["z_slug", "z_slug", "z_slug"]
+    row = await db.fetchrow(
+        "SELECT into_slug, status FROM tag_vocab_merge WHERE id=$1", pending["id"]
+    )
+    assert (row["into_slug"], row["status"]) == ("z_slug", "applied")
+    # two runs carry the canonical; the run that carried both x and y counts once
+    assert await vocab.hints(db, org_id, "concept_tags", 10) == [("z_slug", 2)]
+
+
+async def test_decide_review_rejects_when_the_target_merged_into_this_slug(db, org_id):
+    await _seed_vocab(db, org_id, "concept_tags", {"gummy": 2, "easy_gummy_format": 4})
+    await _open_rows(db, org_id, "concept_tags", [("gummy", "e"), ("easy_gummy_format", "f")])
+    await record_review(
+        db, org_id, "concept_tags", [Merge("gummy", "easy_gummy_format", 0.74, "maybe")]
+    )
+    # the reverse merge wins the race: easy_gummy_format is now pointed at gummy
+    await apply_merges(
+        db, org_id, "concept_tags", [Merge("easy_gummy_format", "gummy", 0.9, "r")], source="auto"
+    )
+    (pending,) = await list_review(db, org_id)
+    await decide_review(db, pending["id"], approve=True)
+    row = await db.fetchrow("SELECT status, reason FROM tag_vocab_merge WHERE id=$1", pending["id"])
+    assert (row["status"], row["reason"]) == ("rejected", "target merged into this slug")
+    assert (
+        await db.fetchval(
+            "SELECT canonical_slug FROM tag_vocab WHERE org_id=$1 AND slug='gummy'", org_id
+        )
+        == "gummy"
+    )
+
+
+async def test_apply_merges_rejects_a_non_canonical_target(db, org_id):
+    await _seed_vocab(db, org_id, "concept_tags", {"gummy": 2, "easy_gummy_format": 4, "gum": 1})
+    await apply_merges(
+        db, org_id, "concept_tags", [Merge("gum", "easy_gummy_format", 0.9, "r")], source="auto"
+    )
+    with pytest.raises(ValueError, match="is not canonical"):
+        await apply_merges(
+            db, org_id, "concept_tags", [Merge("gummy", "gum", 0.9, "r")], source="auto"
+        )
 
 
 async def test_revert_rejects_an_unknown_slug(db, org_id):
