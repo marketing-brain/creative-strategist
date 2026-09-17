@@ -270,3 +270,25 @@ def test_nearest_empty_when_nothing_underperforms():
     b = _unit("b", [("setting", "home")], link_clicks=900)
     out = az.nearest([a, b], [], a, "link_ctr", ("link_ctr",))
     assert out.empty_reason == 'No file does worse than "Ad a" on link CTR.'
+
+
+def test_nearest_empty_when_the_anchor_is_below_the_floor():
+    anchor = _unit("a", [("setting", "home")], impressions=100, headline="Thin")
+    peer = _unit("b", [("setting", "home")], link_clicks=400)
+    out = az.nearest([anchor, peer], [], anchor, "link_ctr", ("link_ctr",))
+    assert out.empty_reason == '"Thin" is below the floor for link CTR.'
+    assert out.facts == [] and out.tests == []
+
+
+def test_nearest_diff_needs_every_neighbour_when_fewer_than_three():
+    base = [("messenger", "creator_on_camera"), ("setting", "home")]
+    anchor = _unit("w", base + [("registers", "fear")], link_clicks=1200)
+    agree = _unit("n1", base + [("registers", "urgency")], link_clicks=400)
+    disagree = _unit("n2", base + [("registers", "fear")], link_clicks=300)
+    out = az.nearest([anchor, agree, disagree], [], anchor, "link_ctr", ("link_ctr",))
+    neighbours = [f for f in out.facts if f.startswith("neighbour |")]
+    assert len(neighbours) == 2
+    # Two neighbours: a facet joins the diff only when both disagree with the anchor.
+    assert "anchor has, neighbours lack | registers = fear" not in out.facts  # n2 has it
+    assert "neighbours have, anchor lacks | registers = urgency" not in out.facts  # only n1
+    assert out.facts[-1] == "no facet separates the anchor from its neighbours"
