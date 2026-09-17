@@ -21,7 +21,7 @@ The user's four example questions are test cases, not the feature. Nothing in th
 | Interactions | Generic, bounded: for each value of each *grouping dimension* with ≥ 10 units, every facet is tested within the group. Grouping dimensions are a setting, default `audience_callouts, products_mentioned, features_mentioned, messenger, duration_s` |
 | Entanglement | Jaccard ≥ 0.6 between any two graded (strong/suggestive, unflagged, 8–48 units) attributes; for each pair, the effect is recomputed within and outside the partner. Stored beside the patterns |
 | Confounds | `budget_concentration` (one unit ≥ 50% of the cell's impressions), `seasonality` (active-day midpoints differ > 15 days). Stored, never suppress |
-| Writer | One `creative_insight_model` call with the graded tables as a text brief. JSON out. Number-grounding check (every number in prose appears in the brief) with one retry. Verdicts capped in code at the grade of cited evidence |
+| Writer | One `creative_insight_model` call with the graded tables **and the qualitative record of the ads behind them** (concept summaries, verbatim hooks, per-creative insight paragraphs) as a text brief. JSON out. Every finding must name a mechanism, exemplar files and an exception, and state why it is not obvious from the table. Number-grounding check with one retry. Verdicts capped in code at the grade of cited evidence |
 | Ask box | Two model calls: map the question to `{targets, group, layer}` against the run's dimension list, then compute from the stored units and write the answer with the same rules |
 | Storage | One table, JSON payloads. No per-pattern rows in this cut |
 | Surface | "Account read" section at the top of the Insights page, plus the ask box. Explorer table deferred; the evidence lives in expandable lists under each paragraph |
@@ -47,7 +47,7 @@ POST /insights/account-read/ask                  question → mapped query → c
 
 | Module | Responsibility |
 |---|---|
-| `units.py` | Query creatives, assets, metric sums, latest v2 tag run per creative; group by sha256; pick the facet source copy; compute per-unit rates and retention shares; compute active-day midpoint. Output: `list[Unit]` |
+| `units.py` | Query creatives, assets, metric sums, latest v2 tag run per creative, text tags (`concept_summary`, `hook_verbatim`) and any done per-creative insight paragraph; group by sha256; pick the facet source copy; compute per-unit rates and retention shares; compute active-day midpoint. Output: `list[Unit]` |
 | `facets.py` | `Unit.tags` → `set[(dimension, value)]`, dimension kinds, tercile binning with stored edges, the two derived facets |
 | `stats.py` | `mann_whitney_p`, `permutation_p`, `benjamini_hochberg`, `compare(cell, comp) -> list[Test]`, `grade` |
 | `patterns.py` | `run(units, grouping_dims) -> RunResult` = main effects, interactions, entanglement, retention by reveal bin, summary |
@@ -68,6 +68,7 @@ class Unit:
     video_3s_views: int; thruplays: int; p25: int; p50: int; p75: int; p100: int
     link_clicks: int; purchases: int; first_day: date; last_day: date
     facets: set[tuple[str, str]]; numeric: dict[str, float]; first_product_s: float | None
+    concept_summary: str | None; hook_verbatim: str | None; insight_paragraph: str | None   # qualitative record for the writer
 
 @dataclass
 class Test:
@@ -79,7 +80,7 @@ class Test:
 
 `RunResult` holds `units`, `tests` (main + interactions, one list, `group` distinguishes), `entanglement` (overlaps and stratified rows), `retention_by_reveal`, `summary`. It serializes to one JSON document.
 
-`Read` (writer output): `overview`, `findings[]` (title, layer, paragraph, pattern_ids, confidence), `entangled`, `no_evidence`, `next_tests[]`, `data_needed[]`. Pattern IDs are `P<n>` indexes into `tests` in stored order, so the UI can resolve them without a join.
+`Read` (writer output) is defined in §4. Pattern IDs are `P<n>` indexes into `tests` in stored order, so the UI can resolve them without a join.
 
 ## 3. Statistics
 
@@ -94,11 +95,24 @@ Interaction bound: grouping values with fewer than 10 units are skipped. At 56 u
 
 ## 4. Writer
 
-System prompt as in the throwaway script, minus the fixed question list. It asks for `overview`, 4–7 `findings` chosen by evidence rank including interaction findings, `entangled`, `no_evidence`, `next_tests`, `data_needed`. Rules carried over: numbers verbatim, cite IDs, grades bound titles, flags named or omitted, entanglement stated, hypothesis language, layers named.
+The read must be pointed and non-obvious: an amalgamation of what the ads *are* and how they *performed*, not a paragraph that recites the table. Two things make that possible: the brief carries qualitative material, and the prompt rejects table-narration.
 
-Brief construction: account context and baselines; graded main effects unflagged first (cap 70) then flagged (cap 30); interactions grouped by grouping value, non-thin only, with "too few to test" lists; entanglement overlaps and stratified rows for graded attributes; retention by reveal bin with the length caveat.
+**Qualitative inputs in the brief.** For every unit: headline, `concept_summary` and `hook_verbatim` text tags from its tag run, duration, messenger, and the per-creative insight paragraph when one exists (`creative_insight.status = 'done'` for any creative in the unit). For each graded pattern the brief lists its cell units by spend, so the writer can look up what the videos in a cell actually are. Text tags are still not facets; they are context.
 
-Grounding: the `_numbers` regex from `creative_insight.py`, applied to every prose field against the brief. One retry with the problems named; a second failure stores the read with `status='rejected'` and the page shows the tables without prose.
+**Prompt rules, added to those carried over from the throwaway script:**
+
+- Every finding states a **mechanism**: what in the ads plausibly produces the viewer behavior the metric shows, drawn from the qualitative record, in hypothesis language.
+- Every finding names **exemplars**: two or three files from the cell, by headline, and says what they share qualitatively.
+- Every finding names an **exception** where one exists: a file in the cell that breaks the pattern, or a file outside it that behaves like it, and what that suggests.
+- Every finding carries `why_non_obvious`: one sentence on what a reader could not have seen from the metric table alone. A finding whose only content is "attribute X has metric Y higher" is not allowed; the writer must merge it into a larger finding or drop it.
+- Findings are ranked by decision value to the team making the next ad, not by p-value. Fewer, sharper findings beat coverage: 3 to 6.
+- The overview answers "what does this account's creative actually do, and where is it wrong about itself" in prose, before any number.
+
+**Structure of the brief:** account context and baselines; qualitative record of units (capped at the top 60 by spend, one line each); graded main effects unflagged first (cap 60) then flagged (cap 20), each followed by its top three cell units by headline; interactions grouped by grouping value, non-thin only, with "too few to test" lists; entanglement overlaps and stratified rows; retention by reveal bin with the length caveat.
+
+**Output** (`Read`): `overview`, `findings[]` (title, layer, paragraph, mechanism, exemplars[], exception, why_non_obvious, pattern_ids, confidence), `entangled`, `no_evidence`, `next_tests[]`, `data_needed[]`. Pattern IDs are `P<n>` indexes into `tests` in stored order.
+
+**Checks in code:** number grounding (the `_numbers` regex from `creative_insight.py` against the brief); every cited ID exists; every exemplar headline appears in the brief; `why_non_obvious` non-empty on every finding. One retry with the problems named; a second failure stores the read with `status='rejected'` and the page shows the tables without prose. A critic pass that scores obviousness is hardening, not this cut.
 
 ## 5. Ask box
 
@@ -145,7 +159,7 @@ Scheduler: nightly per active ad account with video creatives. `scripts/compute_
 Insights page, new top section **Account read** (`web/src/components/account-read.tsx`):
 
 - Header line: files, creatives pooled, spend, purchases, run date.
-- Overview paragraph, then findings as titled paragraphs with layer and confidence pills. Superscript citations open an inline evidence list: attribute, metric, with vs without, change, n, p, grade, flags, and the cell's creatives with links.
+- Overview paragraph, then findings as titled paragraphs with layer and confidence pills, each followed by its mechanism, exemplars (linked to the creative pages) and exception in smaller type. Superscript citations open an inline evidence list: attribute, metric, with vs without, change, n, p, grade, flags, and the cell's creatives with links.
 - Entangled, no evidence, tests, data needed as short sections.
 - **Ask** box above the findings: text input, submit, answer rendered in the same shape. Loading and unmappable states.
 - Below 10 units: "Account read needs 10 tagged video files. This account has N."
@@ -158,7 +172,7 @@ Styling follows the existing insight card components. No new design system.
 - `facets.py`: extraction from a fixture tag list including terciles, first-product bin, opening scene.
 - `units.py` (DB): six creatives sharing one sha256 pool into one unit with summed metrics; facet source is the highest-spend copy.
 - `patterns.py`: planted-effect fixture of 40 synthetic units; the plant is found; the null facet is thin or directional in ≥ 90 of 100 seeded runs; entanglement detects two attributes on the same units.
-- `writer.py`: grounding check rejects an invented number; verdict cap lowers an over-claimed verdict. Model calls use a fake.
+- `writer.py`: grounding check rejects an invented number and an exemplar headline not in the brief; a finding without `why_non_obvious` is rejected; verdict cap lowers an over-claimed verdict. Model calls use a fake.
 - API: latest-run selection, insufficient state, cross-org 404, ask with a fake mapper and writer.
 - Web: section states (insufficient, done, rejected), citation expansion, ask flow with a mocked response.
 
