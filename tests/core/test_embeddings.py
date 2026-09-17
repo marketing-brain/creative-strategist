@@ -37,10 +37,11 @@ async def test_gateway_embedder_empty_input_makes_no_call(settings):
 async def test_fake_embedder_is_deterministic_and_similar_for_similar_text():
     a = await FakeEmbedder().embed(["concept tags: benadryl swap"])
     b = await FakeEmbedder().embed(["concept tags: benadryl swap"])
-    assert a == b and len(a[0]) == 64
+    assert a == b and len(a[0]) == 1536
     same, other = await FakeEmbedder().embed(["x: glycinate", "x: melatonin"])
     assert cosine(a[0], a[0]) == pytest.approx(1.0)
     assert cosine(same, other) < 0.999
+    assert len((await FakeEmbedder(dims=8).embed(["x"]))[0]) == 8
 
 
 def test_cosine():

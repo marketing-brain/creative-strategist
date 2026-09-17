@@ -38,22 +38,24 @@ class GatewayEmbedder:
 
 
 class FakeEmbedder:
-    """64-dim vectors from character trigram hashes: identical text embeds identically and
-    texts sharing trigrams are closer than unrelated ones. No network."""
+    """Deterministic vectors of the configured width from character trigram hashes:
+    identical text embeds identically and texts sharing trigrams are closer than
+    unrelated ones. No network."""
 
-    def __init__(self, seed: int = 0):
+    def __init__(self, seed: int = 0, dims: int = 1536):
         self.seed = seed
+        self.dims = dims
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         vectors = []
         for text in texts:
-            v = [0.0] * 64
+            v = [0.0] * self.dims
             padded = f"  {text.lower()}  "
             for i in range(len(padded) - 2):
                 h = hashlib.blake2b(
-                    f"{self.seed}:{padded[i : i + 3]}".encode(), digest_size=2
+                    f"{self.seed}:{padded[i : i + 3]}".encode(), digest_size=3
                 ).digest()
-                v[h[0] % 64] += 1.0 if h[1] % 2 else -1.0
+                v[int.from_bytes(h[:2], "big") % self.dims] += 1.0 if h[2] % 2 else -1.0
             norm = math.sqrt(sum(x * x for x in v)) or 1.0
             vectors.append([x / norm for x in v])
         return vectors
