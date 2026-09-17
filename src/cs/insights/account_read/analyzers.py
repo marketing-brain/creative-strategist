@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from itertools import combinations
 
 from cs.insights.account_read.facets import NUMERIC_DIMS
+from cs.insights.account_read.patterns import GRADE_RANK
 from cs.insights.account_read.stats import (
     IMP_FLOOR,
     MIN_CELL,
@@ -315,3 +316,69 @@ def controlled(
     ]
     out.tests = overall + fresh
     return out
+
+
+def recipe(
+    units: list[Unit], tests: list[Test], anchor: Unit, metric: str, metrics: tuple[str, ...]
+) -> Analysis:
+    """The anchor's facets ranked by their best clean graded effect: a main effect, or an
+    interaction whose group is another facet the anchor carries."""
+    groups = {f"{d}={v}" for d, v in anchor.facets}
+    ranked: list[tuple[int, float, Test]] = []
+    for f in sorted(anchor.facets):
+        cands = [
+            t
+            for t in tests
+            if (t.dimension, t.value) == f
+            and t.metric in metrics
+            and t.grade in GOOD_GRADES
+            and not t.confounds
+            and (t.group is None or t.group in groups)
+        ]
+        if not cands:
+            continue
+        best = min(cands, key=lambda t: (GRADE_RANK[t.grade], -abs(t.change)))
+        ranked.append((GRADE_RANK[best.grade], -abs(best.change), best))
+    if not ranked:
+        return Analysis(
+            empty_reason=(
+                "None of this file's attributes has clean graded evidence on these metrics."
+            )
+        )
+    ranked.sort(key=lambda r: (r[0], r[1]))
+    out = Analysis()
+    out.facts.append(f"anchor | {unit_line(anchor, metric)}")
+    for i, (_, _, t) in enumerate(ranked, start=1):
+        out.tests.append(t)
+        within = f"within {t.group} | " if t.group else ""
+        out.facts.append(
+            f"#{i} | {label(t)} | {within}{METRIC_NAME[t.metric]} {t.change * 100:+.0f}% "
+            f"{t.grade} (P{i})"
+        )
+    return out
+
+
+def run(
+    query: dict,
+    units: list[Unit],
+    tests: list[Test],
+    overlaps: list[dict],
+    metrics: tuple[str, ...],
+    draws: int,
+    anchor: Unit | None = None,
+) -> Analysis:
+    """Dispatch a parsed non-compare query. `anchor` must be resolved by the caller for the
+    nearest and recipe kinds."""
+    kind = query["kind"]
+    if kind == "spend_gap":
+        return spend_gap(units, tests, metrics)
+    if kind == "untried":
+        return untried(units, tests, overlaps, metrics)
+    if kind == "controlled":
+        return controlled(units, tests, tuple(query["target"]), query["control"], metrics, draws)
+    if anchor is None:
+        return Analysis(empty_reason="No file matches that description.")
+    metric = rank_metric(metrics)
+    if kind == "nearest":
+        return nearest(units, tests, anchor, metric, metrics)
+    return recipe(units, tests, anchor, metric, metrics)

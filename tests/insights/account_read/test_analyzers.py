@@ -360,3 +360,47 @@ def test_controlled_empty_when_strata_pass_the_cell_floor_but_not_the_purchase_f
         "No stratum has 5 files on both sides that clear the metric floors "
         "(2,000 impressions for rates, 20 purchases per side for purchase metrics)."
     )
+
+
+def test_recipe_ranks_the_anchor_facets_by_grade_then_change():
+    A, B, C = ("messenger", "expert_on_camera"), ("registers", "authority"), ("setting", "home")
+    anchor = _unit("w", [A, B, C], headline="Winner", spend=9000)
+    tests = [
+        _test(*A, change=0.6, grade="strong", cell_shas=["w"]),
+        _test(*B, change=0.3, cell_shas=["w"]),
+        _test(*B, change=0.4, grade="strong", group="messenger=expert_on_camera", cell_shas=["w"]),
+        _test(
+            *B, change=0.9, grade="strong", group="setting=outdoor", cell_shas=["w"]
+        ),  # not anchor's
+        _test(*C, change=0.2, grade="thin", cell_shas=["w"]),
+        _test(*A, change=-0.9, metric="cpa", grade="strong", cell_shas=["w"]),  # not in layer
+    ]
+    out = az.recipe([anchor], tests, anchor, "link_ctr", ("link_ctr",))
+    assert out.facts[0] == 'anchor | "Winner" | $9,000 spend | 0 copies | link CTR 3.0%'
+    assert out.facts[1:] == [
+        "#1 | messenger = expert on camera | link CTR +60% strong (P1)",
+        "#2 | registers = authority | within messenger=expert_on_camera | link CTR +40% "
+        "strong (P2)",
+    ]
+    assert out.tests == [tests[0], tests[2]]
+
+
+def test_recipe_empty_without_graded_facets():
+    anchor = _unit("w", [("setting", "home")])
+    out = az.recipe([anchor], [], anchor, "link_ctr", ("link_ctr",))
+    assert out.empty_reason == (
+        "None of this file's attributes has clean graded evidence on these metrics."
+    )
+
+
+def test_run_dispatches_by_kind():
+    units = [_unit(f"u{i}", [("angles", "novelty")]) for i in range(6)]
+    t = _test("angles", "novelty", change=0.4, cell_shas=[u.sha256 for u in units])
+    assert az.run({"kind": "untried"}, units, [t], [], ("link_ctr",), 50).empty_reason
+    assert az.run({"kind": "spend_gap"}, units, [t], [], ("link_ctr",), 50).empty_reason
+    q = {"kind": "controlled", "target": ("angles", "novelty"), "control": "spend"}
+    assert az.run(q, units, [t], [], ("link_ctr",), 50).empty_reason
+    out = az.run({"kind": "recipe"}, units, [t], [], ("link_ctr",), 50, anchor=units[0])
+    assert out.tests == [t]
+    out = az.run({"kind": "nearest"}, units, [t], [], ("link_ctr",), 50, anchor=units[0])
+    assert out.empty_reason  # nothing underperforms an identical peer
