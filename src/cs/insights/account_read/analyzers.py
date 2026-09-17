@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 from cs.insights.account_read.stats import MIN_PURCHASES, pooled, unit_rates
 from cs.insights.account_read.types import LOWER_IS_BETTER, METRICS, RATE_METRICS, Test, Unit
-from cs.insights.account_read.writer import METRIC_NAME, fmt_val
+from cs.insights.account_read.writer import METRIC_NAME, fmt_val, label
 
 GOOD_GRADES = ("strong", "suggestive")
 
@@ -78,3 +78,35 @@ def unit_line(u: Unit, metric: str) -> str:
 
 def facet_words(f: tuple[str, str]) -> str:
     return f"{f[0].replace('_', ' ')} = {str(f[1]).replace('_', ' ')}"
+
+
+OVER_FUNDED, STARVED = 1.5, 0.67  # spend share against file share
+
+
+def spend_gap(units: list[Unit], tests: list[Test], metrics: tuple[str, ...]) -> Analysis:
+    """Graded attributes whose share of spend is out of line with their share of files and
+    their effect: over-funded when heavy and bad, starved when light and good."""
+    total = float(sum(u.spend for u in units)) or 1.0
+    n = len(units)
+    by_sha = {u.sha256: u for u in units}
+    rows: list[tuple[str, float, Test]] = []
+    for t in clean_main_effects(tests, metrics):
+        cell_spend = sum(float(by_sha[s].spend) for s in t.cell_shas if s in by_sha)
+        spend_share, file_share = cell_spend / total, len(t.cell_shas) / n
+        if spend_share >= OVER_FUNDED * file_share and not is_good(t):
+            rows.append(("over-funded", spend_share, t))
+        elif spend_share <= STARVED * file_share and is_good(t):
+            rows.append(("starved", spend_share, t))
+    rows.sort(key=lambda r: (r[0] != "over-funded", -r[1]))
+    out = Analysis()
+    for verdict, share, t in rows:
+        out.tests.append(t)
+        out.facts.append(
+            f"{verdict} | {label(t)} | {len(t.cell_shas)} of {n} files | {share * 100:.0f}% of "
+            f"spend | {METRIC_NAME[t.metric]} {t.change * 100:+.0f}% {t.grade} (P{len(out.tests)})"
+        )
+    if not rows:
+        out.empty_reason = (
+            "No graded attribute is over- or under-funded relative to its share of files."
+        )
+    return out

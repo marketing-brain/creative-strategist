@@ -135,3 +135,41 @@ def test_rank_metric():
         az.rank_metric(("hook_rate", "thruplay_rate", "link_ctr", "purchases_per_1k", "cpa"))
         == "cpa"
     )
+
+
+def test_spend_gap_flags_over_funded_and_starved_attributes():
+    heavy = [_unit(f"h{i}", [("registers", "fear")], spend=5000) for i in range(3)]
+    light = [_unit(f"l{i}", [("proof_devices", "expert_credential")], spend=1000) for i in range(4)]
+    rest = [_unit(f"r{i}", [("angles", "novelty")], spend=2000) for i in range(3)]
+    units = heavy + light + rest  # total spend 25,000 across 10 files; novelty is proportional
+    fear = _test("registers", "fear", change=-0.3, cell_shas=[u.sha256 for u in heavy])
+    expert = _test(
+        "proof_devices", "expert_credential", change=0.5, cell_shas=[u.sha256 for u in light]
+    )
+    novelty = _test("angles", "novelty", change=0.4, cell_shas=[u.sha256 for u in rest])
+    flagged = _test(
+        "registers",
+        "fear",
+        change=-0.5,
+        cell_shas=[u.sha256 for u in heavy],
+        confounds=("budget_concentration",),
+    )
+    out = az.spend_gap(units, [fear, expert, novelty, flagged], ("link_ctr",))
+    assert out.empty_reason is None
+    assert out.tests == [fear, expert]
+    assert out.facts == [
+        "over-funded | registers = fear | 3 of 10 files | 60% of spend | "
+        "link CTR -30% suggestive (P1)",
+        "starved | proof devices = expert credential | 4 of 10 files | 16% of spend | "
+        "link CTR +50% suggestive (P2)",
+    ]
+
+
+def test_spend_gap_empty_when_nothing_is_skewed():
+    units = [_unit(f"u{i}", [("angles", "novelty")]) for i in range(5)] + [
+        _unit(f"v{i}", []) for i in range(5)
+    ]
+    t = _test("angles", "novelty", change=0.4, cell_shas=[f"u{i}" for i in range(5)])
+    out = az.spend_gap(units, [t], ("link_ctr",))
+    assert out.tests == [] and out.facts == []
+    assert out.empty_reason.startswith("No graded attribute")
