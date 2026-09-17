@@ -1,4 +1,4 @@
-version: "2.4"
+version: "2.5"
 # Formats whose model call returns the nested v2 profile (spec §2). Every other format
 # keeps the legacy flat {"tags": [...]} schema.
 nested_formats: [video]
@@ -150,7 +150,7 @@ dimensions:
     kind: single
     applies_to: [video]
     values: [none, creator_on_camera, creator_off_camera, expert_on_camera, founder_on_camera, actor_scripted, multiple_people, graphic_only]
-    description: Who carries the message, judged by who speaks or performs it. expert_on_camera only when a credential is stated on screen or in speech. creator_off_camera means a person speaking or performing without their face shown (voiceover, POV, hands doing something). graphic_only when text or graphics carry the message and nobody speaks, even if a silent hand or body part holds the product. multiple_people only when speech is shared roughly equally; otherwise the main speaker's type.
+    description: Who carries the message, judged by who speaks or performs it. expert_on_camera only when a credential is stated on screen or in speech. creator_off_camera means a person speaking or performing without their face shown (voiceover, POV, hands doing something). graphic_only when text or graphics carry the message and nobody speaks, even if a silent hand or body part holds the product. If any speaker states a credential, expert_on_camera wins regardless of other speakers; multiple_people only when no credential is stated and speech is shared roughly equally; otherwise the main speaker's type.
   - name: narration
     group: messenger
     kind: single
@@ -168,13 +168,13 @@ dimensions:
     kind: single
     applies_to: [video]
     values: [text_card, face_to_camera, product_in_hand, product_only, scene_broll, screen_recording]
-    description: What dominates the first three seconds.
+    description: What dominates the first three seconds. text_card only when the text sits on a plain or static background; text over live footage takes the footage's shot type (scene_broll, face_to_camera, product_in_hand).
   - name: production
     group: form
     kind: single
     applies_to: [video]
     values: [phone_ugc, polished_studio, motion_graphics, mixed_ugc_broll, screen_capture]
-    description: Production style of the footage.
+    description: Production style of the footage. phone_ugc when everything looks self-shot on a phone, including text-over-footage ads; mixed_ugc_broll only when self-shot footage is cut together with stock, studio or third-party footage.
   - name: setting
     group: form
     kind: single
@@ -192,7 +192,7 @@ dimensions:
     kind: single
     applies_to: [video]
     values: [cta_card, product_shot, speaker_signoff, hard_cut, loop]
-    description: How the video ends.
+    description: How the video ends. loop only when the final frame is designed to run back into the first (same scene, no card); a short ad that simply stops is hard_cut.
   - name: music
     group: form
     kind: single

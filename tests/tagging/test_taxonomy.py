@@ -78,7 +78,7 @@ VIDEO_DIMENSIONS = {
 
 def test_version_and_nested_formats():
     t = load_taxonomy()
-    assert t.version == "2.4" and len(t.sha256) == 64
+    assert t.version == "2.5" and len(t.sha256) == 64
     assert t.nested_formats == ("video",)
     assert t.is_nested("video") and not t.is_nested("image") and not t.is_nested("carousel")
 
