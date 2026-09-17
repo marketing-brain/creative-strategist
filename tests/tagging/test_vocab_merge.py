@@ -1,6 +1,8 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from cs.connectors.base import PlatformCreative
 from cs.core import repo as ingest_repo
 from cs.core.embeddings import FakeEmbedder
@@ -112,13 +114,13 @@ async def test_candidate_pairs_respects_floor_and_rejections(db, org_id):
     )
 
 
-async def _open_rows(db, org_id, dimension, values_with_evidence):
+async def _open_rows(db, org_id, dimension, values_with_evidence, pcid="v"):
     acct = await ingest_repo.upsert_ad_account(db, org_id, "1", "M", "USD")
     cid, _ = await ingest_repo.upsert_creative(
         db,
         org_id,
         acct,
-        PlatformCreative("v", "video", "H", "P", None, None, "u", None, None, {}),
+        PlatformCreative(pcid, "video", "H", "P", None, None, "u", None, None, {}),
         "raw",
         format_source="manual_review",
     )
@@ -237,10 +239,10 @@ def test_plan_merges_union_find_canonical_by_count_then_length():
         _v("melatonin", "benadryl_swap", 0.75, False),
     ]
     plan = plan_merges(verdicts, counts)
-    # tie on count 3 -> shortest slug wins
-    assert sorted((m.slug, m.into_slug) for m in plan.apply) == [
-        ("benadryl_alternative", "benadryl_swap"),
-        ("benadryl_sleep_alternative", "benadryl_swap"),
+    # tie on count 3 -> shortest slug wins; each member logs its own strongest pair
+    assert sorted((m.slug, m.into_slug, m.similarity) for m in plan.apply) == [
+        ("benadryl_alternative", "benadryl_swap", 0.90),
+        ("benadryl_sleep_alternative", "benadryl_swap", 0.90),
     ]
     assert plan.review == [] and [v.pair.a for v in plan.rejected] == ["benadryl_swap"]
 
@@ -282,7 +284,8 @@ async def test_apply_merges_rewrites_vocab_and_open_tag_values_but_not_raw(db, o
             "SELECT slug, canonical_slug, count FROM tag_vocab WHERE org_id=$1", org_id
         )
     }
-    assert vocab_rows == {"glycinate": ("glycinate", 3), "magnesium_glycinate": ("glycinate", 0)}
+    # count is distinct runs carrying the canonical, not the sum of the members' counts
+    assert vocab_rows == {"glycinate": ("glycinate", 1), "magnesium_glycinate": ("glycinate", 0)}
     tags = await db.fetch(
         "SELECT value, raw_value FROM tag "
         "WHERE org_id=$1 AND dimension='features_mentioned' ORDER BY raw_value",
@@ -298,7 +301,7 @@ async def test_apply_merges_rewrites_vocab_and_open_tag_values_but_not_raw(db, o
     )
     assert tuple(log) == ("magnesium_glycinate", "glycinate", "applied", "auto", "same compound")
     # hints now show the merged count on the canonical only
-    assert await vocab.hints(db, org_id, "features_mentioned", 10) == [("glycinate", 3)]
+    assert await vocab.hints(db, org_id, "features_mentioned", 10) == [("glycinate", 1)]
 
 
 async def test_review_records_approve_and_reject(db, org_id):
@@ -388,3 +391,112 @@ async def test_decide_review_reject_and_revert(db, org_id):
         )
         == "reverted"
     )
+    # and the reverted pair is not proposed again
+    pairs = await vocab_merge.candidate_pairs(db, org_id, "concept_tags", MODEL, floor=-1.0)
+    assert ("easy_gummy_format", "gummy") not in [(p.a, p.b) for p in pairs]
+
+
+def test_plan_merges_logs_each_members_strongest_evidence():
+    counts = {"sleep_aid": 9, "sleep_support": 1, "sleepy": 1}
+    verdicts = [
+        Verdict(Pair("sleep_aid", "sleep_support", 0.95), True, "same aid"),
+        Verdict(Pair("sleep_support", "sleepy", 0.82), True, "same vibe"),
+    ]
+    plan = plan_merges(verdicts, counts)
+    # not the group's weakest (0.82) for both, and not the first verdict's reason for both
+    assert sorted((m.slug, m.similarity, m.reason) for m in plan.apply) == [
+        ("sleep_support", 0.95, "same aid"),
+        ("sleepy", 0.82, "same vibe"),
+    ]
+
+
+async def test_apply_merges_counts_distinct_runs_across_creatives(db, org_id):
+    await _seed_vocab(db, org_id, "features_mentioned", {"glycinate": 2, "magnesium_glycinate": 1})
+    await _open_rows(
+        db, org_id, "features_mentioned", [("glycinate", "e1"), ("magnesium_glycinate", "e2")]
+    )
+    await _open_rows(db, org_id, "features_mentioned", [("magnesium_glycinate", "e3")], pcid="v2")
+    await apply_merges(
+        db,
+        org_id,
+        "features_mentioned",
+        [Merge("magnesium_glycinate", "glycinate", 0.92, "same compound")],
+        source="auto",
+    )
+    counts = {
+        r["slug"]: r["count"]
+        for r in await db.fetch("SELECT slug, count FROM tag_vocab WHERE org_id=$1", org_id)
+    }
+    # two runs carry the canonical after the rewrite; the first run carried both members
+    # and must not be counted twice
+    assert counts == {"glycinate": 2, "magnesium_glycinate": 0}
+
+
+async def test_apply_merges_rejects_a_canonical_outside_the_vocabulary(db, org_id):
+    await _seed_vocab(db, org_id, "concept_tags", {"gummy": 1})
+    with pytest.raises(ValueError, match="not in the vocabulary"):
+        await apply_merges(
+            db, org_id, "concept_tags", [Merge("gummy", "nope", 0.9, "r")], source="auto"
+        )
+    assert (
+        await db.fetchval(
+            "SELECT canonical_slug FROM tag_vocab WHERE org_id=$1 AND slug='gummy'", org_id
+        )
+        == "gummy"
+    )
+    assert await db.fetchval("SELECT count(*) FROM tag_vocab_merge WHERE org_id=$1", org_id) == 0
+
+
+async def test_approving_a_review_twice_raises_and_leaves_one_log_row(db, org_id):
+    await _seed_vocab(db, org_id, "concept_tags", {"gummy": 2, "easy_gummy_format": 4})
+    await _open_rows(db, org_id, "concept_tags", [("gummy", "e")])
+    await record_review(
+        db, org_id, "concept_tags", [Merge("gummy", "easy_gummy_format", 0.74, "maybe")]
+    )
+    (pending,) = await list_review(db, org_id)
+    await decide_review(db, pending["id"], approve=True)
+    with pytest.raises(ValueError, match="no pending review merge"):
+        await decide_review(db, pending["id"], approve=True)
+    rows = await db.fetch(
+        "SELECT id, status, source FROM tag_vocab_merge "
+        "WHERE org_id=$1 AND dimension='concept_tags' AND slug='gummy' "
+        "AND into_slug='easy_gummy_format'",
+        org_id,
+    )
+    assert [(r["id"], r["status"], r["source"]) for r in rows] == [
+        (pending["id"], "applied", "manual")
+    ]
+
+
+async def test_revert_stops_the_pair_from_being_reproposed(db, org_id):
+    await _seed_vocab(db, org_id, "concept_tags", {"gummy": 2, "easy_gummy_format": 4})
+    await _open_rows(db, org_id, "concept_tags", [("gummy", "e"), ("easy_gummy_format", "f")])
+    await vocab_merge.embed_missing(db, FakeEmbedder(), org_id, "concept_tags", MODEL)
+    before = await vocab_merge.candidate_pairs(db, org_id, "concept_tags", MODEL, floor=-1.0)
+    assert [(p.a, p.b) for p in before] == [("easy_gummy_format", "gummy")]
+    await apply_merges(
+        db, org_id, "concept_tags", [Merge("gummy", "easy_gummy_format", 0.9, "r")], source="auto"
+    )
+    await revert(db, org_id, "concept_tags", "gummy")
+    assert await vocab_merge.candidate_pairs(db, org_id, "concept_tags", MODEL, floor=-1.0) == []
+    row = await db.fetchrow(
+        "SELECT reason, source, into_slug FROM tag_vocab_merge "
+        "WHERE org_id=$1 AND status='rejected' AND slug='gummy'",
+        org_id,
+    )
+    assert tuple(row) == ("reverted by operator", "manual", "easy_gummy_format")
+
+
+async def test_revert_rejects_an_unknown_slug(db, org_id):
+    with pytest.raises(ValueError, match="no vocab row for 'nope'"):
+        await revert(db, org_id, "concept_tags", "nope")
+
+
+async def test_revert_is_a_no_op_for_a_slug_that_was_never_merged(db, org_id):
+    await _seed_vocab(db, org_id, "concept_tags", {"gummy": 7})
+    await revert(db, org_id, "concept_tags", "gummy")
+    assert (
+        await db.fetchval("SELECT count FROM tag_vocab WHERE org_id=$1 AND slug='gummy'", org_id)
+        == 7
+    )
+    assert await db.fetchval("SELECT count(*) FROM tag_vocab_merge WHERE org_id=$1", org_id) == 0

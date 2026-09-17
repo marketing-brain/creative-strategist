@@ -290,18 +290,71 @@ def plan_merges(
         groups.setdefault(find(slug), []).append(slug)
     weakest: dict[str, float] = {}
     reasons: dict[str, str] = {}
+    best: dict[str, tuple[float, str]] = {}
     for v in accepted:
         root = find(v.pair.a)
         weakest[root] = min(weakest.get(root, 1.0), v.pair.cosine)
         reasons.setdefault(root, v.reason)
+        for slug in (v.pair.a, v.pair.b):
+            if slug not in best or v.pair.cosine > best[slug][0]:
+                best[slug] = (v.pair.cosine, v.reason)
     plan = MergePlan(apply=[], review=[], rejected=[v for v in verdicts if not v.same_concept])
     for root, members in groups.items():
         canonical = _canonical(members, counts)
+        # The group is routed by its weakest accepted pair, but each member logs the
+        # strongest accepted pair it took part in, so the row carries its own evidence.
         target = plan.apply if weakest[root] >= apply_floor else plan.review
         for slug in sorted(members):
             if slug != canonical:
-                target.append(Merge(slug, canonical, weakest[root], reasons[root]))
+                similarity, reason = best.get(slug, (weakest[root], reasons[root]))
+                target.append(Merge(slug, canonical, similarity, reason))
     return plan
+
+
+async def _apply(tx: Database, org_id: UUID, dimension: str, merges: list[Merge]) -> None:
+    """Repoint each member at its canonical, rewrite open tag values and recompute counts.
+    Writes no log rows, and must be called inside a transaction."""
+    canonicals = {m.into_slug for m in merges}
+    for canonical in sorted(canonicals):
+        known = await tx.fetchval(
+            "SELECT 1 FROM tag_vocab WHERE org_id=$1 AND dimension=$2 AND slug=$3",
+            org_id,
+            dimension,
+            canonical,
+        )
+        if known is None:
+            raise ValueError(f"canonical {canonical!r} is not in the vocabulary")
+    for m in merges:
+        await tx.execute(
+            "UPDATE tag_vocab SET canonical_slug=$4 WHERE org_id=$1 AND dimension=$2 AND slug=$3",
+            org_id,
+            dimension,
+            m.slug,
+            m.into_slug,
+        )
+        await tx.execute(
+            "UPDATE tag SET value=$4 WHERE org_id=$1 AND dimension=$2 AND kind='open' AND value=$3",
+            org_id,
+            dimension,
+            m.slug,
+            m.into_slug,
+        )
+    # count is the number of distinct runs carrying the slug -- what bump_counts
+    # accumulates -- so it is recounted from the rewritten rows, never summed across
+    # members (one run carrying two members of the group would be counted twice).
+    for canonical in sorted(canonicals):
+        await tx.execute(
+            """
+            UPDATE tag_vocab SET count = CASE WHEN slug=$3 THEN (
+              SELECT count(DISTINCT tag_run_id) FROM tag
+              WHERE org_id=$1 AND dimension=$2 AND kind='open' AND value=$3
+            ) ELSE 0 END
+            WHERE org_id=$1 AND dimension=$2 AND canonical_slug=$3
+            """,
+            org_id,
+            dimension,
+            canonical,
+        )
 
 
 async def apply_merges(
@@ -310,23 +363,8 @@ async def apply_merges(
     if not merges:
         return
     async with db.transaction() as tx:
+        await _apply(tx, org_id, dimension, merges)
         for m in merges:
-            await tx.execute(
-                "UPDATE tag_vocab SET canonical_slug=$4 "
-                "WHERE org_id=$1 AND dimension=$2 AND slug=$3",
-                org_id,
-                dimension,
-                m.slug,
-                m.into_slug,
-            )
-            await tx.execute(
-                "UPDATE tag SET value=$4 "
-                "WHERE org_id=$1 AND dimension=$2 AND kind='open' AND value=$3",
-                org_id,
-                dimension,
-                m.slug,
-                m.into_slug,
-            )
             await tx.execute(
                 "INSERT INTO tag_vocab_merge (id, org_id, dimension, slug, into_slug, "
                 "similarity, reason, status, source, decided_at) "
@@ -339,21 +377,6 @@ async def apply_merges(
                 m.similarity,
                 m.reason,
                 source,
-            )
-        for canonical in {m.into_slug for m in merges}:
-            await tx.execute(
-                """
-                WITH total AS (
-                  SELECT sum(count) AS n FROM tag_vocab
-                  WHERE org_id=$1 AND dimension=$2 AND canonical_slug=$3
-                )
-                UPDATE tag_vocab v SET count =
-                  CASE WHEN v.slug=$3 THEN (SELECT n FROM total) ELSE 0 END
-                WHERE v.org_id=$1 AND v.dimension=$2 AND v.canonical_slug=$3
-                """,
-                org_id,
-                dimension,
-                canonical,
             )
 
 
@@ -412,45 +435,41 @@ async def list_review(db: Database, org_id: UUID) -> list[asyncpg.Record]:
 
 
 async def decide_review(db: Database, merge_id: UUID, approve: bool) -> None:
-    row = await db.fetchrow(
-        "SELECT org_id, dimension, slug, into_slug, similarity, reason FROM tag_vocab_merge "
-        "WHERE id=$1 AND status='review'",
-        merge_id,
-    )
-    if row is None:
-        raise ValueError(f"no pending review merge {merge_id}")
-    if approve:
-        # apply_merges writes its own 'applied' log row; mark the review row as decided by
-        # turning it into that applied row instead of leaving two.
-        await db.execute("DELETE FROM tag_vocab_merge WHERE id=$1", merge_id)
-        await apply_merges(
-            db,
-            row["org_id"],
-            row["dimension"],
-            [Merge(row["slug"], row["into_slug"], row["similarity"], row["reason"] or "")],
-            source="manual",
-        )
-        await db.execute(
-            "UPDATE tag_vocab_merge SET id=$1 "
-            "WHERE org_id=$2 AND dimension=$3 AND slug=$4 AND into_slug=$5 "
-            "AND status='applied' AND source='manual' AND id <> $1",
-            merge_id,
-            row["org_id"],
-            row["dimension"],
-            row["slug"],
-            row["into_slug"],
-        )
-    else:
-        await db.execute(
-            "UPDATE tag_vocab_merge SET status='rejected', source='manual', decided_at=now() "
-            "WHERE id=$1",
+    """Approve or reject one pending review row. The row itself becomes the decision, so
+    an approved merge and its log entry commit together or not at all."""
+    async with db.transaction() as tx:
+        row = await tx.fetchrow(
+            "SELECT org_id, dimension, slug, into_slug, similarity, reason FROM tag_vocab_merge "
+            "WHERE id=$1 AND status='review' FOR UPDATE",
             merge_id,
         )
+        if row is None:
+            raise ValueError(f"no pending review merge {merge_id}")
+        if approve:
+            await _apply(
+                tx,
+                row["org_id"],
+                row["dimension"],
+                [Merge(row["slug"], row["into_slug"], row["similarity"], row["reason"] or "")],
+            )
+            await tx.execute(
+                "UPDATE tag_vocab_merge SET status='applied', source='manual', decided_at=now() "
+                "WHERE id=$1",
+                merge_id,
+            )
+        else:
+            await tx.execute(
+                "UPDATE tag_vocab_merge SET status='rejected', source='manual', decided_at=now() "
+                "WHERE id=$1",
+                merge_id,
+            )
 
 
 async def revert(db: Database, org_id: UUID, dimension: str, slug: str) -> None:
     """Point `slug` back at itself and restore tag.value from raw_value for the rows whose
-    raw slug normalizes to it. Counts are recomputed from the restored rows."""
+    raw slug normalizes to it. Counts are recomputed from the restored rows, and the pair
+    is logged as rejected so the next run does not propose it again. Raises ValueError for
+    an unknown slug; does nothing for a slug that is not merged."""
     from cs.tagging.vocab import normalize
 
     async with db.transaction() as tx:
@@ -460,6 +479,10 @@ async def revert(db: Database, org_id: UUID, dimension: str, slug: str) -> None:
             dimension,
             slug,
         )
+        if into is None:
+            raise ValueError(f"no vocab row for {slug!r}")
+        if into == slug:
+            return
         await tx.execute(
             "UPDATE tag_vocab SET canonical_slug=slug WHERE org_id=$1 AND dimension=$2 AND slug=$3",
             org_id,
@@ -494,4 +517,16 @@ async def revert(db: Database, org_id: UUID, dimension: str, slug: str) -> None:
             org_id,
             dimension,
             slug,
+        )
+        # A reverted pair must not be proposed again: rejected_pairs only reads
+        # status='rejected', so record the operator's decision as one.
+        await tx.execute(
+            "INSERT INTO tag_vocab_merge (id, org_id, dimension, slug, into_slug, "
+            "similarity, reason, status, source, decided_at) "
+            "VALUES ($1,$2,$3,$4,$5,0.0,'reverted by operator','rejected','manual',now())",
+            new_id(),
+            org_id,
+            dimension,
+            slug,
+            into,
         )
