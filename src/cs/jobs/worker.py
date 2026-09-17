@@ -74,6 +74,25 @@ async def run_once(db: Database, blobs: BlobStore, settings: Settings, worker_id
     return True
 
 
+async def _run_slot(db: Database, blobs: BlobStore, settings: Settings, worker_id: str) -> None:
+    """One claim-run-complete loop; `run_worker` runs `worker_concurrency` of these."""
+    failures = 0
+    while True:
+        try:
+            ran = await run_once(db, blobs, settings, worker_id)
+        except Exception:  # noqa: BLE001 - the loop must outlive transient outages
+            failures += 1
+            log.exception(
+                "worker iteration failed",
+                extra={"worker_id": worker_id, "consecutive_failures": failures},
+            )
+            await asyncio.sleep(min(30, 2**failures))
+            continue
+        failures = 0
+        if not ran:
+            await asyncio.sleep(settings.worker_poll_seconds)
+
+
 async def run_worker(settings: Settings | None = None) -> None:
     settings = settings or get_settings()
     import cs.jobs.all_handlers  # noqa: F401 - registers handlers from every module
@@ -81,22 +100,11 @@ async def run_worker(settings: Settings | None = None) -> None:
     db = await Database.connect(settings.database_url)
     blobs = blob_store_from_settings(settings)
     worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
-    log.info("worker started", extra={"worker_id": worker_id})
-    failures = 0
+    slots = max(1, settings.worker_concurrency)
+    log.info("worker started", extra={"worker_id": worker_id, "concurrency": slots})
     try:
-        while True:
-            try:
-                ran = await run_once(db, blobs, settings, worker_id)
-            except Exception:  # noqa: BLE001 - the loop must outlive transient outages
-                failures += 1
-                log.exception(
-                    "worker iteration failed",
-                    extra={"worker_id": worker_id, "consecutive_failures": failures},
-                )
-                await asyncio.sleep(min(30, 2**failures))
-                continue
-            failures = 0
-            if not ran:
-                await asyncio.sleep(settings.worker_poll_seconds)
+        await asyncio.gather(
+            *(_run_slot(db, blobs, settings, f"{worker_id}:{i}") for i in range(slots))
+        )
     finally:
         await db.close()

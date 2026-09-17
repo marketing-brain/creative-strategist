@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     apify_api_key: str = ""
 
     worker_poll_seconds: float = 1.0
+    # Jobs one worker process runs at the same time. Each slot claims, runs and
+    # completes jobs independently; the DB pool (max 10) and the box's memory bound it.
+    worker_concurrency: int = 1
     # 'done' jobs are deleted after this many days; 'dead' rows are kept (queue.is_dead).
     job_retention_days: int = 30
     job_lease_seconds: int = 600
