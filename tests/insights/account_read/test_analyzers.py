@@ -342,4 +342,21 @@ def test_controlled_empty_when_no_stratum_reaches_the_cell_floor():
     target = ("messenger", "expert_on_camera")
     units = [_unit(f"u{i}", [target] if i < 2 else [], spend=100 * i) for i in range(9)]
     out = az.controlled(units, [], target, "spend", ("link_ctr",), draws=50)
-    assert out.empty_reason == "No stratum has 5 files on both sides."
+    assert out.empty_reason == (
+        "No stratum has 5 files on both sides that clear the metric floors "
+        "(2,000 impressions for rates, 20 purchases per side for purchase metrics)."
+    )
+
+
+def test_controlled_empty_when_strata_pass_the_cell_floor_but_not_the_purchase_floor():
+    target = ("messenger", "expert_on_camera")
+    units = [
+        _unit(f"u{i:02d}", [target] if i % 2 == 0 else [], spend=100 * (i + 1), purchases=2)
+        for i in range(30)
+    ]  # every tercile splits 5 with vs 5 without, but 10 purchases a side is under the floor
+    out = az.controlled(units, [], target, "spend", ("cpa",), draws=50)
+    assert out.tests == []
+    assert out.empty_reason == (
+        "No stratum has 5 files on both sides that clear the metric floors "
+        "(2,000 impressions for rates, 20 purchases per side for purchase metrics)."
+    )

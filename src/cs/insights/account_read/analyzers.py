@@ -8,6 +8,7 @@ from itertools import combinations
 
 from cs.insights.account_read.facets import NUMERIC_DIMS
 from cs.insights.account_read.stats import (
+    IMP_FLOOR,
     MIN_CELL,
     MIN_PURCHASES,
     benjamini_hochberg,
@@ -297,7 +298,13 @@ def controlled(
         found = compare(cell, comp, dimension=dim, value=val, group=lbl, draws=draws)
         fresh += [t for t in found if t.metric in metrics]
     if not fresh:
-        return Analysis(empty_reason=f"No stratum has {MIN_CELL} files on both sides.")
+        return Analysis(
+            empty_reason=(
+                f"No stratum has {MIN_CELL} files on both sides that clear the metric floors "
+                f"({IMP_FLOOR:,} impressions for rates, {MIN_PURCHASES} purchases per side for "
+                "purchase metrics)."
+            )
+        )
     passing = benjamini_hochberg([t.p for t in fresh])
     for i, t in enumerate(fresh):
         t.grade = grade(t.p, t.change, i in passing)
