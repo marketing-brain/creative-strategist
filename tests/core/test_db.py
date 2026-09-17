@@ -63,3 +63,23 @@ async def test_jsonb_codec_encodes_uuid_datetime_and_decimal(db):
 def test_json_default_rejects_unknown_types():
     with pytest.raises(TypeError):
         _json_default(object())
+
+
+def test_pool_kwargs_disable_statement_cache_for_transaction_pooler():
+    from cs.core.db import pool_kwargs
+
+    session = pool_kwargs("postgres://u:p@aws-0.pooler.supabase.com:5432/postgres")
+    tx = pool_kwargs("postgres://u:p@aws-0.pooler.supabase.com:6543/postgres")
+    assert "statement_cache_size" not in session
+    assert tx["statement_cache_size"] == 0
+
+
+def test_settings_pool_url_falls_back_to_database_url(monkeypatch):
+    from cs.core.config import Settings
+
+    monkeypatch.setenv("DATABASE_URL", "postgres://u:p@h:5432/d")
+    monkeypatch.setenv("CLERK_JWKS_URL", "https://example.test/jwks")
+    monkeypatch.delenv("DATABASE_POOL_URL", raising=False)
+    assert Settings().pool_url == "postgres://u:p@h:5432/d"
+    monkeypatch.setenv("DATABASE_POOL_URL", "postgres://u:p@h:6543/d")
+    assert Settings().pool_url == "postgres://u:p@h:6543/d"

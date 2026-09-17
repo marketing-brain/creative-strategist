@@ -85,7 +85,7 @@ async def run_scheduler(settings: Settings | None = None) -> None:
     settings = settings or get_settings()
     import cs.jobs.all_handlers  # noqa: F401 - schedules live beside handlers
 
-    db = await Database.connect(settings.database_url)
+    db = await Database.connect(settings.pool_url)
     state = await load_schedule_state(db)
     try:
         while True:

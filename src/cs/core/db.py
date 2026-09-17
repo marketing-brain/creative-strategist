@@ -35,6 +35,17 @@ async def _init_conn(conn: asyncpg.Connection) -> None:
     )
 
 
+def pool_kwargs(url: str) -> dict:
+    """Pool settings for `url`. Behind a transaction-mode pooler (PgBouncer, Supabase port
+    6543) server connections are shared per transaction, so asyncpg's prepared-statement
+    cache must be off: a statement prepared on one server connection does not exist on
+    the next."""
+    kwargs: dict = {"min_size": 1, "max_size": 10, "init": _init_conn}
+    if ":6543/" in url or url.rstrip("/").endswith(":6543"):
+        kwargs["statement_cache_size"] = 0
+    return kwargs
+
+
 class Database:
     def __init__(self, pool: asyncpg.Pool | None, conn: asyncpg.Connection | None = None):
         self._pool = pool
@@ -42,7 +53,7 @@ class Database:
 
     @classmethod
     async def connect(cls, url: str) -> Database:
-        pool = await asyncpg.create_pool(url, min_size=1, max_size=10, init=_init_conn)
+        pool = await asyncpg.create_pool(url, **pool_kwargs(url))
         return cls(pool)
 
     async def close(self) -> None:

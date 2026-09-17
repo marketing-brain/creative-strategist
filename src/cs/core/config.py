@@ -9,6 +9,11 @@ class Settings(BaseSettings):
 
     database_url: str
     database_url_test: str = ""
+    # Optional URL for the long-lived app pools (api, worker, scheduler). Point it at the
+    # transaction-mode pooler (Supabase port 6543) so the three processes share server
+    # connections instead of each pinning a session-mode slot; migrations and psql keep
+    # using DATABASE_URL. Empty means "same as DATABASE_URL".
+    database_pool_url: str = ""
 
     blob_backend: Literal["local", "s3"] = "local"
     blob_root: str = "./var/blobs"
@@ -82,6 +87,10 @@ class Settings(BaseSettings):
     job_lease_seconds: int = 600
 
     cors_origins: str = "http://localhost:3000"
+
+    @property
+    def pool_url(self) -> str:
+        return self.database_pool_url or self.database_url
 
     @property
     def account_read_grouping_dims_list(self) -> list[str]:

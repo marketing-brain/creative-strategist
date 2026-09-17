@@ -78,7 +78,7 @@ async def run_worker(settings: Settings | None = None) -> None:
     settings = settings or get_settings()
     import cs.jobs.all_handlers  # noqa: F401 - registers handlers from every module
 
-    db = await Database.connect(settings.database_url)
+    db = await Database.connect(settings.pool_url)
     blobs = blob_store_from_settings(settings)
     worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
     log.info("worker started", extra={"worker_id": worker_id})
