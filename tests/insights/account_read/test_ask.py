@@ -399,6 +399,7 @@ async def test_answer_ranks_nearest_by_the_named_anchor_metric():
     )
     out = await answer("what separates our best CPA video from its lookalikes?", result, w)
     assert out["kind"] == "nearest"
-    assert out["facts"][0].startswith('anchor | "Ad 0"')
-    assert "CPA $17" in out["facts"][0]
-    assert len([f for f in out["facts"] if f.startswith("neighbour |")]) == 5
+    texts = [f["text"] for f in out["facts"]]
+    assert texts[0].startswith('anchor | "Ad 0"')
+    assert "CPA $17" in texts[0]
+    assert len([t for t in texts if t.startswith("neighbour |")]) == 5
