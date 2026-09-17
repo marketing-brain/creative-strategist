@@ -215,3 +215,19 @@ def test_generic_partner_values_need_the_dimension_name_and_entangled_must_name_
     ]
     ok = _read(findings=[f], entangled="Warning hooks and duration (long videos) share files.")
     assert check_read(ok, brief, 1, collapses) == []
+
+
+def test_parse_read_salvages_a_top_level_list_and_skips_non_dict_findings():
+    r = parse_read(
+        '[{"overview": "o", "findings": [{"title": "t"}, "junk", ["x"]], "next_tests": []}]'
+    )
+    assert r.overview == "o" and [f.title for f in r.findings] == ["t"]
+
+
+async def test_write_read_gets_three_attempts():
+    run = _run()
+    bad = _json(_read(overview="CTR rose 99%."))
+    good = _json(_read())
+    writer = FakeAccountReadWriter([bad, bad, good])
+    read, problems, _, _ = await write_read(run, writer)
+    assert read is not None and problems == [] and len(writer.calls) == 3

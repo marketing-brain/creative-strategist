@@ -23,6 +23,7 @@ METRIC_NAME = {
 MAX_MAIN_UNFLAGGED, MAX_MAIN_FLAGGED, MAX_UNITS_LISTED = 60, 20, 60
 # Interactions are numerous; the brief carries the sharpest lines per group, strongest groups first.
 MAX_GROUPS, MAX_LINES_PER_GROUP = 20, 10
+MAX_ATTEMPTS = 3  # first draft plus two retries with the problems named
 GRADE_ORDER = {"strong": 0, "suggestive": 1, "directional": 2}
 
 
@@ -222,8 +223,14 @@ def _numbers(text: str) -> set[float]:
 def parse_read(text: str) -> Read:
     m = _FENCE.match(text)
     body = json.loads(m.group(1) if m else text)
+    if isinstance(body, list):  # a model sometimes wraps the object in an array
+        body = next((x for x in body if isinstance(x, dict)), {})
+    if not isinstance(body, dict):
+        raise TypeError("response is not a JSON object")
     findings = []
     for f in body.get("findings") or []:
+        if not isinstance(f, dict):
+            continue
         findings.append(
             Finding(
                 title=str(f.get("title", "")),
@@ -388,21 +395,22 @@ class GeminiGatewayAccountReadWriter:
 async def write_read(
     run: RunResult, writer: AccountReadWriter
 ) -> tuple[Read | None, list[str], int, int]:
-    """One draft, one retry with the problems named; None when the retry still fails."""
+    """One draft plus retries with the problems named; None when the last one still fails."""
     brief = build_brief(run)
     collapses = entanglement_collapses(run)
     tokens_in = tokens_out = 0
     feedback: list[str] = []
-    for _ in range(2):
+    for _ in range(MAX_ATTEMPTS):
         user = brief + (
-            "\n\nWrite the overview, findings, entangled, no_evidence, next_tests and data_needed."
+            "\n\nWrite the overview, findings, entangled, no_evidence, next_tests and data_needed. "
+            "Return one JSON object with exactly those keys."
         )
         if feedback:
             user += (
                 "\n\nYour previous draft broke the rules: "
                 + "; ".join(feedback)
                 + ". Rewrite, citing only numbers and headlines that appear in the brief exactly "
-                "as written."
+                "as written, and return a single JSON object."
             )
         text, ti, to = await writer.complete(SYSTEM, user)
         tokens_in, tokens_out = tokens_in + ti, tokens_out + to
