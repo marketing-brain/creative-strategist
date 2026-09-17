@@ -47,14 +47,27 @@ async def insert_run(
 
 
 async def latest_run(db: Database, org_id: UUID, ad_account_id: UUID) -> dict | None:
-    row = await db.fetchrow(
+    """The newest done run when one exists, else the newest run of any status. When a newer
+    run failed its checks, its error rides along as `newer_failed_error` so the page can say
+    the read is from an earlier run."""
+    rows = await db.fetch(
         "SELECT id, status, n_units, window_start, window_end, result, read, error, created_at "
         "FROM account_read_run WHERE org_id=$1 AND ad_account_id=$2 AND format='video' "
-        "ORDER BY created_at DESC LIMIT 1",
+        "ORDER BY created_at DESC LIMIT 20",
         org_id,
         ad_account_id,
     )
-    return dict(row) if row is not None else None  # jsonb columns arrive decoded
+    if not rows:
+        return None
+    newest = dict(rows[0])
+    done = next((dict(r) for r in rows if r["status"] == "done"), None)
+    chosen = done or newest
+    chosen["newer_failed_error"] = (
+        newest["error"]
+        if chosen["id"] != newest["id"] and newest["status"] in ("rejected", "failed")
+        else None
+    )
+    return chosen
 
 
 async def purge_runs(db: Database, days: int = 30) -> int:

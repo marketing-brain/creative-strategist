@@ -101,6 +101,7 @@ async def account_read(
         "retention_by_reveal": result.get("retention_by_reveal", {}),
         "units": units,
         "error": row["error"],
+        "newer_failed_error": row.get("newer_failed_error"),
     }
 
 

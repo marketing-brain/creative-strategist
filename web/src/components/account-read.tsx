@@ -74,6 +74,11 @@ export function AccountReadSection({ data, accountId }: { data: AccountRead; acc
         </span>
       </div>
       <AccountReadAsk accountId={accountId} tests={tests} units={units} />
+      {data.newer_failed_error && (
+        <p className="text-xs text-muted-foreground">
+          A newer run failed its checks ({data.newer_failed_error.slice(0, 160)}). Showing the last read that passed.
+        </p>
+      )}
       {!read ? (
         <p className="text-sm text-muted-foreground">
           The prose read failed its checks on the last run{data.error ? `: ${data.error}` : ''}. The patterns are still current;

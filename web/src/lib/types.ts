@@ -59,6 +59,6 @@ export type AccountReadUnit = { sha256: string; headline: string; spend: number;
 export type AccountRead = {
   status: 'none' | 'done' | 'insufficient' | 'rejected' | 'failed'; n_units?: number; created_at?: string; window_start?: string | null; window_end?: string | null;
   summary?: Record<string, unknown>; tests?: AccountReadTest[]; overlaps?: unknown[]; stratified?: unknown[]; retention_by_reveal?: Record<string, unknown>;
-  units?: AccountReadUnit[]; read?: AccountReadText | null; error?: string | null;
+  units?: AccountReadUnit[]; read?: AccountReadText | null; error?: string | null; newer_failed_error?: string | null;
 };
 export type AccountReadAnswer = { unmappable?: string; verdict?: 'answerable' | 'directional' | 'not yet'; answer?: string; pattern_ids?: string[]; tests?: AccountReadTest[]; what_would_settle_it?: string };

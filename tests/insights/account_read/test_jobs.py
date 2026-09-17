@@ -113,3 +113,31 @@ async def test_latest_run_and_purge(db, org_id, ad_account_id):
         "UPDATE account_read_run SET created_at = now() - interval '40 days' WHERE id=$1", a
     )
     assert await repo.purge_runs(db, days=30) == 1
+
+
+async def test_latest_run_prefers_the_newest_done_run_over_a_newer_rejected_one(
+    db, org_id, ad_account_id
+):
+    good = await repo.insert_run(
+        db,
+        org_id,
+        ad_account_id,
+        status="done",
+        n_units=12,
+        result={"summary": {}},
+        read={"overview": "good"},
+        error=None,
+    )
+    await repo.insert_run(
+        db,
+        org_id,
+        ad_account_id,
+        status="rejected",
+        n_units=12,
+        result={"summary": {}},
+        read=None,
+        error="checks failed",
+    )
+    row = await repo.latest_run(db, org_id, ad_account_id)
+    assert row["id"] == good and row["read"]["overview"] == "good"
+    assert row["newer_failed_error"] == "checks failed"
