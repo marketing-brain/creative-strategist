@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     # dry run 1 (ingredient vs. branded form, falling asleep vs. sleep quality). A wrong
     # merge is destructive and only reversible by hand, so it runs on the full flash tier.
     judge_model: str = "google/gemini-2.5-flash"
+    # Account read (spec 2026-09-17). Grouping dimensions for bounded interaction tests;
+    # a grouping value needs account_read_min_units units before it is used as a group.
+    account_read_grouping_dims: str = (
+        "audience_callouts,products_mentioned,features_mentioned,messenger,duration_s"
+    )
+    account_read_min_units: int = 10
+    account_read_permutation_draws: int = 1000
     # Per-creative insight paragraph (ad + diagnosis brief). Needs cross-modal reasoning, so
     # the stronger tier. Independent of video_tagging_enabled: videos get an insight even with
     # tagging off, bounded by creative_insight_limit_per_format.
@@ -75,6 +82,10 @@ class Settings(BaseSettings):
     job_lease_seconds: int = 600
 
     cors_origins: str = "http://localhost:3000"
+
+    @property
+    def account_read_grouping_dims_list(self) -> list[str]:
+        return [d.strip() for d in self.account_read_grouping_dims.split(",") if d.strip()]
 
     @property
     def cors_origins_list(self) -> list[str]:

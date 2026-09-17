@@ -1,0 +1,228 @@
+"""One account-read run: main effects, bounded interactions, entanglement, retention by reveal."""
+
+from __future__ import annotations
+
+import statistics
+from itertools import combinations
+
+from cs.insights.account_read.facets import DERIVED_SINGLE_DIMS, NUMERIC_DIMS, REVEAL_BINS
+from cs.insights.account_read.stats import (
+    MIN_PURCHASES,
+    benjamini_hochberg,
+    compare,
+    grade,
+    pooled,
+    retention_shares,
+    unit_rates,
+)
+from cs.insights.account_read.types import RATE_METRICS, RunResult, Test, Unit
+from cs.tagging.taxonomy import load_taxonomy
+
+GRADE_RANK = {"strong": 0, "suggestive": 1, "directional": 2, "thin": 3}
+MIN_GROUP = 10
+
+
+def _kinds() -> dict[str, str]:
+    """dimension -> 'single' for taxonomy single-value dimensions, the derived single facets
+    and the numeric tercile facets (complement = units that have the dimension at all);
+    anything else is 'multi' (complement = every other unit)."""
+    kinds = {d.name: "single" for d in load_taxonomy().dimensions if d.kind == "single"}
+    for d in DERIVED_SINGLE_DIMS + NUMERIC_DIMS:
+        kinds[d] = "single"
+    return kinds
+
+
+def _all_facets(units: list[Unit]) -> list[tuple[str, str]]:
+    return sorted({f for u in units for f in u.facets})
+
+
+def _scope(units: list[Unit], dim: str, kinds: dict[str, str]) -> list[Unit]:
+    if kinds.get(dim) == "single":
+        return [u for u in units if any(d == dim for d, _ in u.facets)]
+    return list(units)
+
+
+def main_effects(
+    units: list[Unit], bin_edges: dict, kinds: dict[str, str], draws: int
+) -> list[Test]:
+    out: list[Test] = []
+    for dim, val in _all_facets(units):
+        cell = [u for u in units if u.has(dim, val)]
+        comp = [u for u in _scope(units, dim, kinds) if not u.has(dim, val)]
+        out += compare(
+            cell, comp, dimension=dim, value=val, bin_edges=bin_edges.get(dim), draws=draws
+        )
+    return out
+
+
+def interactions(
+    units: list[Unit], grouping_dims: list[str], kinds: dict[str, str], draws: int
+) -> list[Test]:
+    out: list[Test] = []
+    for gdim in grouping_dims:
+        for gval in sorted({v for u in units for d, v in u.facets if d == gdim}):
+            group = [u for u in units if u.has(gdim, gval)]
+            if len(group) < MIN_GROUP:
+                continue
+            label = f"{gdim}={gval}"
+            for dim, val in _all_facets(group):
+                if dim == gdim:
+                    continue
+                cell = [u for u in group if u.has(dim, val)]
+                comp = [u for u in _scope(group, dim, kinds) if not u.has(dim, val)]
+                out += compare(cell, comp, dimension=dim, value=val, group=label, draws=draws)
+    return out
+
+
+def apply_grades(tests: list[Test]) -> None:
+    passing = benjamini_hochberg([t.p for t in tests])
+    for i, t in enumerate(tests):
+        t.grade = grade(t.p, t.change, i in passing)
+
+
+def _change_within(cell: list[Unit], comp: list[Unit], metric: str) -> tuple[float | None, str]:
+    if metric in RATE_METRICS:
+        x = [unit_rates(u)[metric] for u in cell if metric in unit_rates(u)]
+        y = [unit_rates(u)[metric] for u in comp if metric in unit_rates(u)]
+        if len(x) >= 3 and len(y) >= 3 and statistics.median(y):
+            return statistics.median(x) / statistics.median(y) - 1, f"{len(x)} vs {len(y)}"
+        return None, f"{len(x)} vs {len(y)}"
+    if metric == "purchases_per_1k":
+        num, den = "purchases", "impressions"
+    else:
+        num, den = "spend", "purchases"
+    ok = (
+        len(cell) >= 3
+        and len(comp) >= 3
+        and sum(u.purchases for u in cell) >= MIN_PURCHASES
+        and sum(u.purchases for u in comp) >= MIN_PURCHASES
+    )
+    ra, rb = pooled(cell, num, den), pooled(comp, num, den)
+    change = (ra / rb - 1) if ok and ra and rb else None
+    return change, f"{len(cell)} vs {len(comp)}"
+
+
+def entanglement(units: list[Unit], tests: list[Test]) -> tuple[list[dict], list[dict]]:
+    """Jaccard >= 0.6 between graded, unflagged main-effect attributes with 8..48 units, and the
+    effect of each on its graded metrics within / outside the partner."""
+    graded: dict[tuple[str, str], list[tuple[str, float]]] = {}
+    for t in tests:
+        if (
+            t.group is None
+            and t.grade in ("strong", "suggestive")
+            and not t.confounds
+            and 8 <= t.n_cell <= 48
+        ):
+            graded.setdefault((t.dimension, t.value), []).append((t.metric, t.change))
+    members = {a: {u.sha256 for u in units if u.has(*a)} for a in graded}
+    by_sha = {u.sha256: u for u in units}
+    overlaps: list[dict] = []
+    strat: list[dict] = []
+    for a, b in combinations(sorted(graded), 2):
+        inter, union = len(members[a] & members[b]), len(members[a] | members[b])
+        j = inter / union if union else 0.0
+        if j < 0.6:
+            continue
+        overlaps.append(
+            {
+                "a": list(a),
+                "b": list(b),
+                "jaccard": round(j, 2),
+                "shared": inter,
+                "n_a": len(members[a]),
+                "n_b": len(members[b]),
+            }
+        )
+        for attr, partner in ((a, b), (b, a)):
+            inside = [by_sha[s] for s in members[partner]]
+            outside = [u for u in units if u.sha256 not in members[partner]]
+            for metric, overall in graded[attr]:
+                w_ch, w_n = _change_within(
+                    [u for u in inside if u.has(*attr)],
+                    [u for u in inside if not u.has(*attr)],
+                    metric,
+                )
+                o_ch, o_n = _change_within(
+                    [u for u in outside if u.has(*attr)],
+                    [u for u in outside if not u.has(*attr)],
+                    metric,
+                )
+                strat.append(
+                    {
+                        "attribute": list(attr),
+                        "controlling_for": list(partner),
+                        "metric": metric,
+                        "overall_change": overall,
+                        "within": {"change": w_ch, "n": w_n},
+                        "outside": {"change": o_ch, "n": o_n},
+                    }
+                )
+    overlaps.sort(key=lambda o: -o["jaccard"])
+    return overlaps, strat
+
+
+def retention_by_reveal(units: list[Unit]) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for b in REVEAL_BINS:
+        grp = [u for u in units if u.has("first_product_shown", b)]
+        if len(grp) < 3:
+            continue
+        reveals = [u.first_product_s for u in grp if u.first_product_s is not None]
+        row: dict = {
+            "n": len(grp),
+            "median_dur_s": round(statistics.median(u.duration_s or 0 for u in grp)),
+            "median_reveal_s": round(statistics.median(reveals)) if reveals else None,
+        }
+        shares = [retention_shares(u) for u in grp]
+        for q in ("p25", "p50", "p75", "p100"):
+            vals = [s[q] for s in shares if q in s]
+            row[q] = round(statistics.median(vals), 3) if vals else None
+        hooks = [unit_rates(u)["hook_rate"] for u in grp if "hook_rate" in unit_rates(u)]
+        row["hook_rate"] = round(statistics.median(hooks), 3) if hooks else None
+        enough = sum(u.purchases for u in grp) >= MIN_PURCHASES
+        cpa = pooled(grp, "spend", "purchases")
+        row["cpa"] = round(cpa) if enough and cpa else None
+        ppk = pooled(grp, "purchases", "impressions")
+        row["ppk"] = round(1000 * ppk, 2) if ppk else None
+        out[b] = row
+    return out
+
+
+def run(
+    units: list[Unit],
+    bin_edges: dict[str, tuple[float, float]],
+    *,
+    grouping_dims: list[str],
+    draws: int,
+) -> RunResult:
+    kinds = _kinds()
+    tests = main_effects(units, bin_edges, kinds, draws)
+    tests += interactions(units, grouping_dims, kinds, draws)
+    apply_grades(tests)
+    main = [t for t in tests if t.group is None]
+    main.sort(key=lambda t: (GRADE_RANK[t.grade], len(t.confounds), -abs(t.change)))
+    inter = [t for t in tests if t.group is not None]
+    inter.sort(key=lambda t: (t.group or "", GRADE_RANK[t.grade], t.p))
+    tests = main + inter
+    overlaps, strat = entanglement(units, tests)
+    summary = {
+        "units": len(units),
+        "creatives": sum(len(u.creative_ids) for u in units),
+        "spend": round(float(sum(u.spend for u in units))),
+        "purchases": sum(u.purchases for u in units),
+        "tests": len(main),
+        "interaction_tests": len(inter),
+        "by_grade": {g: sum(1 for t in main if t.grade == g) for g in GRADE_RANK},
+        "dimensions": sorted({t.dimension for t in main}),
+        "first_day": min(u.first_day for u in units).isoformat() if units else None,
+        "last_day": max(u.last_day for u in units).isoformat() if units else None,
+    }
+    return RunResult(
+        units=units,
+        tests=tests,
+        overlaps=overlaps,
+        stratified=strat,
+        retention_by_reveal=retention_by_reveal(units),
+        summary=summary,
+        bin_edges=bin_edges,
+    )
