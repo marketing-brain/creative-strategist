@@ -55,6 +55,8 @@ class Unit:
 
 @dataclass
 class Test:
+    __test__ = False  # not a pytest test class
+
     dimension: str
     value: str
     group: str | None  # "audience_callouts=magnesium_users" for an interaction, else None
