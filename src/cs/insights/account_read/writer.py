@@ -247,7 +247,36 @@ def parse_read(text: str) -> Read:
     )
 
 
-def check_read(read: Read, brief: str, n_tests: int) -> list[str]:
+def entanglement_collapses(run: RunResult) -> dict[str, str]:
+    """Pattern id -> partner attribute label, for every main-effect test whose effect falls to
+    under a third of its overall size once the partner attribute is held constant."""
+    ids = {
+        (t.dimension, t.value, t.metric): f"P{i}"
+        for i, t in enumerate(run.tests, start=1)
+        if t.group is None
+    }
+    out: dict[str, str] = {}
+    for x in run.stratified:
+        within = x.get("within") or {}
+        overall = x.get("overall_change") or 0
+        if within.get("change") is None or not overall:
+            continue
+        if abs(within["change"]) < abs(overall) / 3:
+            attr, partner = tuple(x["attribute"]), x["controlling_for"]
+            pid = ids.get((attr[0], attr[1], x["metric"]))
+            if pid and pid not in out:
+                out[pid] = f"{partner[0].replace('_', ' ')} = {str(partner[1]).replace('_', ' ')}"
+    return out
+
+
+def _mentions(text: str, partner_label: str) -> bool:
+    value = partner_label.split(" = ", 1)[-1].lower()
+    return value in text.lower() or value.replace(" ", "_") in text.lower()
+
+
+def check_read(
+    read: Read, brief: str, n_tests: int, collapses: dict[str, str] | None = None
+) -> list[str]:
     allowed = _numbers(brief)
     problems: list[str] = []
     prose = [
@@ -275,6 +304,18 @@ def check_read(read: Read, brief: str, n_tests: int) -> list[str]:
             problems.append(f"finding '{f.title}': no exemplars")
         if not f.why_non_obvious.strip():
             problems.append(f"finding '{f.title}': why_non_obvious is empty")
+    for f in read.findings:
+        for pid in f.pattern_ids:
+            partner = (collapses or {}).get(pid)
+            if not partner:
+                continue
+            finding_text = " ".join((f.paragraph, f.mechanism, f.exception, f.why_non_obvious))
+            if not (_mentions(finding_text, partner) or _mentions(read.entangled, partner)):
+                problems.append(
+                    f"finding '{f.title}' cites {pid}, whose effect vanishes once "
+                    f"'{partner}' is held constant; name that entanglement in the finding or "
+                    "in 'entangled'"
+                )
     if not read.findings:
         problems.append("no findings")
     return problems
@@ -315,6 +356,7 @@ async def write_read(
 ) -> tuple[Read | None, list[str], int, int]:
     """One draft, one retry with the problems named; None when the retry still fails."""
     brief = build_brief(run)
+    collapses = entanglement_collapses(run)
     tokens_in = tokens_out = 0
     feedback: list[str] = []
     for _ in range(2):
@@ -335,7 +377,7 @@ async def write_read(
         except (json.JSONDecodeError, TypeError, AttributeError) as exc:
             feedback = [f"response was not valid JSON: {exc}"]
             continue
-        feedback = check_read(read, brief, len(run.tests))
+        feedback = check_read(read, brief, len(run.tests), collapses)
         if not feedback:
             return read, [], tokens_in, tokens_out
     return None, feedback, tokens_in, tokens_out

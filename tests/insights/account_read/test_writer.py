@@ -148,3 +148,48 @@ async def test_write_read_retries_once_then_rejects():
     assert read is not None and problems == []
     read2, problems2, _, _ = await write_read(run, FakeAccountReadWriter([bad, bad]))
     assert read2 is None and problems2
+
+
+def test_check_read_requires_naming_a_collapsing_entanglement():
+    brief = build_brief(_run())
+    collapses = {"P1": "proof devices = expert credential"}
+    silent = _read()
+    problems = check_read(silent, brief, 1, collapses)
+    assert any("entangle" in p and "expert credential" in p for p in problems)
+    # naming the partner anywhere in the finding or in the entangled paragraph satisfies it
+    f = _finding()
+    f.exception = (
+        "The same files carry the expert credential proof, so the two cannot be separated."
+    )
+    assert check_read(_read(findings=[f]), brief, 1, collapses) == []
+    assert (
+        check_read(
+            _read(entangled="Warning hooks ride on expert credential files."), brief, 1, collapses
+        )
+        == []
+    )
+
+
+def test_entanglement_collapses_detects_vanishing_effect():
+    from cs.insights.account_read.writer import entanglement_collapses
+
+    run = _run()
+    run.stratified = [
+        {
+            "attribute": ["hook_devices", "warning_or_risk"],
+            "controlling_for": ["proof_devices", "expert_credential"],
+            "metric": "link_ctr",
+            "overall_change": 0.5,
+            "within": {"change": 0.02, "n": "6 vs 4"},
+            "outside": {"change": 0.6, "n": "3 vs 30"},
+        },
+        {
+            "attribute": ["hook_devices", "warning_or_risk"],
+            "controlling_for": ["angles", "convenience"],
+            "metric": "link_ctr",
+            "overall_change": 0.5,
+            "within": {"change": 0.45, "n": "6 vs 4"},
+            "outside": {"change": 0.5, "n": "3 vs 30"},
+        },
+    ]
+    assert entanglement_collapses(run) == {"P1": "proof devices = expert credential"}
