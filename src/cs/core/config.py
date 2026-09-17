@@ -44,6 +44,14 @@ class Settings(BaseSettings):
     # tagging.tag_creative job at all; it does not touch jobs already in the queue.
     video_tagging_enabled: bool = True
     insights_model: str = "google/gemini-2.5-flash-lite"
+    # Open-vocabulary merge (spec 2026-09-16-vocab-merge-design.md): slug embeddings for
+    # candidate recall. pgvector HNSW caps at 2000 dims; 1536 keeps the index option open.
+    embedding_model: str = "google/gemini-embedding-2"
+    embedding_dimensions: int = 1536
+    # The merge judge is text-only and cheap either way, but flash-lite over-merged in
+    # dry run 1 (ingredient vs. branded form, falling asleep vs. sleep quality). A wrong
+    # merge is destructive and only reversible by hand, so it runs on the full flash tier.
+    judge_model: str = "google/gemini-2.5-flash"
     # Per-creative insight paragraph (ad + diagnosis brief). Needs cross-modal reasoning, so
     # the stronger tier. Independent of video_tagging_enabled: videos get an insight even with
     # tagging off, bounded by creative_insight_limit_per_format.
