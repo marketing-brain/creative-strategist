@@ -35,7 +35,7 @@ describe('AccountReadSection', () => {
     expect(screen.getByText('Warning hooks earn the click')).toBeInTheDocument();
     expect(screen.getByText(/frames the category as risky/)).toBeInTheDocument();
     expect(screen.getByText(/Every warning ad is also a pharmacist/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /^▸ Evidence/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Evidence/ }));
     expect(screen.getByText(/hook devices = warning or risk/)).toBeInTheDocument();
     // the paragraph already carries the numbers; the evidence line adds a second occurrence
     expect(screen.getAllByText(/4\.5% with vs 3\.0% without/).length).toBeGreaterThan(1);

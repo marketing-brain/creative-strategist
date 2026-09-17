@@ -14,9 +14,7 @@ export default async function Insights() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Insights</h1>
-        <p className="text-sm text-muted-foreground">
-          The account read: what this account&apos;s video creative does, what works, and why, from the tagged files and their results.
-        </p>
+        <p className="text-sm text-muted-foreground">What this account&apos;s video creative does, what works, and why.</p>
       </div>
       {active && accountRead ? (
         <AccountReadSection data={accountRead} accountId={active.id} />

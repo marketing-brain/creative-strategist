@@ -24,22 +24,35 @@ export function testLabel(t: AccountReadTest) {
   return `${t.dimension.replace(/_/g, ' ')} = ${v}`;
 }
 
-export const gradeClass: Record<string, string> = {
-  strong: 'bg-success/10 text-success',
-  suggestive: 'bg-muted text-muted-foreground',
-  directional: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
-  thin: 'bg-muted text-muted-foreground',
-  mixed: 'bg-muted text-muted-foreground',
+/** Small-caps text marks. Grades are the app's own semantics, not the accent hue. */
+export const markClass: Record<string, string> = {
+  strong: 'text-success',
+  suggestive: 'text-foreground',
+  directional: 'text-amber-700 dark:text-amber-400',
+  thin: 'text-muted-foreground',
+  mixed: 'text-muted-foreground',
+  answerable: 'text-success',
+  'not yet': 'text-muted-foreground',
 };
 
-export function Pill({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <span className={cn('inline-block rounded-full px-2 py-0.5 text-xs font-semibold', className)}>{children}</span>;
+export function Mark({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <span className={cn('text-[11px] font-semibold uppercase tracking-[0.08em]', className)}>{children}</span>
+  );
+}
+
+export function Flag({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="rounded-sm border border-amber-500/40 px-1 py-px text-[10px] font-medium uppercase tracking-[0.06em] text-amber-700 dark:text-amber-400">
+      {children}
+    </span>
+  );
 }
 
 export function EvidenceList({ ids, tests, units }: { ids: string[]; tests: AccountReadTest[]; units: AccountReadUnit[] }) {
   const bySha = new Map(units.map((u) => [u.sha256, u]));
   return (
-    <ol className="mt-2 space-y-2 border-l-2 border-border pl-3 text-sm text-muted-foreground">
+    <ol className="mt-3 divide-y divide-border border-y border-border text-[13px] leading-6 text-muted-foreground">
       {ids.map((pid) => {
         const t = pid.startsWith('P') ? tests[Number(pid.slice(1)) - 1] : undefined;
         if (!t) return null;
@@ -50,33 +63,41 @@ export function EvidenceList({ ids, tests, units }: { ids: string[]; tests: Acco
           .sort((a, b) => (b.spend ?? 0) - (a.spend ?? 0))
           .slice(0, 5);
         return (
-          <li key={pid}>
-            <span className="font-mono text-xs text-muted-foreground/70">{pid.slice(1)}</span>{' '}
-            {t.group && <span className="text-xs text-primary">within {t.group.replace(/_/g, ' ')} · </span>}
-            <b className="font-medium text-foreground">{testLabel(t)}</b> · {METRIC[t.metric] ?? t.metric}{' '}
-            {fmtVal(t.metric, t.cell_value)} with vs {fmtVal(t.metric, t.comp_value)} without{' '}
-            <span className={cn('font-mono font-medium', good ? 'text-success' : 'text-destructive')}>{fmtChange(t.change)}</span> ·{' '}
-            {t.n_cell} vs {t.n_complement} files · p {t.p.toFixed(3)}{' '}
-            <Pill className={gradeClass[t.grade] ?? gradeClass.thin}>{t.grade}</Pill>
-            {t.confounds.map((c) => (
-              <Pill key={c} className="ml-1 bg-amber-500/10 text-amber-700 dark:text-amber-400">
-                {c.replace(/_/g, ' ')}
-              </Pill>
-            ))}
-            {cell.length > 0 && (
-              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-                {cell.map((u) => (
-                  <Link
-                    key={u.sha256}
-                    href={u.rep_creative_id ? `/creatives/${u.rep_creative_id}` : '#'}
-                    className="underline decoration-muted-foreground/50 underline-offset-2 hover:decoration-foreground"
-                  >
-                    {u.headline}
-                    {u.creative_ids.length > 1 ? ` ×${u.creative_ids.length}` : ''}
-                  </Link>
-                ))}
+          <li key={pid} className="grid grid-cols-[2.25rem_1fr] gap-x-2 py-2.5 sm:grid-cols-[2.25rem_1fr_auto]">
+            <span className="pt-px font-mono text-xs tabular-nums text-muted-foreground/60">{pid.slice(1)}</span>
+            <div className="min-w-0">
+              <div className="text-foreground">
+                {t.group && <span className="text-primary">within {t.group.replace(/_/g, ' ')} · </span>}
+                <span className="font-medium">{testLabel(t)}</span>
               </div>
-            )}
+              <div className="tabular-nums">
+                {METRIC[t.metric] ?? t.metric} {fmtVal(t.metric, t.cell_value)} with vs {fmtVal(t.metric, t.comp_value)} without{' '}
+                <span className={cn('font-mono font-medium', good ? 'text-success' : 'text-destructive')}>{fmtChange(t.change)}</span> ·{' '}
+                {t.n_cell} vs {t.n_complement} files · p {t.p.toFixed(3)}
+                {t.confounds.length > 0 && (
+                  <span className="ml-2 inline-flex gap-1 align-middle">
+                    {t.confounds.map((c) => (
+                      <Flag key={c}>{c.replace(/_/g, ' ')}</Flag>
+                    ))}
+                  </span>
+                )}
+              </div>
+              {cell.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+                  {cell.map((u) => (
+                    <Link
+                      key={u.sha256}
+                      href={u.rep_creative_id ? `/creatives/${u.rep_creative_id}` : '#'}
+                      className="truncate underline decoration-border underline-offset-[3px] transition-colors hover:text-foreground hover:decoration-foreground"
+                    >
+                      {u.headline}
+                      {u.creative_ids.length > 1 ? ` ×${u.creative_ids.length}` : ''}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+            <Mark className={cn('pt-px sm:text-right', markClass[t.grade] ?? markClass.thin)}>{t.grade}</Mark>
           </li>
         );
       })}
