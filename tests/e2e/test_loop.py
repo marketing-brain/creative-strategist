@@ -13,7 +13,6 @@ import respx
 from PIL import Image
 
 from cs.connectors.fivetran.connect import schema_for
-from cs.core import queue
 from cs.core import repo as ingest_repo
 from cs.ingest.fivetran import insights as fivetran_insights
 from cs.ingest.fivetran import transform as fivetran_transform
@@ -108,10 +107,3 @@ async def test_full_loop(client, db, blobs, settings, monkeypatch):
     await client.post(f"/accounts/{acct}/activate", headers=H)
     await _drain(db, blobs, settings)
     assert await db.fetchval("SELECT count(*) FROM tag_run WHERE status='done'") == 12
-
-    # 2. insights
-    await queue.enqueue(db, org_id, "insights.compute_patterns", {"ad_account_id": str(acct)})
-    await _drain(db, blobs, settings)
-    ins = (await client.get("/insights?kind=pattern", headers=H)).json()["items"]
-    winner = next(i for i in ins if i["value"] == "question" and i["metric"] == "ctr")
-    assert winner["lift"] > 0

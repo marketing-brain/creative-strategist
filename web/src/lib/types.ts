@@ -52,3 +52,13 @@ export type Diagnosis = {
   tiers: DiagnosisTier[];
 };
 export type CreativeInsight = { paragraph: string | null; window_start?: string; window_end?: string; created_at?: string };
+export type AccountReadTest = { dimension: string; value: string; group: string | null; metric: string; kind: 'per_unit' | 'pooled'; n_cell: number; n_complement: number; cell_value: number; comp_value: number; change: number; p: number; grade: string; confounds: string[]; cell_shas: string[]; bin_edges: [number, number] | null; cell_purchases: number | null };
+export type AccountReadFinding = { title: string; layer: string; paragraph: string; mechanism: string; exemplars: string[]; exception: string; why_non_obvious: string; pattern_ids: string[]; confidence: string };
+export type AccountReadText = { overview: string; findings: AccountReadFinding[]; entangled: string; no_evidence: string; next_tests: string[]; data_needed: string[] };
+export type AccountReadUnit = { sha256: string; headline: string; spend: number; creative_ids: string[]; rep_creative_id: string | null; duration_s: number | null; impressions: number; purchases: number };
+export type AccountRead = {
+  status: 'none' | 'done' | 'insufficient' | 'rejected' | 'failed'; n_units?: number; created_at?: string; window_start?: string | null; window_end?: string | null;
+  summary?: Record<string, unknown>; tests?: AccountReadTest[]; overlaps?: unknown[]; stratified?: unknown[]; retention_by_reveal?: Record<string, unknown>;
+  units?: AccountReadUnit[]; read?: AccountReadText | null; error?: string | null; newer_failed_error?: string | null;
+};
+export type AccountReadAnswer = { unmappable?: string; verdict?: 'answerable' | 'directional' | 'not yet'; answer?: string; pattern_ids?: string[]; tests?: AccountReadTest[]; what_would_settle_it?: string };

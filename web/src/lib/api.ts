@@ -39,9 +39,10 @@ export const api = {
   dimensions: () => apiFetch<import('./types').Dimension[]>('/tags/dimensions'),
   dimensionValues: (name: string) => apiFetch<import('./types').DimensionValue[]>(`/tags/dimensions/${encodeURIComponent(name)}/values`),
   creativeTranscript: (id: string) => apiFetch<{ transcript: string | null }>(`/creatives/${id}/transcript`),
-  insights: (kind: string, offset = 0) =>
-    apiFetch<import('./types').Paginated<import('./types').Insight>>(`/insights?kind=${kind}&offset=${offset}`),
   fatigue: (offset = 0) =>
     apiFetch<import('./types').Paginated<import('./types').Insight>>(`/fatigue?offset=${offset}`),
   briefs: () => apiFetch<import('./types').Brief[]>('/briefs'),
+  accountRead: (accountId: string) => apiFetch<import('./types').AccountRead>(`/insights/account-read?ad_account_id=${accountId}`),
+  accountReadAsk: (accountId: string, question: string) =>
+    apiFetch<import('./types').AccountReadAnswer>('/insights/account-read/ask', { method: 'POST', body: JSON.stringify({ ad_account_id: accountId, question }) }),
 };

@@ -13,7 +13,6 @@ from cs.insights.creative_insight_runner import FORMATS, write_creative_insight
 from cs.insights.diagnosis import ATTENTION_FLOOR
 from cs.insights.explain import Explainer, GeminiGatewayExplainer
 from cs.insights.fatigue import compute_fatigue
-from cs.insights.patterns import compute_pattern_insights
 from cs.insights.types import InsightDraft
 from cs.jobs.registry import JobContext, handler
 from cs.jobs.scheduler import register_schedule
@@ -81,16 +80,6 @@ async def _account(ctx: JobContext):
     )
 
 
-@handler("insights.compute_patterns")
-async def compute_patterns(ctx: JobContext) -> None:
-    acct = await _account(ctx)
-    end = date.today() - timedelta(days=1)
-    drafts = await compute_pattern_insights(
-        ctx.db, ctx.job.org_id, acct["id"], end - timedelta(days=WINDOW_DAYS - 1), end
-    )
-    await _persist(ctx, drafts, acct["name"])
-
-
 @handler("insights.compute_fatigue")
 async def compute_fatigue_job(ctx: JobContext) -> None:
     acct = await _account(ctx)
@@ -109,11 +98,6 @@ async def _enqueue_for_active(db: Database, job_type: str, prefix: str) -> None:
         )
 
 
-@register_schedule("insights.nightly_patterns", every_seconds=86400)
-async def nightly_patterns(db: Database, settings: Settings) -> None:
-    await _enqueue_for_active(db, "insights.compute_patterns", "patterns")
-
-
 @register_schedule("insights.periodic_fatigue", every_seconds=21600)
 async def periodic_fatigue(db: Database, settings: Settings) -> None:
     await _enqueue_for_active(db, "insights.compute_fatigue", "fatigue")
@@ -130,14 +114,13 @@ async def weekly_brief(ctx: JobContext) -> None:
         "WHERE i.org_id=$1 AND i.created_at >= now() - interval '7 days' ORDER BY abs(i.lift) DESC",
         org_id,
     )
-    patterns = [dict(r) for r in rows if r["kind"] == "pattern"][:10]
     fatigue = [dict(r) for r in rows if r["kind"] == "fatigue"][:10]
     await repo.insert_brief(
         ctx.db,
         org_id,
         week_start,
-        render_brief(week_start, patterns, fatigue),
-        [r["id"] for r in rows],
+        render_brief(week_start, fatigue),
+        [r["id"] for r in rows if r["kind"] == "fatigue"],
     )
 
 

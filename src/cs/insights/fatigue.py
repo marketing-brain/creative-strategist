@@ -6,8 +6,15 @@ from decimal import Decimal
 from uuid import UUID
 
 from cs.core.db import Database
-from cs.insights.patterns import metrics_from_sums, signed_lift
+from cs.core.metrics import derived_metrics as metrics_from_sums
 from cs.insights.types import InsightDraft
+
+
+def signed_lift(metric: str, observed: float | None, baseline: float | None) -> float | None:
+    if observed is None or baseline is None or baseline == 0:
+        return None
+    raw = (observed - baseline) / baseline
+    return round(-raw if metric == "cpa" else raw, 6)
 
 
 async def compute_fatigue(
