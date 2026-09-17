@@ -9,6 +9,15 @@ import type { AccountReadAnswer, AccountReadTest, AccountReadUnit } from '@/lib/
 
 type Entry = { id: number; question: string; answer?: AccountReadAnswer; error?: string };
 
+// One seeded question per query kind, as the empty-state menu.
+const SEEDS = [
+  'Where is our money going versus where the evidence points?',
+  'Which proven ingredients have we never combined?',
+  'What separates our best CPA video from the ads most like it that failed?',
+  'Is the expert effect real, or just where we spent the money?',
+  'Which single ingredient is doing the work in our best recipe?',
+];
+
 export function AccountReadAsk({ accountId, tests, units }: { accountId: string; tests: AccountReadTest[]; units: AccountReadUnit[] }) {
   const [q, setQ] = useState('');
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -21,9 +30,7 @@ export function AccountReadAsk({ accountId, tests, units }: { accountId: string;
     if (entries.length) endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [entries]);
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const question = q.trim();
+  const ask = async (question: string) => {
     if (!question || pending) return;
     const id = nextId.current++;
     setEntries((prev) => [...prev, { id, question }]);
@@ -40,6 +47,11 @@ export function AccountReadAsk({ accountId, tests, units }: { accountId: string;
     } finally {
       setPending(false);
     }
+  };
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void ask(q.trim());
   };
 
   return (
@@ -76,6 +88,22 @@ export function AccountReadAsk({ accountId, tests, units }: { accountId: string;
           <ArrowRight className="size-4" aria-hidden="true" />
         </button>
       </form>
+      {entries.length === 0 && (
+        <ul className="flex flex-wrap gap-2" aria-label="Example questions">
+          {SEEDS.map((s) => (
+            <li key={s}>
+              <button
+                type="button"
+                onClick={() => void ask(s)}
+                disabled={pending}
+                className="rounded-full border border-border px-3 py-1 text-left text-[13px] leading-6 text-muted-foreground transition-colors hover:border-foreground hover:text-foreground disabled:opacity-50"
+              >
+                {s}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -87,6 +115,7 @@ function Exchange({ entry, tests, units }: { entry: Entry; tests: AccountReadTes
   return (
     <div className="space-y-3">
       <p className="max-w-[68ch] text-[15px] leading-7 font-medium text-pretty">{question}</p>
+      {answer?.read_as && <p className="text-[13px] leading-6 text-muted-foreground">Read as: {answer.read_as}</p>}
       {!settled && <p className="text-sm text-muted-foreground">Reading the account…</p>}
       {error && <p className="text-sm text-destructive">{error}</p>}
       {answer?.unmappable && <p className="text-sm text-muted-foreground">{answer.unmappable}</p>}
@@ -96,6 +125,16 @@ function Exchange({ entry, tests, units }: { entry: Entry; tests: AccountReadTes
           <p className="mt-1.5 max-w-[68ch] text-[15px] leading-7 text-pretty">{answer.answer}</p>
           {answer.what_would_settle_it && (
             <p className="mt-2 max-w-[68ch] text-[13px] leading-6 text-muted-foreground">To settle it: {answer.what_would_settle_it}</p>
+          )}
+          {(answer.facts?.length ?? 0) > 0 && (
+            <ol className="mt-3 space-y-1 text-[13px] leading-6">
+              {answer.facts!.map((f) => (
+                <li key={f.id} className="grid grid-cols-[2.25rem_1fr] gap-x-2">
+                  <span className="pt-px font-mono text-xs tabular-nums text-muted-foreground/60">{f.id}</span>
+                  <span className="text-foreground">{f.text}</span>
+                </li>
+              ))}
+            </ol>
           )}
           {(answer.pattern_ids?.length ?? 0) > 0 && (
             <EvidenceList ids={answer.pattern_ids ?? []} tests={answerTests.length ? answerTests : tests} units={units} />

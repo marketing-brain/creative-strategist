@@ -82,4 +82,31 @@ describe('AccountReadAsk', () => {
     expect(await screen.findByText('The tags do not capture sentiment yet.')).toBeInTheDocument();
     expect(screen.queryByText('directional')).not.toBeInTheDocument();
   });
+
+  it('shows how the question was read and the facts behind the answer', async () => {
+    accountReadAsk.mockResolvedValueOnce({
+      ...answer('The older messenger is starved.'),
+      kind: 'spend_gap',
+      read_as: 'spend share of every graded attribute against its effect, on click metrics',
+      facts: [{ id: 'F1', text: 'starved | messenger age band = 40 to 60 | 10 of 56 files | 6% of spend' }],
+    });
+    render(<AccountReadAsk accountId="a1" tests={[]} units={[]} />);
+
+    await ask('where is the money going?');
+    expect(await screen.findByText('The older messenger is starved.')).toBeInTheDocument();
+    expect(screen.getByText(/read as: spend share of every graded attribute/i)).toBeInTheDocument();
+    expect(screen.getByText('F1')).toBeInTheDocument();
+    expect(screen.getByText(/starved \| messenger age band = 40 to 60/)).toBeInTheDocument();
+  });
+
+  it('offers seeded questions until the first one is asked, and a chip submits its question', async () => {
+    accountReadAsk.mockResolvedValueOnce(answer('Nothing untried.'));
+    render(<AccountReadAsk accountId="a1" tests={[]} units={[]} />);
+
+    const chip = screen.getByRole('button', { name: 'Which proven ingredients have we never combined?' });
+    await userEvent.click(chip);
+    expect(accountReadAsk).toHaveBeenCalledWith('a1', 'Which proven ingredients have we never combined?');
+    expect(await screen.findByText('Nothing untried.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /never combined/ })).not.toBeInTheDocument();
+  });
 });

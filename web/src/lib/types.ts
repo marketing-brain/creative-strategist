@@ -61,4 +61,15 @@ export type AccountRead = {
   summary?: Record<string, unknown>; tests?: AccountReadTest[]; overlaps?: unknown[]; stratified?: unknown[]; retention_by_reveal?: Record<string, unknown>;
   units?: AccountReadUnit[]; read?: AccountReadText | null; error?: string | null; newer_failed_error?: string | null;
 };
-export type AccountReadAnswer = { unmappable?: string; verdict?: 'answerable' | 'directional' | 'not yet'; answer?: string; pattern_ids?: string[]; tests?: AccountReadTest[]; what_would_settle_it?: string };
+export type AccountReadFact = { id: string; text: string };
+export type AccountReadAnswer = {
+  unmappable?: string;
+  kind?: string;
+  read_as?: string;
+  verdict?: 'answerable' | 'directional' | 'not yet';
+  answer?: string;
+  pattern_ids?: string[];
+  facts?: AccountReadFact[];
+  tests?: AccountReadTest[];
+  what_would_settle_it?: string;
+};
