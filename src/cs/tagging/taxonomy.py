@@ -238,20 +238,25 @@ class Taxonomy:
 
     @staticmethod
     def _ordered_rows(d: Dimension, items) -> list[dict]:
+        """Timestamped enum steps (beats, scenes). Steps are sorted by time — the model
+        sometimes lists them out of order and a retry costs a full video call — and
+        consecutive identical steps collapse into one."""
         items = _items(d, items)
         if not items:
             raise ValueError(f"{d.name}: must not be empty")
-        out: list[dict] = []
-        last = float("-inf")
+        parsed: list[tuple[float, str, str | None]] = []
         for item in items:
             value = str(_item(d, item).get("value", "")).strip()
             if value not in (d.values or ()):
                 raise ValueError(f"{d.name}: value {value!r} not allowed")
             t = _seconds(_clock(item))
-            if t is None or t < last:
-                raise ValueError(f"{d.name}: t_start_s must be present and non-decreasing")
-            last = t
+            if t is None:
+                raise ValueError(f"{d.name}: t_start must be present")
             flags = "|".join(f for f in d.flags if item.get(f) is True) or None
+            parsed.append((t, value, flags))
+        parsed.sort(key=lambda p: p[0])
+        out: list[dict] = []
+        for t, value, flags in parsed:
             if out and out[-1]["value"] == value and out[-1]["raw_value"] == flags:
                 continue  # consecutive cuts of the same shot/beat are one step
             out.append(_row(d, value, raw_value=flags, t_start_s=t, ordinal=len(out)))

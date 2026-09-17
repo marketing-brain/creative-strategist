@@ -294,9 +294,7 @@ def test_validate_nested_caps_concept_tags_at_six():
         (lambda p: p["multi"]["angles"].append({"value": "nope", "evidence": ""}), "angles"),
         (lambda p: p["ordered"].update(beats=[]), "beats"),
         (
-            lambda p: p["ordered"].update(
-                beats=[{"value": "hook", "t_start_s": 3.0}, {"value": "cta", "t_start_s": 1.0}]
-            ),
+            lambda p: p["ordered"].update(beats=[{"value": "hook"}]),
             "beats",
         ),
         (lambda p: p["multi"].update(registers=["fear"]), "registers"),
@@ -479,3 +477,15 @@ def test_ordered_collapses_consecutive_identical_steps():
     p["series"] = {"overlay_texts": []}
     rows = reconcile_captions(load_taxonomy().validate(p, "video"))
     assert [r["value"] for r in rows if r["dimension"] == "captions"] == ["subtitles"]
+
+
+def test_ordered_steps_are_sorted_by_time_rather_than_rejected():
+    p = _payload()
+    p["ordered"]["beats"] = [
+        {"value": "cta", "t_start": "1:20"},
+        {"value": "hook", "t_start": "0:00"},
+        {"value": "proof", "t_start": "0:45"},
+    ]
+    rows = load_taxonomy().validate(p, "video")
+    beats = [(r["ordinal"], r["value"], r["t_start_s"]) for r in rows if r["dimension"] == "beats"]
+    assert beats == [(0, "hook", 0.0), (1, "proof", 45.0), (2, "cta", 80.0)]
