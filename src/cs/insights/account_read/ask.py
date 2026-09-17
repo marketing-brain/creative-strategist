@@ -7,8 +7,16 @@ import json
 import re
 
 from cs.core.config import Settings
+from cs.insights.account_read import analyzers
 from cs.insights.account_read.stats import benjamini_hochberg, compare, grade
-from cs.insights.account_read.types import METRICS, Test, Unit, to_json, unit_from_json
+from cs.insights.account_read.types import (
+    METRICS,
+    Test,
+    Unit,
+    test_from_json,
+    to_json,
+    unit_from_json,
+)
 from cs.insights.account_read.writer import (
     METRIC_NAME,
     GeminiGatewayAccountReadWriter,
@@ -168,7 +176,7 @@ If the question asks about something none of these kinds can answer from tagged 
 """  # noqa: E501
 
 ANSWER_SYSTEM = """\
-You are a senior performance-creative strategist answering one question about an ad account from precomputed, graded comparisons. Rules: reproduce numbers exactly as written and cite pattern IDs (P1, P2, ...); strong is evidence, suggestive a lead, directional a hint; name flags; cells under 10 files are small; hypothesis language; say plainly when the data shows no difference or has too few files. Return JSON: {"verdict": "answerable" | "directional" | "not yet", "answer": <3 to 7 sentences, direct answer first, then evidence, then caveat>, "pattern_ids": [...], "what_would_settle_it": <one sentence>}. Return valid JSON only.
+You are a senior performance-creative strategist answering one question about an ad account from precomputed, graded comparisons. Rules: reproduce numbers exactly as written and cite pattern IDs (P1, P2, ...); strong is evidence, suggestive a lead, directional a hint; name flags; cells under 10 files are small; hypothesis language; say plainly when the data shows no difference or has too few files. FACTS are descriptive counts and shares; COMPARISONS are graded tests. Cite both by id (F1, P1). The READ AS line is how the question was interpreted; if it misses the question, say so in one clause. Return JSON: {"verdict": "answerable" | "directional" | "not yet", "answer": <3 to 7 sentences, direct answer first, then evidence, then caveat>, "pattern_ids": [...], "what_would_settle_it": <one sentence>}. Return valid JSON only.
 """  # noqa: E501
 
 
@@ -219,25 +227,71 @@ def cap_verdict(claimed: str, cited: list[dict]) -> str:
     return "not yet"
 
 
+_SETTLE = "More tagged videos with these attributes."
+_TOO_FEW = (
+    "Too few files carry those attributes to compare. Each side needs 5 files, "
+    "and purchase metrics need 20 purchases per side."
+)
+
+
+def _empty(base: dict, reason: str) -> dict:
+    return {
+        **base,
+        "verdict": "not yet",
+        "answer": reason,
+        "pattern_ids": [],
+        "facts": [],
+        "tests": [],
+        "what_would_settle_it": _SETTLE,
+    }
+
+
+def _analyse(query: dict, result_json: dict, draws: int) -> analyzers.Analysis | dict:
+    """Run the kind's analyzer. Returns {"unmappable": ...} when the query names something the
+    run does not hold."""
+    units = [unit_from_json(u) for u in result_json.get("units", [])]
+    if query["kind"] == "compare":
+        found = targeted_tests(query, units, draws)
+        return analyzers.Analysis(tests=found, empty_reason=None if found else _TOO_FEW)
+    tests = [test_from_json(t) for t in result_json.get("tests", [])]
+    overlaps = result_json.get("overlaps", [])
+    metrics = LAYER_METRICS[query["layer"]]
+    anchor = None
+    if query["kind"] in ("nearest", "recipe"):
+        a = query["anchor"]
+        metric = a.get("best") or analyzers.rank_metric(metrics)
+        anchor = analyzers.resolve_anchor(a, units, metric)
+        if anchor is None:
+            if "named" in a:
+                return {"unmappable": f'No file matches "{a["named"]}".'}
+            return analyzers.Analysis(
+                empty_reason=f"No file clears the floor for {METRIC_NAME[metric]}."
+            )
+    if query["kind"] == "controlled" and query["control"] != "spend":
+        cd, cv = query["control"]
+        if not any(u.has(cd, cv) for u in units):
+            return {"unmappable": f"No file carries {_words((cd, cv))}."}
+    return analyzers.run(query, units, tests, overlaps, metrics, draws, anchor=anchor)
+
+
 async def answer(question: str, result_json: dict, writer, draws: int = 300) -> dict:
     query = await map_question(question, result_json, writer)
     if "unmappable" in query:
         return query
-    units = [unit_from_json(u) for u in result_json.get("units", [])]
-    tests = targeted_tests(query, units, draws)
-    if not tests:
-        return {
-            "verdict": "not yet",
-            "answer": (
-                "Too few files carry those attributes to compare. Each side needs 5 files, "
-                "and purchase metrics need 20 purchases per side."
-            ),
-            "pattern_ids": [],
-            "tests": [],
-            "what_would_settle_it": "More tagged videos with these attributes.",
-        }
-    lines = [pattern_line(f"P{i}", t) for i, t in enumerate(tests, start=1)]
-    user = "QUESTION: " + question + "\n\nCOMPARISONS:\n" + "\n".join(lines)
+    reading = read_as(query)
+    base = {"kind": query["kind"], "read_as": reading}
+    analysis = _analyse(query, result_json, draws)
+    if isinstance(analysis, dict):
+        return analysis
+    if analysis.empty_reason:
+        return _empty(base, analysis.empty_reason)
+    tests = analysis.tests
+    plines = [pattern_line(f"P{i}", t) for i, t in enumerate(tests, start=1)]
+    flines = [f"F{i} | {f}" for i, f in enumerate(analysis.facts, start=1)]
+    user = f"QUESTION: {question}\n\nREAD AS: {reading}\n"
+    if flines:
+        user += "\nFACTS:\n" + "\n".join(flines) + "\n"
+    user += "\nCOMPARISONS:\n" + ("\n".join(plines) if plines else "(none)")
     text, _, _ = await writer.complete(ANSWER_SYSTEM, user)
     body = _loads(text)
     bad = sorted(_numbers(str(body.get("answer", ""))) - _numbers(user))
@@ -248,13 +302,17 @@ async def answer(question: str, result_json: dict, writer, draws: int = 300) -> 
         )
         text, _, _ = await writer.complete(ANSWER_SYSTEM, retry)
         body = _loads(text)
-    ids = {f"P{i}" for i in range(1, len(tests) + 1)}
-    cited_ids = [p for p in body.get("pattern_ids", []) if p in ids]
-    cited = [to_json(tests[int(p[1:]) - 1]) for p in cited_ids]
+    valid = {f"P{i}" for i in range(1, len(tests) + 1)} | {
+        f"F{i}" for i in range(1, len(analysis.facts) + 1)
+    }
+    cited_ids = [p for p in body.get("pattern_ids", []) if p in valid]
+    cited = [to_json(tests[int(p[1:]) - 1]) for p in cited_ids if p.startswith("P")]
     return {
+        **base,
         "verdict": cap_verdict(str(body.get("verdict", "not yet")), cited),
         "answer": str(body.get("answer", "")),
         "pattern_ids": cited_ids,
+        "facts": [{"id": f"F{i}", "text": f} for i, f in enumerate(analysis.facts, start=1)],
         "tests": [to_json(t) for t in tests],
         "what_would_settle_it": str(body.get("what_would_settle_it", "")),
     }

@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal
 
 from cs.insights.account_read.ask import answer, cap_verdict, map_question, parse_query, read_as
-from cs.insights.account_read.types import Unit, to_json
+from cs.insights.account_read.types import Test, Unit, to_json
 from cs.insights.fakes import FakeAccountReadWriter
 
 
@@ -243,3 +243,138 @@ def test_cap_verdict_never_exceeds_evidence():
     assert cap_verdict("answerable", strong) == "answerable"
     assert cap_verdict("answerable", sugg) == "directional"
     assert cap_verdict("answerable", []) == "not yet"
+
+
+def _graded(dim, val, shas, change=0.5, metric="link_ctr", grade="suggestive"):
+    return to_json(
+        Test(
+            dimension=dim,
+            value=val,
+            group=None,
+            metric=metric,
+            kind="per_unit",
+            n_cell=len(shas),
+            n_complement=14 - len(shas),
+            cell_value=0.06,
+            comp_value=0.03,
+            change=change,
+            p=0.02,
+            grade=grade,
+            confounds=[],
+            cell_shas=list(shas),
+        )
+    )
+
+
+async def test_answer_compare_carries_kind_and_read_as():
+    w = FakeAccountReadWriter(
+        [
+            json.dumps({"kind": "compare", "targets": ["messenger_age_band"], "layer": "click"}),
+            json.dumps(
+                {
+                    "verdict": "answerable",
+                    "answer": "Older messengers earn more clicks.",
+                    "pattern_ids": ["P1"],
+                    "what_would_settle_it": "More files.",
+                }
+            ),
+        ]
+    )
+    out = await answer("does messenger age matter for clicks?", _result_json(), w)
+    assert out["kind"] == "compare"
+    assert (
+        out["read_as"]
+        == "every value of messenger age band against everything else, on click metrics"
+    )
+    assert out["facts"] == []
+    assert "READ AS: every value of messenger age band" in w.calls[1][1]
+
+
+async def test_answer_empty_analysis_short_circuits_without_a_writer_call():
+    w = FakeAccountReadWriter([json.dumps({"kind": "untried", "layer": "click"})])
+    out = await answer("what have we never combined?", _result_json(), w)
+    assert len(w.calls) == 1
+    assert out["kind"] == "untried" and out["verdict"] == "not yet"
+    assert out["answer"].startswith("Fewer than two attributes")
+    assert out["facts"] == [] and out["tests"] == [] and out["pattern_ids"] == []
+
+
+async def test_answer_named_anchor_miss_is_unmappable():
+    w = FakeAccountReadWriter(
+        [json.dumps({"kind": "recipe", "anchor": {"named": "zebra"}, "layer": "all"})]
+    )
+    out = await answer("what makes the zebra ad work?", _result_json(), w)
+    assert out == {"unmappable": 'No file matches "zebra".'}
+    assert len(w.calls) == 1
+
+
+async def test_answer_controlled_with_unknown_partner_is_unmappable():
+    w = FakeAccountReadWriter(
+        [
+            json.dumps(
+                {
+                    "kind": "controlled",
+                    "target": ["messenger_age_band", "40_to_60"],
+                    "control": ["registers", "fear"],
+                    "layer": "click",
+                }
+            )
+        ]
+    )
+    out = await answer(
+        "is the older-messenger effect real once you control for fear?", _result_json(), w
+    )
+    assert out == {"unmappable": "No file carries registers = fear."}
+
+
+async def test_answer_facts_are_numbered_in_the_prompt_and_cap_ignores_f_ids():
+    result = _result_json()
+    odd = [f"u{i}" for i in range(14) if i % 2]
+    even = [f"u{i}" for i in range(14) if not i % 2]
+    result["tests"] = [
+        _graded("messenger_age_band", "40_to_60", odd, change=0.5),
+        # Positive, so the heavily funded 25_to_40 side is never flagged as over-funded and
+        # the starved 40_to_60 row is F1.
+        _graded("messenger_age_band", "25_to_40", even, change=0.2),
+    ]
+    result["overlaps"] = []
+    w = FakeAccountReadWriter(
+        [
+            json.dumps({"kind": "spend_gap", "layer": "click"}),
+            json.dumps(
+                {
+                    "verdict": "answerable",
+                    "answer": "Spend is even; nothing to move.",
+                    "pattern_ids": ["F1", "P9"],
+                    "what_would_settle_it": "n/a",
+                }
+            ),
+        ]
+    )
+    out = await answer("where is the money going?", result, w)
+    # Even spend across the fixture means no gap: the empty path.
+    assert out["verdict"] == "not yet" and len(w.calls) == 1
+
+    # Skew the spend so 40_to_60 is starved and the writer runs.
+    for u in result["units"]:
+        u["spend"] = 100 if u["sha256"] in odd else 5000
+    w = FakeAccountReadWriter(
+        [
+            json.dumps({"kind": "spend_gap", "layer": "click"}),
+            json.dumps(
+                {
+                    "verdict": "answerable",
+                    "answer": "The older messenger is starved.",
+                    "pattern_ids": ["F1", "P9"],
+                    "what_would_settle_it": "n/a",
+                }
+            ),
+        ]
+    )
+    out = await answer("where is the money going?", result, w)
+    prompt = w.calls[1][1]
+    assert "FACTS:\nF1 | starved | messenger age band = 40 to 60" in prompt
+    assert "COMPARISONS:\nP1 | " in prompt
+    assert out["facts"][0]["id"] == "F1" and out["facts"][0]["text"].startswith("starved |")
+    assert out["pattern_ids"] == ["F1"]  # P9 does not exist; F1 is kept
+    assert out["verdict"] == "not yet"  # F-ids never raise the verdict
