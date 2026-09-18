@@ -140,6 +140,8 @@ def test_unit_line_and_facet_words():
     assert line == '"Beware" | $1,234 spend | 0 copies | link CTR 3.0%'
     below = _unit("b", [], impressions=100)
     assert az.unit_line(below, "link_ctr").endswith("link CTR below floor")
+    wrapped = _unit("w", [], headline="Line one\n\nLine two")
+    assert az.unit_line(wrapped, "link_ctr").startswith('"Line one Line two" |')
     assert az.facet_words(("hook_devices", "audience_callout")) == "hook devices = audience callout"
 
 
@@ -325,6 +327,36 @@ def test_nearest_diff_needs_every_neighbour_when_fewer_than_three():
     assert out.facts[-1] == "no facet separates the anchor from its neighbours"
 
 
+def test_nearest_diff_keeps_twelve_rows_with_the_cited_facets_first():
+    shared = [("setting", "home")]
+    anchor_only = [("anchor_dims", f"a{i:02d}") for i in range(10)]
+    near_only = [("near_dims", f"n{i:02d}") for i in range(10)]
+    anchor = _unit("w", shared + anchor_only, link_clicks=1200)
+    near = [_unit(f"n{i}", shared + near_only, link_clicks=400) for i in range(3)]
+    # Only one facet on each side of the diff carries a test; both must survive the cut.
+    cited = [
+        _test("anchor_dims", "a09", change=0.5, cell_shas=["w"]),
+        _test("near_dims", "n09", change=-0.4, cell_shas=["n0"]),
+    ]
+    out = az.nearest([anchor] + near, cited, anchor, "link_ctr", ("link_ctr",))
+    diff = [f for f in out.facts if f.startswith(("anchor has", "neighbours have"))]
+    assert len(diff) == az.MAX_ROWS == 12
+    assert diff[0] == "anchor has, neighbours lack | anchor dims = a09 (P1)"
+    assert diff[1] == "neighbours have, anchor lacks | near dims = n09 (P2)"
+    assert all("(P" not in f for f in diff[2:])
+    assert out.tests == cited
+
+
+def test_recipe_keeps_twelve_ranked_rows():
+    facets = [(f"d{i:02d}", "v") for i in range(13)]
+    anchor = _unit("w", facets, headline="Winner")
+    tests = [_test(d, v, change=0.5 - i * 0.01, cell_shas=["w"]) for i, (d, v) in enumerate(facets)]
+    out = az.recipe([anchor], tests, anchor, "link_ctr", ("link_ctr",))
+    ranked = [f for f in out.facts if f.startswith("#")]
+    assert len(ranked) == az.MAX_ROWS == 12
+    assert ranked[0].startswith("#1 | d00 = v |")  # biggest effect first, weakest dropped
+
+
 def test_controlled_by_spend_yields_one_test_per_tercile_plus_the_overall_reference():
     target = ("messenger", "expert_on_camera")
     units = []
@@ -417,7 +449,8 @@ def test_controlled_empty_when_strata_pass_the_cell_floor_but_not_the_purchase_f
 
 def test_recipe_ranks_the_anchor_facets_by_grade_then_change():
     A, B, C = ("messenger", "expert_on_camera"), ("registers", "authority"), ("setting", "home")
-    anchor = _unit("w", [A, B, C], headline="Winner", spend=9000)
+    D = ("opening_shot", "face_to_camera")
+    anchor = _unit("w", [A, B, C, D], headline="Winner", spend=9000)
     tests = [
         _test(*A, change=0.6, grade="strong", cell_shas=["w"]),
         _test(*B, change=0.3, cell_shas=["w"]),
@@ -427,6 +460,8 @@ def test_recipe_ranks_the_anchor_facets_by_grade_then_change():
         ),  # not anchor's
         _test(*C, change=0.2, grade="thin", cell_shas=["w"]),
         _test(*A, change=-0.9, metric="cpa", grade="strong", cell_shas=["w"]),  # not in layer
+        # Strong and the biggest effect of all, but it hurts: it ranks behind every helper.
+        _test(*D, change=-0.8, grade="strong", cell_shas=["w"]),
     ]
     out = az.recipe([anchor], tests, anchor, "link_ctr", ("link_ctr",))
     assert out.facts[0] == 'anchor | "Winner" | $9,000 spend | 0 copies | link CTR 3.0%'
@@ -434,8 +469,9 @@ def test_recipe_ranks_the_anchor_facets_by_grade_then_change():
         "#1 | messenger = expert on camera | link CTR +60% strong (P1)",
         "#2 | registers = authority | among files with messenger = expert on camera | "
         "link CTR +40% strong (P2)",
+        "#3 | hurts: opening shot = face to camera | link CTR -80% strong (P3)",
     ]
-    assert out.tests == [tests[0], tests[2]]
+    assert out.tests == [tests[0], tests[2], tests[6]]
 
 
 def test_recipe_empty_without_graded_facets():

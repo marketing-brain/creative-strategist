@@ -90,8 +90,9 @@ def unit_line(u: Unit, metric: str) -> str:
     v = unit_metric(u, metric)
     val = fmt_val(metric, v) if v is not None else "below floor"
     n = len(u.creative_ids)
+    headline = " ".join(u.headline.split())  # a fact line is one line; headlines are not
     return (
-        f'"{u.headline}" | ${float(u.spend):,.0f} spend | {n} cop{"y" if n == 1 else "ies"} | '
+        f'"{headline}" | ${float(u.spend):,.0f} spend | {n} cop{"y" if n == 1 else "ies"} | '
         f"{METRIC_NAME[metric]} {val}"
     )
 
@@ -220,6 +221,7 @@ def untried(
 
 NEIGHBOURS = 5
 DIFF_MIN = 3  # a facet joins the diff when at least this many neighbours disagree with the anchor
+MAX_ROWS = 12  # a ranked or diff list longer than this is a dump, not an answer
 
 
 def _choices(u: Unit) -> set[tuple[str, str]]:
@@ -282,10 +284,13 @@ def nearest(
             out.tests.append(t)
         return f" (P{out.tests.index(t) + 1})"
 
-    for f in only_anchor:
-        out.facts.append(f"anchor has, neighbours lack | {facet_words(f)}{cite(f)}")
-    for f in only_near:
-        out.facts.append(f"neighbours have, anchor lacks | {facet_words(f)}{cite(f)}")
+    rows = [("anchor has, neighbours lack", f) for f in only_anchor]
+    rows += [("neighbours have, anchor lacks", f) for f in only_near]
+    # Facets with a cited effect first; the sort is stable, so anchor-has still precedes
+    # neighbours-have inside each group.
+    rows.sort(key=lambda r: best.get(r[1]) is None)
+    for lbl, f in rows[:MAX_ROWS]:
+        out.facts.append(f"{lbl} | {facet_words(f)}{cite(f)}")
     if not only_anchor and not only_near:
         out.facts.append("no facet separates the anchor from its neighbours")
     return out
@@ -359,9 +364,10 @@ def recipe(
     units: list[Unit], tests: list[Test], anchor: Unit, metric: str, metrics: tuple[str, ...]
 ) -> Analysis:
     """The anchor's facets ranked by their best clean graded effect: a main effect, or an
-    interaction whose group is another facet the anchor carries."""
+    interaction whose group is another facet the anchor carries. Helping facets rank first, then
+    the ones that hurt: the question is what makes the file work."""
     groups = {f"{d}={v}" for d, v in anchor.facets}
-    ranked: list[tuple[int, float, Test]] = []
+    ranked: list[tuple[int, int, float, Test]] = []
     for f in sorted(anchor.facets):
         cands = [
             t
@@ -375,17 +381,17 @@ def recipe(
         if not cands:
             continue
         best = min(cands, key=lambda t: (GRADE_RANK[t.grade], -abs(t.change)))
-        ranked.append((GRADE_RANK[best.grade], -abs(best.change), best))
+        ranked.append((0 if is_good(best) else 1, GRADE_RANK[best.grade], -abs(best.change), best))
     if not ranked:
         return Analysis(
             empty_reason=(
                 "None of this file's attributes has clean graded evidence on these metrics."
             )
         )
-    ranked.sort(key=lambda r: (r[0], r[1]))
+    ranked.sort(key=lambda r: (r[0], r[1], r[2]))
     out = Analysis()
     out.facts.append(f"anchor | {unit_line(anchor, metric)}")
-    for i, (_, _, t) in enumerate(ranked, start=1):
+    for i, (harm, _, _, t) in enumerate(ranked[:MAX_ROWS], start=1):
         out.tests.append(t)
         # Name the group in words, so the row reads as a measurement of the facet among files
         # carrying the group rather than as a claim about the group itself.
@@ -393,8 +399,9 @@ def recipe(
         if t.group:
             gd, _, gv = t.group.partition("=")
             within = f"among files with {facet_words((gd, gv))} | "
+        name = f"hurts: {label(t)}" if harm else label(t)
         out.facts.append(
-            f"#{i} | {label(t)} | {within}{METRIC_NAME[t.metric]} {t.change * 100:+.0f}% "
+            f"#{i} | {name} | {within}{METRIC_NAME[t.metric]} {t.change * 100:+.0f}% "
             f"{t.grade} (P{i})"
         )
     return out
