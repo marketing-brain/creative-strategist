@@ -214,7 +214,8 @@ def untried(
         )
     if not out.facts:
         out.empty_reason = (
-            "Every compatible pair of proven attributes is already carried by at least two files."
+            "Every compatible pair or triple of proven attributes is already carried by more "
+            "than one file."
         )
     return out
 

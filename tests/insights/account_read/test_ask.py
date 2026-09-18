@@ -186,8 +186,8 @@ def test_read_as_per_kind():
     )
     assert (
         read_as({"kind": "untried", "layer": "click"})
-        == "pairs and triples of attributes with clean positive effects on click metrics that no "
-        "file carries together"
+        == "pairs and triples of attributes with clean positive effects on click metrics that at "
+        "most one file carries together"
     )
     assert (
         read_as({"kind": "nearest", "anchor": {"best": "cpa"}, "layer": "conversion"})

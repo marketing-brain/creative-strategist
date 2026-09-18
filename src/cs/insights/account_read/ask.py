@@ -146,8 +146,8 @@ def read_as(query: dict) -> str:
         return f"spend share of every graded attribute against its effect, on {on}"
     if kind == "untried":
         return (
-            f"pairs and triples of attributes with clean positive effects on {on} that no file "
-            "carries together"
+            f"pairs and triples of attributes with clean positive effects on {on} that at most "
+            "one file carries together"
         )
     if kind == "nearest":
         return (

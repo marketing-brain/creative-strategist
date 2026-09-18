@@ -267,6 +267,20 @@ def test_untried_empty_with_one_candidate():
     )
 
 
+def test_untried_empty_when_every_compatible_combo_is_already_carried():
+    A = ("hook_devices", "audience_callout")
+    B = ("proof_devices", "expert_credential")
+    units = [_unit(f"u{i}", [A, B]) for i in range(6)]  # every file carries both
+    shas = [u.sha256 for u in units]
+    tests = [_test(*A, change=0.5, cell_shas=shas), _test(*B, change=0.4, cell_shas=shas)]
+    out = az.untried(units, tests, [], ("link_ctr",))
+    assert out.facts == []
+    assert out.empty_reason == (
+        "Every compatible pair or triple of proven attributes is already carried by more than "
+        "one file."
+    )
+
+
 def test_nearest_finds_underperforming_lookalikes_and_the_diff():
     base = [("messenger", "creator_on_camera"), ("angles", "symptom_relief"), ("setting", "home")]
     d = ("proof_devices", "expert_credential")
