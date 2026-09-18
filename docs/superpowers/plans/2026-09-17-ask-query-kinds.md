@@ -1956,7 +1956,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 Ran `scripts/ask_probe.py` against org 3's video ad account (`01a09811-497e-7000-989e-4ffdf8aff83d`, latest done run, 56 units) with all fifteen reference questions and paraphrases, live map and writer, `draws=300`. One run only; no reference question misrouted, so `MAP_SYSTEM` was not touched and there was no second attempt.
 
-- **Unmappable:** 1 of 15 (`Which part of the wrong-supplement reveal concept is carrying it?` — the map correctly chose `recipe` with a named anchor, but no unit's headline, concept summary or concept tags contains "wrong-supplement reveal", so anchor resolution reported unmappable. This is a legitimate no-match, not a routing failure — the paraphrase invents a concept that does not exist among org 3's tagged creatives.)
+- **Unmappable:** 1 of 15 (`Which part of the wrong-supplement reveal concept is carrying it?` — the map correctly chose `recipe` with a named anchor, but no unit's headline, concept summary or concept tags contains "wrong-supplement reveal", so anchor resolution reported unmappable. **Corrected after review:** this was not a legitimate no-match. The concept does exist in org 3 — the tag is `wrong_supplement_reveal`, on the $100,534 file "I was taking the wrong magnesium" — and `resolve_anchor` missed it because it matched the typed name as a raw lowercase substring without folding hyphens and spaces to underscores. It was a matcher defect, fixed in the fix wave as G1.)
 - **Misrouted (wrong kind):** 0. All fourteen mappable questions, including all five reference questions, landed on the intended kind.
 - **Answers that contradicted their own facts:** none found. Spot-checked two answers number-by-number against their printed facts: the spend_gap answer to "Where is our money going versus where the evidence points?" reproduces all seven percentages (8%, 39%, 42%, 12%, 15%, 47%, 73%, 20%, 14%) exactly as printed in F1–F7; the recipe answer to "Which single ingredient is doing the work in our best recipe?" reproduces all six cited percentages (53%, 18%, 72%, 35%, 28%, 27%) exactly as printed in F2/F3/F6/F20/F22/F29. No fabricated numbers in either.
 - **Org 3 verdicts for the five reference questions:**
@@ -1984,4 +1984,58 @@ Ran `scripts/ask_probe.py` against org 3's video ad account (`01a09811-497e-7000
 | 14 | What makes our biggest-spend ad work? | recipe | answerable | right |
 | 15 | Which part of the wrong-supplement reveal concept is carrying it? | unmappable | — | right |
 
-Notes for the record, not fixes: (a) question 14 maps "biggest-spend ad" to the best-CPA anchor per `MAP_SYSTEM`'s existing "our biggest ad" -> `{"best": "cpa"}` example (Task 7, prior work) — the resulting anchor ($2,317 spend) is not literally the account's highest spender ($146k+ elsewhere in the run); the `read as` line discloses the best-CPA interpretation honestly, so this is a design choice already baked into the map prompt, not a Task 10 routing bug, and out of this task's scope to change. (b) the recipe answers occasionally narrate a dimension's "within" clause loosely (e.g. attributing a `visual_motifs=platform_caption_style | within products_mentioned=ashwagandha` interaction to "ashwagandha" in prose) while still citing the correct grounded number — a wording nuance, not a wrong number or wrong citation.
+Notes for the record, not fixes: (a) question 14 maps "biggest-spend ad" to the best-CPA anchor per `MAP_SYSTEM`'s existing "our biggest ad" -> `{"best": "cpa"}` example (Task 7, prior work) — the resulting anchor ($2,317 spend) is not literally the account's highest spender ($146k+ elsewhere in the run); the `read as` line discloses the best-CPA interpretation honestly, so this is a design choice already baked into the map prompt, not a Task 10 routing bug, and out of this task's scope to change. (b) the recipe answers occasionally narrate a dimension's "within" clause loosely (e.g. attributing a `visual_motifs=platform_caption_style | within products_mentioned=ashwagandha` interaction to "ashwagandha" in prose) while still citing the correct grounded number. **Corrected after review:** this was not a wording nuance. The number was right and the citation was right, but the *subject* was wrong: an interaction row measures the named facet among the files carrying the group, so crediting the group is a false claim about which ingredient does the work — the exact question the recipe kind exists to answer. Fixed in the fix wave as G4, by rendering the group as "among files with …" and telling the writer where the effect belongs.
+
+### Fix wave (2026-09-17)
+
+Sixteen accepted findings — G1–G4 from the controller's reading of the probe above, R5–R20 from
+the whole-branch review — were fixed in ten commits on `ask-query-kinds`, then the **full**
+fifteen-question probe was rerun once against the same org 3 account and stored run
+(`01a09811-497e-7000-989e-4ffdf8aff83d`, 56 units, live map and writer, `draws=300`). The whole
+probe was rerun rather than the four affected questions because the recipe misattribution was
+intermittent, and only a full run shows whether the prompt change held.
+
+What changed: G1 named-anchor separator folding; G2 a `{"best": "spend"}` anchor plus the map
+example that had been sending "biggest-spend ad" to the best-CPA file; G3 `spend_gap` no longer
+filters out confounded effects (heavy spend is what earns the `budget_concentration` flag, so the
+filter hid the rows the kind exists to show) and names the flags; G4 interaction rows render as
+"among files with X" and the writer is told the effect belongs to the named attribute; R5 an
+untested stratum says so; R6 fresh stratum grades cap at suggestive; R7 `nearest` and `recipe` cap
+at directional; R8 one `spend_gap` fact per attribute; R9 headlines collapse to one line; R10 diff
+and ingredient lists cap at 12 rows; R11/R19 `untried` wording matches `MAX_CARRIERS`; R14/R15/R20
+malformed writer output cannot raise; R16 no empty evidence box for an F-only citation; R17
+hurting recipe facets rank last with a `hurts:` prefix.
+
+**Rerun result: 15 questions, 0 unmappable** (was 1 of 15).
+
+| # | Question | Kind | Verdict | Judgement |
+|---|---|---|---|---|
+| 1 | Where is our money going versus where the evidence points? | spend_gap | answerable | right; three over-funded rows now appear, each with its flags named |
+| 2 | Which proven ingredients have we never combined? | untried | answerable | right; layer read as conversion this run (was all) — both defensible for the wording |
+| 3 | What separates our best CPA video from the ads most like it that failed? | nearest | directional | right; capped by R7, and the answer says the evidence is account-wide |
+| 4 | Is the expert effect real, or just where we spent the money? | controlled | directional | right; the answer now states the low and mid terciles could not be tested |
+| 5 | Which single ingredient is doing the work in our best recipe? | recipe | directional | right; the gummy row is credited to gummy, not to magnesium |
+| 6 | Are we overspending on anything the data says doesn't work? | spend_gap | answerable | right; melatonin, product-in-hand and guarantee shown over-funded with flags |
+| 7 | What's cheap and working that we should put more budget behind? | spend_gap | directional | right |
+| 8 | What should the next video look like, based on what's proven? | untried | answerable | right |
+| 9 | Give me a combination of winning elements we haven't shot yet | untried | answerable | right |
+| 10 | Why do the ads that look like our top converter underperform it? | nearest | directional | right; anchored on the best purchases-per-1k file, which is what "top converter" asks for |
+| 11 | Compare the pharmacist ad to its closest lookalikes | nearest | directional | right |
+| 12 | Does expert on camera still win once you control for how much we spent on it? | controlled | not yet | right; only the high tercile was testable and it shows nothing |
+| 13 | Is the long-video advantage just a spend artefact? | controlled | directional | right; was answerable before R6 capped a fresh stratum's BH pass |
+| 14 | What makes our biggest-spend ad work? | recipe | directional | right; now reads as the highest-spend file ($146,572), not the best-CPA file ($2,317) |
+| 15 | Which part of the wrong-supplement reveal concept is carrying it? | recipe | directional | right; the anchor resolves to "I was taking the wrong magnesium" ($100,534) |
+
+Every read-as line describes the question that was asked, every kind is the intended one, and every
+cited row is attributed to the right subject. Three answers were spot-checked number by number
+against their facts and comparisons — #6 (28%, 18%, 22%, 33%, 18%, 34%, 39%, 8%, 12%), #5 (53%,
+41%, 34%) and #14 (76%, 22%, 53%, 41%, 39%, 25%) — with no ungrounded number in any of them.
+
+Two earlier statements in this note are corrected above: question 15 was a matcher defect, not a
+legitimate no-match, and the recipe misattribution was a wrong subject on a correct number, not a
+wording nuance. Note (a) about question 14 is also superseded: the best-CPA reading of
+"biggest-spend ad" was a map-prompt defect, and G2 added the spend anchor that fixes it.
+
+New caps worth recording: `nearest` and `recipe` can no longer reach answerable, and a `controlled`
+stratum's fresh grade can no longer reach strong. Both are deliberate — neither kind runs a test of
+the claim it makes, and a BH pass over a family of two or three is not evidence.
