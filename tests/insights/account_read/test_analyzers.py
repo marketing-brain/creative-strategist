@@ -171,12 +171,28 @@ def test_spend_gap_flags_over_funded_and_starved_attributes():
     )
     out = az.spend_gap(units, [fear, expert, novelty, flagged], ("link_ctr",))
     assert out.empty_reason is None
-    assert out.tests == [fear, expert]
+    # The flagged effect is kept (heavy spend is what earns the flag) and joins fear's one fact.
+    assert out.tests == [fear, flagged, expert]
     assert out.facts == [
         "over-funded | registers = fear | 3 of 10 files | 60% of spend | "
-        "link CTR -30% suggestive (P1)",
+        "link CTR -30% suggestive (P1); link CTR -50% suggestive (P2) | "
+        "flags: budget concentration",
         "starved | proof devices = expert credential | 4 of 10 files | 16% of spend | "
-        "link CTR +50% suggestive (P2)",
+        "link CTR +50% suggestive (P3)",
+    ]
+
+
+def test_spend_gap_gives_one_attribute_one_fact_carrying_every_agreeing_metric():
+    heavy = [_unit(f"h{i}", [("registers", "fear")], spend=5000) for i in range(3)]
+    rest = [_unit(f"r{i}", [], spend=1000) for i in range(7)]
+    shas = [u.sha256 for u in heavy]
+    ctr = _test("registers", "fear", change=-0.3, p=0.02, cell_shas=shas)
+    cpa = _test("registers", "fear", metric="cpa", change=0.4, p=0.01, cell_shas=shas)
+    out = az.spend_gap(heavy + rest, [ctr, cpa], ("link_ctr", "cpa"))
+    assert out.tests == [cpa, ctr]  # ascending p
+    assert out.facts == [
+        "over-funded | registers = fear | 3 of 10 files | 68% of spend | "
+        "CPA +40% suggestive (P1); link CTR -30% suggestive (P2)"
     ]
 
 

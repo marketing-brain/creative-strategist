@@ -105,25 +105,45 @@ OVER_FUNDED, STARVED = 1.5, 0.67  # spend share against file share
 
 def spend_gap(units: list[Unit], tests: list[Test], metrics: tuple[str, ...]) -> Analysis:
     """Graded attributes whose share of spend is out of line with their share of files and
-    their effect: over-funded when heavy and bad, starved when light and good."""
+    their effect: over-funded when heavy and bad, starved when light and good.
+
+    Confounded effects are kept: heavy spend on an attribute is what earns the
+    budget_concentration flag, so dropping flagged tests would hide the very rows this kind
+    exists to show. The flags ride on the fact line instead. One fact per attribute, carrying
+    every metric that agrees with the bucket its best-p metric chose."""
     total = float(sum(u.spend for u in units)) or 1.0
     n = len(units)
     by_sha = {u.sha256: u for u in units}
-    rows: list[tuple[str, float, Test]] = []
-    for t in clean_main_effects(tests, metrics):
-        cell_spend = sum(float(by_sha[s].spend) for s in t.cell_shas if s in by_sha)
-        spend_share, file_share = cell_spend / total, len(t.cell_shas) / n
-        if spend_share >= OVER_FUNDED * file_share and not is_good(t):
-            rows.append(("over-funded", spend_share, t))
-        elif spend_share <= STARVED * file_share and is_good(t):
-            rows.append(("starved", spend_share, t))
+    graded = [
+        t for t in tests if t.group is None and t.metric in metrics and t.grade in GOOD_GRADES
+    ]
+    by_attr: dict[tuple[str, str], list[Test]] = {}
+    for t in graded:
+        by_attr.setdefault((t.dimension, t.value), []).append(t)
+    rows: list[tuple[str, float, Test, list[Test]]] = []
+    for ts in by_attr.values():
+        ts = sorted(ts, key=lambda t: t.p)  # best p first, and it picks the bucket
+        head = ts[0]
+        cell_spend = sum(float(by_sha[s].spend) for s in head.cell_shas if s in by_sha)
+        spend_share, file_share = cell_spend / total, len(head.cell_shas) / n
+        if spend_share >= OVER_FUNDED * file_share and not is_good(head):
+            rows.append(("over-funded", spend_share, head, [t for t in ts if not is_good(t)]))
+        elif spend_share <= STARVED * file_share and is_good(head):
+            rows.append(("starved", spend_share, head, [t for t in ts if is_good(t)]))
     rows.sort(key=lambda r: (r[0] != "over-funded", -r[1]))
     out = Analysis()
-    for verdict, share, t in rows:
-        out.tests.append(t)
+    for verdict, share, head, keep in rows:
+        parts = []
+        for t in keep:
+            out.tests.append(t)
+            parts.append(
+                f"{METRIC_NAME[t.metric]} {t.change * 100:+.0f}% {t.grade} (P{len(out.tests)})"
+            )
+        flags = sorted({f for t in keep for f in t.confounds})
+        tail = f" | flags: {', '.join(f.replace('_', ' ') for f in flags)}" if flags else ""
         out.facts.append(
-            f"{verdict} | {label(t)} | {len(t.cell_shas)} of {n} files | {share * 100:.0f}% of "
-            f"spend | {METRIC_NAME[t.metric]} {t.change * 100:+.0f}% {t.grade} (P{len(out.tests)})"
+            f"{verdict} | {label(head)} | {len(head.cell_shas)} of {n} files | "
+            f"{share * 100:.0f}% of spend | {'; '.join(parts)}{tail}"
         )
     if not rows:
         out.empty_reason = (
