@@ -23,6 +23,7 @@ from cs.insights.account_read.writer import (
     _numbers,
     pattern_line,
 )
+from cs.tagging.taxonomy import load_taxonomy
 
 LAYER_METRICS = {
     "attention": ("hook_rate",),
@@ -62,16 +63,45 @@ def _loads(text: str) -> dict:
     return body if isinstance(body, dict) else {}
 
 
-def _vocab(units: list[Unit]) -> dict[str, list[str]]:
+MIN_VOCAB = 5  # files a value needs before the mapper may compare it (MIN_CELL per side)
+
+
+def _counts(units: list[Unit]) -> dict[tuple[str, str], int]:
     counts: dict[tuple[str, str], int] = {}
     for u in units:
         for f in u.facets:
             counts[f] = counts.get(f, 0) + 1
+    return counts
+
+
+def _vocab(units: list[Unit]) -> dict[str, list[str]]:
     vocab: dict[str, list[str]] = {}
-    for (d, v), n in sorted(counts.items()):
-        if n >= 5:
+    for (d, v), n in sorted(_counts(units).items()):
+        if n >= MIN_VOCAB:
             vocab.setdefault(d, []).append(v)
     return vocab
+
+
+def _thin(units: list[Unit]) -> dict[tuple[str, str], int]:
+    """Tagged values under the vocabulary floor, plus closed video taxonomy values no file
+    carries, each with its file count. Offered to the mapper so a question about one of them
+    gets "only N files" instead of "not tagged"."""
+    counts = _counts(units)
+    thin = {f: n for f, n in counts.items() if n < MIN_VOCAB}
+    for dim in load_taxonomy().dimensions:
+        if "video" not in dim.applies_to or not dim.values or dim.kind not in ("single", "multi"):
+            continue
+        for v in dim.values:
+            if (dim.name, str(v)) not in counts:
+                thin[(dim.name, str(v))] = 0
+    return thin
+
+
+def _thin_lines(thin: dict[tuple[str, str], int]) -> list[str]:
+    by_dim: dict[str, list[str]] = {}
+    for (d, v), n in sorted(thin.items()):
+        by_dim.setdefault(d, []).append(f"{v}({n})")
+    return [f"- {d}: {', '.join(vs)}" for d, vs in by_dim.items()]
 
 
 def rank_metric_for_layer(layer: str) -> str:
@@ -95,6 +125,9 @@ def parse_query(body: dict) -> dict:
     """The model's map JSON -> a parsed query, or {"unmappable": reason}."""
     if "unmappable" in body:
         return {"unmappable": str(body["unmappable"])}
+    if "thin" in body:
+        thin = _facet(body["thin"])
+        return {"thin": thin} if thin else {"unmappable": _UNMAPPABLE}
     raw_layer = body.get("layer")
     layer = raw_layer if isinstance(raw_layer, str) and raw_layer in LAYER_METRICS else "all"
     kind = body.get("kind")
@@ -187,6 +220,7 @@ You translate a strategist's question about an ad account into one query over it
 - {"kind": "recipe", "anchor": A, "layer": L}: which ingredient of one video does the work; what makes our best ad work.
 A (anchor) is {"best": <metric>} with metric one of hook_rate, thruplay_rate, link_ctr, purchases_per_1k, cpa, or "spend" for the file the account spent the most on, or {"named": "<the words in the question that identify the video>"}. "best CPA video" -> {"best": "cpa"}; "the pharmacist ad" -> {"named": "pharmacist"}; "our biggest ad" or "our biggest-spend ad" -> {"best": "spend"}.
 L (layer): "trust" or "hold" -> retention; "attention" or "hook" -> attention; "clicks" -> click; "CAC", "CPA", "conversions", "purchases" -> conversion; otherwise all.
+THIN lists tagged values with too few files to compare, each with its file count in parentheses. If the question is about one of them, return {"thin": [<dimension>, <value>]} and nothing else.
 If the question asks about something none of these kinds can answer from tagged attributes, return {"unmappable": "<what is missing, in one sentence>"}. Return valid JSON only.
 """  # noqa: E501
 
@@ -199,13 +233,30 @@ async def map_question(question: str, result_json: dict, writer) -> dict:
     """A query dict, or {"unmappable": reason} when the tags do not capture the question."""
     units = [unit_from_json(u) for u in result_json.get("units", [])]
     vocab = _vocab(units)
+    thin = _thin(units)
     user = (
         "DIMENSIONS AND VALUES:\n"
         + "\n".join(f"- {d}: {', '.join(vs)}" for d, vs in vocab.items())
+        + f"\n\nTHIN (under {MIN_VOCAB} files, cannot be compared):\n"
+        + "\n".join(_thin_lines(thin))
         + f"\n\nQUESTION: {question}"
     )
     text, _, _ = await writer.complete(MAP_SYSTEM, user)
-    return parse_query(_loads(text))
+    query = parse_query(_loads(text))
+    if "thin" not in query:
+        return query
+    n = thin.get(query["thin"])
+    if n is None:
+        return {"unmappable": _UNMAPPABLE}
+    words = analyzers.facet_words(query["thin"])
+    if n == 0:
+        return {"unmappable": f"No file in this account is tagged {words}."}
+    files = "file is" if n == 1 else "files are"
+    return {
+        "unmappable": (
+            f"Only {n} {files} tagged {words}; {MIN_VOCAB} are needed on each side to compare."
+        )
+    }
 
 
 def targeted_tests(query: dict, units: list[Unit], draws: int) -> list[Test]:

@@ -90,6 +90,41 @@ async def test_map_question_unmappable():
     assert out == {"unmappable": "persona is not tagged"}
 
 
+async def test_map_question_offers_thin_values_and_renders_their_count():
+    result = _result_json()
+    for u in result["units"][:2]:
+        u["facets"].append(["production", "motion_graphics"])
+    w = FakeAccountReadWriter([json.dumps({"thin": ["production", "motion_graphics"]})])
+    out = await map_question("do animated creatives work better?", result, w)
+    assert out == {
+        "unmappable": "Only 2 files are tagged production = motion graphics; "
+        "5 are needed on each side to compare."
+    }
+    prompt = w.calls[0][1]
+    assert "THIN" in prompt and "motion_graphics(2)" in prompt.split("THIN")[1]
+    assert "motion_graphics" not in prompt.split("THIN")[0]  # not offered as comparable
+
+
+async def test_map_question_names_a_taxonomy_value_no_file_carries():
+    w = FakeAccountReadWriter([json.dumps({"thin": ["ending", "loop"]})])
+    out = await map_question("do looping videos hold better?", _result_json(), w)
+    assert out == {"unmappable": "No file in this account is tagged ending = loop."}
+    assert "loop(0)" in w.calls[0][1]
+
+
+async def test_map_question_thin_with_an_unknown_value_falls_back():
+    w = FakeAccountReadWriter([json.dumps({"thin": ["nope", "nothing"]})])
+    out = await map_question("anything", _result_json(), w)
+    assert out == {"unmappable": "That asks about something the tags do not capture yet."}
+
+
+def test_parse_query_thin():
+    assert parse_query({"thin": ["production", "motion_graphics"]}) == {
+        "thin": ("production", "motion_graphics")
+    }
+    assert "unmappable" in parse_query({"thin": "production"})
+
+
 def test_parse_query_kinds_without_arguments():
     assert parse_query({"kind": "spend_gap", "layer": "conversion"}) == {
         "kind": "spend_gap",
