@@ -144,6 +144,14 @@ def test_parse_query_controlled_requires_target_and_defaults_control_to_spend():
     assert "unmappable" in parse_query({"kind": "controlled", "control": "spend"})
 
 
+def test_parse_query_drops_malformed_targets_and_keeps_bare_dimensions():
+    assert parse_query({"kind": "compare", "targets": [["a"], ["b", "c"], "d"]})["targets"] == [
+        ("b", "c"),
+        "d",
+    ]
+    assert "unmappable" in parse_query({"kind": "compare", "targets": [["a"], ["b", "c", "d"]]})
+
+
 def test_parse_query_unknown_kind_falls_back_to_compare_or_unmappable():
     assert parse_query({"kind": "wat", "targets": ["registers"]})["kind"] == "compare"
     assert "unmappable" in parse_query({"kind": "wat"})
@@ -320,6 +328,31 @@ async def test_answer_empty_analysis_short_circuits_without_a_writer_call():
     assert out["kind"] == "untried" and out["verdict"] == "not yet"
     assert out["answer"].startswith("Fewer than two attributes")
     assert out["facts"] == [] and out["tests"] == [] and out["pattern_ids"] == []
+
+
+async def test_answer_maps_non_json_writer_output_to_unmappable():
+    w = FakeAccountReadWriter(["I'm sorry, I can't help with that."])
+    out = await answer("what makes the best ad work?", _result_json(), w)
+    assert out == {"unmappable": "That asks about something the tags do not capture yet."}
+
+
+async def test_answer_ignores_an_unhashable_pattern_id():
+    mapper = json.dumps({"targets": ["messenger_age_band"], "group": None, "layer": "click"})
+    prose = json.dumps(
+        {
+            "verdict": "directional",
+            "answer": "Older messengers earn more clicks.",
+            "pattern_ids": [["P1"], "P1"],
+            "what_would_settle_it": "more files",
+        }
+    )
+    out = await answer(
+        "which age band earns clicks?",
+        _result_json(),
+        FakeAccountReadWriter([mapper, prose]),
+        draws=100,
+    )
+    assert out["pattern_ids"] == ["P1"]
 
 
 async def test_answer_named_anchor_miss_is_unmappable():

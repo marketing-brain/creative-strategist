@@ -52,8 +52,13 @@ ASK_WRITER_FACTORY = _default_writer
 
 
 def _loads(text: str) -> dict:
+    """The writer's JSON, or {} when it did not return JSON at all. Three parses run per ask,
+    and a prose apology from the gateway must not raise out of the request."""
     m = _FENCE.match(text)
-    body = json.loads(m.group(1) if m else text)
+    try:
+        body = json.loads(m.group(1) if m else text)
+    except json.JSONDecodeError:
+        return {}
     return body if isinstance(body, dict) else {}
 
 
@@ -100,7 +105,15 @@ def parse_query(body: dict) -> dict:
     if kind == "compare":
         if not body.get("targets"):
             return {"unmappable": _UNMAPPABLE}
-        targets = [tuple(t) if isinstance(t, list) else str(t) for t in body["targets"]]
+        # A bare dimension stays a string; anything else must be a well-formed [dim, value] pair.
+        targets: list[str | tuple[str, str]] = []
+        for t in body["targets"]:
+            if isinstance(t, str):
+                targets.append(t)
+            elif (f := _facet(t)) is not None:
+                targets.append(f)
+        if not targets:
+            return {"unmappable": _UNMAPPABLE}
         return {
             "kind": kind,
             "targets": targets,
@@ -324,7 +337,7 @@ async def answer(question: str, result_json: dict, writer, draws: int = 300) -> 
     valid = {f"P{i}" for i in range(1, len(tests) + 1)} | {
         f"F{i}" for i in range(1, len(analysis.facts) + 1)
     }
-    cited_ids = [p for p in body.get("pattern_ids", []) if p in valid]
+    cited_ids = [p for p in body.get("pattern_ids", []) if isinstance(p, str) and p in valid]
     cited = [to_json(tests[int(p[1:]) - 1]) for p in cited_ids if p.startswith("P")]
     return {
         **base,
