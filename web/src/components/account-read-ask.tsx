@@ -136,7 +136,8 @@ function Exchange({ entry, tests, units }: { entry: Entry; tests: AccountReadTes
               ))}
             </ol>
           )}
-          {(answer.pattern_ids?.length ?? 0) > 0 && (
+          {/* F-ids are already rendered above as facts; only P-ids have an evidence row. */}
+          {(answer.pattern_ids ?? []).some((id) => id.startsWith('P')) && (
             <EvidenceList ids={answer.pattern_ids ?? []} tests={answerTests.length ? answerTests : tests} units={units} />
           )}
         </div>

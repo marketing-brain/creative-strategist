@@ -99,6 +99,21 @@ describe('AccountReadAsk', () => {
     expect(screen.getByText(/starved \| messenger age band = 40 to 60/)).toBeInTheDocument();
   });
 
+  it('renders no evidence list when only facts are cited', async () => {
+    accountReadAsk.mockResolvedValueOnce({
+      ...answer('The older messenger is starved.'),
+      kind: 'spend_gap',
+      pattern_ids: ['F1'],
+      facts: [{ id: 'F1', text: 'starved | messenger age band = 40 to 60 | 10 of 56 files | 6% of spend' }],
+    });
+    const { container } = render(<AccountReadAsk accountId="a1" tests={[]} units={[]} />);
+
+    await ask('where is the money going?');
+    expect(await screen.findByText(/starved \| messenger age band = 40 to 60/)).toBeInTheDocument();
+    // The facts list is the only <ol>: an F-only citation must not open an empty evidence box.
+    expect(container.querySelectorAll('ol').length).toBe(1);
+  });
+
   it('offers seeded questions until the first one is asked, and a chip submits its question', async () => {
     accountReadAsk.mockResolvedValueOnce(answer('Nothing untried.'));
     render(<AccountReadAsk accountId="a1" tests={[]} units={[]} />);
