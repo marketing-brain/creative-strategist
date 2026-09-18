@@ -121,6 +121,12 @@ def test_resolve_anchor_named_matches_headline_summary_and_concept_tags():
     assert az.resolve_anchor({"named": "nothing here"}, [a, b, c, d], "cpa") is None
 
 
+def test_resolve_anchor_named_matches_a_slug_typed_with_hyphens_or_spaces():
+    a = _unit("a", [("concept_tags", "wrong_supplement_reveal")])
+    assert az.resolve_anchor({"named": "wrong-supplement reveal"}, [a], "cpa") is a
+    assert az.resolve_anchor({"named": "Wrong Supplement Reveal"}, [a], "cpa") is a
+
+
 def test_unit_line_and_facet_words():
     u = _unit("u", [], spend=1234, headline="Beware", link_clicks=600)
     line = az.unit_line(u, "link_ctr")

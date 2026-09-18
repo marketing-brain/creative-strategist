@@ -60,15 +60,21 @@ def rank_metric(metrics: tuple[str, ...]) -> str:
     return "cpa" if len(metrics) == len(METRICS) else metrics[0]
 
 
+def _norm(s: str) -> str:
+    """Lowercase with hyphens and spaces folded to underscores, so a typed concept name matches
+    its slug."""
+    return s.lower().replace("-", "_").replace(" ", "_")
+
+
 def resolve_anchor(anchor: dict, units: list[Unit], metric: str) -> Unit | None:
     if "named" in anchor:
-        needle = str(anchor["named"]).lower()
+        needle = _norm(str(anchor["named"]))
         hits = [
             u
             for u in units
-            if needle in u.headline.lower()
-            or needle in (u.concept_summary or "").lower()
-            or any(d == "concept_tags" and needle in v.lower() for d, v in u.facets)
+            if needle in _norm(u.headline)
+            or needle in _norm(u.concept_summary or "")
+            or any(d == "concept_tags" and needle in _norm(v) for d, v in u.facets)
         ]
         return max(hits, key=lambda u: u.spend) if hits else None
     scored = [(v, u) for u in units if (v := unit_metric(u, metric)) is not None]
