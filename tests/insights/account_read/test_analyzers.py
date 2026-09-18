@@ -350,6 +350,28 @@ def test_controlled_by_spend_yields_one_test_per_tercile_plus_the_overall_refere
     strata = [t.group for t in out.tests[1:]]
     assert strata == ["spend=low", "spend=mid", "spend=high"]
     assert all(t.metric == "link_ctr" and t.grade != "ungraded" for t in out.tests[1:])
+    # A BH pass over a family of three is not evidence: fresh stratum grades stop at suggestive.
+    assert all(t.grade != "strong" for t in out.tests[1:])
+
+
+def test_controlled_marks_a_stratum_that_never_reached_the_floor():
+    target = ("messenger", "expert_on_camera")
+    units = []
+    for i in range(30):
+        has = i in (0, 1) if i < 10 else i % 2 == 0  # low tercile 2/8, mid and high 5/5
+        units.append(
+            _unit(
+                f"u{i:02d}",
+                [target] if has else [],
+                spend=100 * (i + 1),
+                link_clicks=900 if has else 400,
+            )
+        )
+    out = az.controlled(units, [], target, "spend", ("link_ctr",), draws=50)
+    assert out.facts[0] == "spend=low | 2 files with vs 8 without | not tested (needs 5 per side)"
+    assert out.facts[1] == "spend=mid | 5 files with vs 5 without"
+    assert out.facts[2] == "spend=high | 5 files with vs 5 without"
+    assert [t.group for t in out.tests] == ["spend=mid", "spend=high"]
 
 
 def test_controlled_by_partner_attribute_splits_inside_and_outside():

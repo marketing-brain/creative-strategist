@@ -316,16 +316,23 @@ def controlled(
     draws: int,
 ) -> Analysis:
     """The target's comparison rerun inside each stratum of the control. The stored overall
-    main effect rides first as the reference."""
+    main effect rides first as the reference. A fresh stratum grade is capped at suggestive: its
+    BH pass runs over its own two or three tests, and a pass in a family that small is not the
+    evidence that would make the whole question answerable."""
     dim, val = target
     out = Analysis()
     fresh: list[Test] = []
     for lbl, grp in _strata(units, control):
         cell = [u for u in grp if u.has(dim, val)]
         comp = [u for u in grp if not u.has(dim, val)]
-        out.facts.append(f"{lbl} | {len(cell)} files with vs {len(comp)} without")
-        found = compare(cell, comp, dimension=dim, value=val, group=lbl, draws=draws)
-        fresh += [t for t in found if t.metric in metrics]
+        found = [
+            t
+            for t in compare(cell, comp, dimension=dim, value=val, group=lbl, draws=draws)
+            if t.metric in metrics
+        ]
+        untested = "" if found else f" | not tested (needs {MIN_CELL} per side)"
+        out.facts.append(f"{lbl} | {len(cell)} files with vs {len(comp)} without{untested}")
+        fresh += found
     if not fresh:
         return Analysis(
             empty_reason=(
@@ -337,6 +344,8 @@ def controlled(
     passing = benjamini_hochberg([t.p for t in fresh])
     for i, t in enumerate(fresh):
         t.grade = grade(t.p, t.change, i in passing)
+        if t.grade == "strong":
+            t.grade = "suggestive"
     overall = [
         t
         for t in tests
