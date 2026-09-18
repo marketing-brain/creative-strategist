@@ -62,17 +62,7 @@ sudo nano /opt/creative-strategist/web/.env.local
 # NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
 # NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=/
 # NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=/
-# NEXT_PUBLIC_CLERK_JS_VERSION=6.31.1
-# NEXT_PUBLIC_CLERK_UI_VERSION=1.32.3
 ```
-
-The two `*_VERSION` lines pin the Clerk browser scripts. Without them the page loads
-`@clerk/clerk-js@6` and `@clerk/ui@1` from Clerk's CDN unpinned, so a Clerk release
-changes the client code in every browser with no deploy on our side. On 2026-09-18 the
-CDN moved to 6.32.0 / 1.33.0 (released 2026-09-15) and sign-in on the plain-HTTP box
-started looping on token refresh ("Refreshing the session token resulted in an infinite
-redirect loop" in the web journal, "Suffixed cookie failed … secure-context: false" in
-the browser console). Bump the pins deliberately and check the box afterwards.
 
 The three `NEXT_PUBLIC_CLERK_SIGN_IN*`/`SIGN_UP*` lines matter: without them Clerk
 doesn't know the app has its own `/sign-in` page and falls back to redirecting
