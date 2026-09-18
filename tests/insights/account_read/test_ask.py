@@ -2,7 +2,14 @@ import json
 from datetime import date
 from decimal import Decimal
 
-from cs.insights.account_read.ask import answer, cap_verdict, map_question, parse_query, read_as
+from cs.insights.account_read.ask import (
+    answer,
+    cap_for_kind,
+    cap_verdict,
+    map_question,
+    parse_query,
+    read_as,
+)
 from cs.insights.account_read.types import Test, Unit, to_json
 from cs.insights.fakes import FakeAccountReadWriter
 
@@ -251,6 +258,14 @@ def test_cap_verdict_never_exceeds_evidence():
     assert cap_verdict("answerable", strong) == "answerable"
     assert cap_verdict("answerable", sugg) == "directional"
     assert cap_verdict("answerable", []) == "not yet"
+
+
+def test_cap_for_kind_holds_nearest_and_recipe_at_directional():
+    # Their evidence is account-wide effects, never a test of the named files against each other.
+    assert cap_for_kind("nearest", "answerable") == "directional"
+    assert cap_for_kind("recipe", "answerable") == "directional"
+    assert cap_for_kind("recipe", "not yet") == "not yet"
+    assert cap_for_kind("spend_gap", "answerable") == "answerable"
 
 
 def _graded(dim, val, shas, change=0.5, metric="link_ctr", grade="suggestive"):

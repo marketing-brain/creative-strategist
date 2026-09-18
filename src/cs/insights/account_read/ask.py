@@ -178,7 +178,7 @@ If the question asks about something none of these kinds can answer from tagged 
 """  # noqa: E501
 
 ANSWER_SYSTEM = """\
-You are a senior performance-creative strategist answering one question about an ad account from precomputed, graded comparisons. Rules: reproduce numbers exactly as written and cite pattern IDs (P1, P2, ...); strong is evidence, suggestive a lead, directional a hint; name flags; cells under 10 files are small; hypothesis language; say plainly when the data shows no difference or has too few files. FACTS are descriptive counts and shares; COMPARISONS are graded tests. Cite both by id (F1, P1). An "among files with X" or "within X" row measures the named attribute only among files carrying X; the effect belongs to the named attribute, never to X. The READ AS line is how the question was interpreted; if it misses the question, say so in one clause. Return JSON: {"verdict": "answerable" | "directional" | "not yet", "answer": <3 to 7 sentences, direct answer first, then evidence, then caveat>, "pattern_ids": [...], "what_would_settle_it": <one sentence>}. Return valid JSON only.
+You are a senior performance-creative strategist answering one question about an ad account from precomputed, graded comparisons. Rules: reproduce numbers exactly as written and cite pattern IDs (P1, P2, ...); strong is evidence, suggestive a lead, directional a hint; name flags; cells under 10 files are small; hypothesis language; say plainly when the data shows no difference or has too few files. FACTS are descriptive counts and shares; COMPARISONS are graded tests. Cite both by id (F1, P1). An "among files with X" or "within X" row measures the named attribute only among files carrying X; the effect belongs to the named attribute, never to X. For nearest and recipe questions the cited comparisons are account-wide effects of each attribute, not a test of the named files against each other; say so when you lean on them. The READ AS line is how the question was interpreted; if it misses the question, say so in one clause. Return JSON: {"verdict": "answerable" | "directional" | "not yet", "answer": <3 to 7 sentences, direct answer first, then evidence, then caveat>, "pattern_ids": [...], "what_would_settle_it": <one sentence>}. Return valid JSON only.
 """  # noqa: E501
 
 
@@ -227,6 +227,18 @@ def cap_verdict(claimed: str, cited: list[dict]) -> str:
     if any(c["grade"] in ("suggestive", "directional") for c in cited):
         return "directional"
     return "not yet"
+
+
+# nearest and recipe cite account-wide main effects for their diff facets and ingredients: no
+# test compares the anchor to its neighbours, and none measures an ingredient inside the file.
+# The evidence is real but it is not a test of the claim, so these two kinds stop at directional.
+_CAPPED_KINDS = ("nearest", "recipe")
+
+
+def cap_for_kind(kind: str, verdict: str) -> str:
+    if kind in _CAPPED_KINDS and verdict == "answerable":
+        return "directional"
+    return verdict
 
 
 _SETTLE = "More tagged videos with these attributes."
@@ -316,7 +328,9 @@ async def answer(question: str, result_json: dict, writer, draws: int = 300) -> 
     cited = [to_json(tests[int(p[1:]) - 1]) for p in cited_ids if p.startswith("P")]
     return {
         **base,
-        "verdict": cap_verdict(str(body.get("verdict", "not yet")), cited),
+        "verdict": cap_for_kind(
+            query["kind"], cap_verdict(str(body.get("verdict", "not yet")), cited)
+        ),
         "answer": str(body.get("answer", "")),
         "pattern_ids": cited_ids,
         "facts": [{"id": f"F{i}", "text": f} for i, f in enumerate(analysis.facts, start=1)],
