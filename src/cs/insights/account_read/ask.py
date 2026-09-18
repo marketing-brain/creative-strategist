@@ -81,7 +81,7 @@ def _anchor(a, layer: str) -> dict:
     if isinstance(a, dict):
         if a.get("named"):
             return {"named": str(a["named"])}
-        if a.get("best") in METRICS:
+        if a.get("best") in METRICS or a.get("best") == "spend":
             return {"best": str(a["best"])}
     return {"best": rank_metric_for_layer(layer)}
 
@@ -126,6 +126,8 @@ def _words(f) -> str:
 
 
 def _anchor_words(a: dict) -> str:
+    if a.get("best") == "spend":
+        return "the highest-spend file"
     if "best" in a:
         return f"the best-{METRIC_NAME[a['best']]} file"
     return f'the file matching "{a["named"]}"'
@@ -170,7 +172,7 @@ You translate a strategist's question about an ad account into one query over it
 - {"kind": "nearest", "anchor": A, "layer": L}: what separates a winner from the ads most like it; why a lookalike failed; nearest neighbours of one video.
 - {"kind": "controlled", "target": [<dimension>, <value>], "control": [<dimension>, <value>] or "spend", "layer": L}: is an effect real or explained by spend or by another attribute; "after controlling for"; "or is it just because we spent more".
 - {"kind": "recipe", "anchor": A, "layer": L}: which ingredient of one video does the work; what makes our best ad work.
-A (anchor) is {"best": <metric>} with metric one of hook_rate, thruplay_rate, link_ctr, purchases_per_1k, cpa, or {"named": "<the words in the question that identify the video>"}. "best CPA video" -> {"best": "cpa"}; "the pharmacist ad" -> {"named": "pharmacist"}; "our biggest ad" -> {"best": "cpa"}.
+A (anchor) is {"best": <metric>} with metric one of hook_rate, thruplay_rate, link_ctr, purchases_per_1k, cpa, or "spend" for the file the account spent the most on, or {"named": "<the words in the question that identify the video>"}. "best CPA video" -> {"best": "cpa"}; "the pharmacist ad" -> {"named": "pharmacist"}; "our biggest ad" or "our biggest-spend ad" -> {"best": "spend"}.
 L (layer): "trust" or "hold" -> retention; "attention" or "hook" -> attention; "clicks" -> click; "CAC", "CPA", "conversions", "purchases" -> conversion; otherwise all.
 If the question asks about something none of these kinds can answer from tagged attributes, return {"unmappable": "<what is missing, in one sentence>"}. Return valid JSON only.
 """  # noqa: E501
@@ -260,7 +262,9 @@ def _analyse(query: dict, result_json: dict, draws: int) -> analyzers.Analysis |
     metric = None
     if query["kind"] in ("nearest", "recipe"):
         a = query["anchor"]
-        metric = a.get("best") or analyzers.rank_metric(metrics)
+        best = a.get("best")
+        # A spend anchor picks the file by spend, but the layer still decides what it is ranked on.
+        metric = analyzers.rank_metric(metrics) if best in (None, "spend") else best
         anchor = analyzers.resolve_anchor(a, units, metric)
         if anchor is None:
             if "named" in a:

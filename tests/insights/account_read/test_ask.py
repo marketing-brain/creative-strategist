@@ -106,6 +106,9 @@ def test_parse_query_anchor_defaults_to_the_layer_rank_metric():
         "best": "thruplay_rate"
     }
     assert parse_query({"kind": "nearest", "anchor": {"best": "nope"}})["anchor"] == {"best": "cpa"}
+    assert parse_query({"kind": "recipe", "anchor": {"best": "spend"}})["anchor"] == {
+        "best": "spend"
+    }
 
 
 def test_parse_query_controlled_requires_target_and_defaults_control_to_spend():
@@ -210,6 +213,11 @@ def test_read_as_per_kind():
         read_as({"kind": "recipe", "anchor": {"named": "pharmacist"}, "layer": "all"})
         == 'the ingredients of the file matching "pharmacist", ranked by their graded effects on '
         "all metrics"
+    )
+    assert (
+        read_as({"kind": "recipe", "anchor": {"best": "spend"}, "layer": "all"})
+        == "the ingredients of the highest-spend file, ranked by their graded effects on all "
+        "metrics"
     )
 
 

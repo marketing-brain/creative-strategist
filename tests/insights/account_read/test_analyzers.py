@@ -121,6 +121,13 @@ def test_resolve_anchor_named_matches_headline_summary_and_concept_tags():
     assert az.resolve_anchor({"named": "nothing here"}, [a, b, c, d], "cpa") is None
 
 
+def test_resolve_anchor_best_spend_picks_the_biggest_spender_whatever_the_metric():
+    # The high spender is under the purchase floor, so a metric rank would have skipped it.
+    low = _unit("low", [], spend=500, purchases=40)
+    high = _unit("high", [], spend=9000, purchases=5)
+    assert az.resolve_anchor({"best": "spend"}, [low, high], "cpa") is high
+
+
 def test_resolve_anchor_named_matches_a_slug_typed_with_hyphens_or_spaces():
     a = _unit("a", [("concept_tags", "wrong_supplement_reveal")])
     assert az.resolve_anchor({"named": "wrong-supplement reveal"}, [a], "cpa") is a

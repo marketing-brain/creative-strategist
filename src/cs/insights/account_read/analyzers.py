@@ -77,6 +77,8 @@ def resolve_anchor(anchor: dict, units: list[Unit], metric: str) -> Unit | None:
             or any(d == "concept_tags" and needle in _norm(v) for d, v in u.facets)
         ]
         return max(hits, key=lambda u: u.spend) if hits else None
+    if anchor.get("best") == "spend":
+        return max(units, key=lambda u: (u.spend, u.sha256)) if units else None
     scored = [(v, u) for u in units if (v := unit_metric(u, metric)) is not None]
     if not scored:
         return None
