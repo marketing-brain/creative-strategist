@@ -50,8 +50,11 @@ async def latest_run(db: Database, org_id: UUID, ad_account_id: UUID) -> dict | 
     """The newest done run when one exists, else the newest run of any status. When a newer
     run failed its checks, its error rides along as `newer_failed_error` so the page can say
     the read is from an earlier run."""
+    # Two steps on purpose: `result` is a multi-megabyte JSONB per row, and pulling it for
+    # twenty candidates on every page load ran for minutes under concurrent loads and pinned
+    # the database instance (2026-09-18). List the small columns, then fetch one payload.
     rows = await db.fetch(
-        "SELECT id, status, n_units, window_start, window_end, result, read, error, created_at "
+        "SELECT id, status, n_units, error, created_at "
         "FROM account_read_run WHERE org_id=$1 AND ad_account_id=$2 AND format='video' "
         "ORDER BY created_at DESC LIMIT 20",
         org_id,
@@ -59,9 +62,17 @@ async def latest_run(db: Database, org_id: UUID, ad_account_id: UUID) -> dict | 
     )
     if not rows:
         return None
-    newest = dict(rows[0])
-    done = next((dict(r) for r in rows if r["status"] == "done"), None)
-    chosen = done or newest
+    newest = rows[0]
+    done = next((r for r in rows if r["status"] == "done"), None)
+    picked = done or newest
+    full = await db.fetchrow(
+        "SELECT id, status, n_units, window_start, window_end, result, read, error, "
+        "created_at FROM account_read_run WHERE id=$1",
+        picked["id"],
+    )
+    if full is None:  # purged between the two queries
+        return None
+    chosen: dict = dict(full)
     chosen["newer_failed_error"] = (
         newest["error"]
         if chosen["id"] != newest["id"] and newest["status"] in ("rejected", "failed")
