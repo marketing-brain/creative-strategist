@@ -378,7 +378,12 @@ def recipe(
     out.facts.append(f"anchor | {unit_line(anchor, metric)}")
     for i, (_, _, t) in enumerate(ranked, start=1):
         out.tests.append(t)
-        within = f"within {t.group} | " if t.group else ""
+        # Name the group in words, so the row reads as a measurement of the facet among files
+        # carrying the group rather than as a claim about the group itself.
+        within = ""
+        if t.group:
+            gd, _, gv = t.group.partition("=")
+            within = f"among files with {facet_words((gd, gv))} | "
         out.facts.append(
             f"#{i} | {label(t)} | {within}{METRIC_NAME[t.metric]} {t.change * 100:+.0f}% "
             f"{t.grade} (P{i})"

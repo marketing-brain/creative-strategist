@@ -410,8 +410,8 @@ def test_recipe_ranks_the_anchor_facets_by_grade_then_change():
     assert out.facts[0] == 'anchor | "Winner" | $9,000 spend | 0 copies | link CTR 3.0%'
     assert out.facts[1:] == [
         "#1 | messenger = expert on camera | link CTR +60% strong (P1)",
-        "#2 | registers = authority | within messenger=expert_on_camera | link CTR +40% "
-        "strong (P2)",
+        "#2 | registers = authority | among files with messenger = expert on camera | "
+        "link CTR +40% strong (P2)",
     ]
     assert out.tests == [tests[0], tests[2]]
 
