@@ -183,8 +183,15 @@ function Finding({ v, index, citations, f }: { v: FindingView; index: number; ci
             {v.exemplars.map((e) => (
               <FileCard key={e.name} name={e.name} unit={e.unit} f={f} />
             ))}
-            {v.exception && <FileCard name={v.exception.name} unit={v.exception.unit} f={f} note="Exception" />}
+            {v.exception?.unit && <FileCard name={v.exception.name} unit={v.exception.unit} f={f} note="Exception" />}
           </div>
+          {/* The writer gives the exception as a sentence more often than as a bare ad name. */}
+          {v.exception && !v.exception.unit && (
+            <p className="mt-3 max-w-[68ch] text-[14px] leading-6 text-muted-foreground">
+              <span className="font-medium text-foreground">Except </span>
+              {v.exception.name}
+            </p>
+          )}
         </div>
 
         <details className="group/why">
