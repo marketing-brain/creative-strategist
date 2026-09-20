@@ -4,7 +4,14 @@ from datetime import date
 from decimal import Decimal
 
 from cs.insights.account_read.types import Finding, Read, RunResult, Test, Unit
-from cs.insights.account_read.writer import build_brief, check_read, parse_read, write_read
+from cs.insights.account_read.writer import (
+    build_brief,
+    check_money,
+    check_read,
+    parse_read,
+    settle_layers,
+    write_read,
+)
 from cs.insights.fakes import FakeAccountReadWriter
 
 
@@ -224,10 +231,125 @@ def test_parse_read_salvages_a_top_level_list_and_skips_non_dict_findings():
     assert r.overview == "o" and [f.title for f in r.findings] == ["t"]
 
 
-async def test_write_read_gets_three_attempts():
+async def test_write_read_gets_four_attempts():
     run = _run()
     bad = _json(_read(overview="CTR rose 99%."))
     good = _json(_read())
-    writer = FakeAccountReadWriter([bad, bad, good])
+    writer = FakeAccountReadWriter([bad, bad, bad, good])
     read, problems, _, _ = await write_read(run, writer)
-    assert read is not None and problems == [] and len(writer.calls) == 3
+    assert read is not None and problems == [] and len(writer.calls) == 4
+
+
+# --- following a lift to the purchase (org 3 read, 2026-09-19: "qualify higher intent traffic"
+# on a CTR lift whose own purchase lines were flat and whose CPA was worse) ---
+
+
+def _with_money(cpa_grade="suggestive", cpa_change=0.17):
+    run = _run()
+    base = asdict(run.tests[0])
+    run.tests.append(
+        Test(
+            **{
+                **base,
+                "metric": "cpa",
+                "kind": "pooled",
+                "cell_value": 49,
+                "comp_value": 42,
+                "change": cpa_change,
+                "grade": cpa_grade,
+            }
+        )
+    )  # P2
+    run.tests.append(
+        Test(
+            **{
+                **base,
+                "metric": "purchases_per_1k",
+                "kind": "pooled",
+                "cell_value": 1.47,
+                "comp_value": 1.42,
+                "change": 0.04,
+                "grade": "thin",
+            }
+        )
+    )  # P3
+    return run
+
+
+def test_brief_follows_every_click_line_to_the_purchase_even_when_the_purchase_line_is_thin():
+    brief = build_brief(_with_money())
+    assert (
+        "downstream, same files: P2 CPA $49 with vs $42 without (17% higher, suggestive)" in brief
+    )
+    assert "P3 purchases per 1,000 impressions 1.47 with vs 1.42 without" in brief
+    assert "no clear difference" in brief
+
+
+def test_a_click_lift_with_a_graded_cpa_penalty_must_say_so():
+    run = _with_money()
+    problems = check_money(_read(), run.tests)
+    assert len(problems) == 1 and "P2 CPA $49 with vs $42 without" in problems[0]
+    told = _finding()
+    told.pattern_ids = ["P1", "P2"]
+    assert check_money(_read(findings=[told]), run.tests) == []
+    # a within-group line has no downstream line in the brief, so none can be demanded
+    grouped = _with_money()
+    for t in grouped.tests:
+        t.group = "messenger=pharmacist"
+    assert check_money(_read(), grouped.tests) == []
+    # a purchase line with no clear difference is shown on the page, not demanded in the prose
+    assert check_money(_read(), _with_money(cpa_grade="thin").tests) == []
+
+
+def test_buyer_words_in_a_title_need_a_graded_purchase_line():
+    f = _finding()
+    f.title, f.pattern_ids = "Warning hooks qualify higher intent traffic", ["P1", "P2"]
+    # the purchase lines show no clear difference: the title claims what nothing shows
+    (problem,) = check_money(_read(findings=[f]), _with_money(cpa_grade="thin").tests)
+    assert "'qualify'" in problem and "Retitle" in problem
+    # a CPA line that is at least a lead carries the title, good news or bad
+    assert check_money(_read(findings=[f]), _with_money(cpa_change=-0.17).tests) == []
+    f.title = "Warning hooks cost purchase efficiency"
+    assert check_money(_read(findings=[f]), _with_money().tests) == []
+    # a hint is not enough to headline
+    assert check_money(_read(findings=[f]), _with_money(cpa_grade="directional").tests)
+
+
+async def test_a_retry_hands_the_draft_back_to_be_corrected_not_rewritten():
+    run = _run()
+    bad, good = _json(_read(overview="CTR rose 99%.")), _json(_read())
+    writer = FakeAccountReadWriter([bad, good])
+    await write_read(run, writer)
+    retry = writer.calls[1][1]
+    assert "CTR rose 99%." in retry and "Correct only what is named" in retry
+
+
+def test_confidence_is_capped_by_the_weakest_graded_line_and_thin_lines_do_not_count():
+    run = _with_money(cpa_grade="directional")
+    f = _finding()
+    f.pattern_ids, f.confidence = ["P1", "P2", "P3"], "suggestive"
+    (problem,) = check_money(_read(findings=[f]), run.tests)
+    assert "use 'directional' or 'mixed'" in problem
+    f.confidence = "mixed"
+    assert check_money(_read(findings=[f]), run.tests) == []
+
+
+def test_a_funnel_label_without_a_purchase_line_is_refiled_under_its_evidence():
+    run = _with_money()
+    f = _finding()
+    f.layer = "funnel"
+    read = _read(findings=[f])
+    settle_layers(read, run.tests)
+    assert read.findings[0].layer == "click"
+    f.layer, f.pattern_ids = "funnel", ["P1", "P2"]
+    settle_layers(read, run.tests)
+    assert read.findings[0].layer == "funnel"  # it cites the CPA line, so the label stands
+
+
+def test_stages_the_brief_holds_no_data_on_cannot_be_blamed():
+    run = _run()
+    brief = build_brief(run)
+    read = _read(overview="Warning-led ads earn clicks but lose people at the checkout stage.")
+    assert any("'checkout'" in p for p in check_read(read, brief, 1))
+    asking = _read(data_needed=["Checkout and landing page data."])
+    assert check_read(asking, brief, 1) == []

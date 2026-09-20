@@ -23,7 +23,7 @@ METRIC_NAME = {
 MAX_MAIN_UNFLAGGED, MAX_MAIN_FLAGGED, MAX_UNITS_LISTED = 60, 20, 60
 # Interactions are numerous; the brief carries the sharpest lines per group, strongest groups first.
 MAX_GROUPS, MAX_LINES_PER_GROUP = 20, 10
-MAX_ATTEMPTS = 3  # first draft plus two retries with the problems named
+MAX_ATTEMPTS = 4  # first draft plus three retries with the problems named
 GRADE_ORDER = {"strong": 0, "suggestive": 1, "directional": 2}
 
 
@@ -59,6 +59,45 @@ def pattern_line(pid: str, t: Test) -> str:
     )
 
 
+MONEY_METRICS = ("purchases_per_1k", "cpa")
+GRADE_RANK = {"strong": 3, "suggestive": 2, "directional": 1, "thin": 0}
+
+
+def _attr(t: Test) -> tuple:
+    return (t.group, t.dimension, str(t.value))
+
+
+def money_siblings(tests: list[Test]) -> dict[tuple, list[Test]]:
+    """Attribute -> its purchases-per-1,000 and CPA tests, whatever their grade."""
+    out: dict[tuple, list[Test]] = {}
+    for t in tests:
+        if t.metric in MONEY_METRICS:
+            out.setdefault(_attr(t), []).append(t)
+    return out
+
+
+def pays(t: Test) -> bool:
+    """A purchase or cost result that is good news and at least a lead."""
+    good = t.change < 0 if t.metric == "cpa" else t.change > 0
+    return good and GRADE_RANK.get(t.grade, 0) >= GRADE_RANK["suggestive"]
+
+
+def costs(t: Test, at_least: str = "directional") -> bool:
+    """A purchase or cost result that is bad news and at least a hint."""
+    bad = t.change > 0 if t.metric == "cpa" else t.change < 0
+    return bad and GRADE_RANK.get(t.grade, 0) >= GRADE_RANK[at_least]
+
+
+def downstream(pid: str, t: Test) -> str:
+    direction = "higher" if t.change > 0 else "lower"
+    grade = "no clear difference" if t.grade == "thin" else t.grade
+    return (
+        f"{pid} {METRIC_NAME[t.metric]} {fmt_val(t.metric, t.cell_value)} with vs "
+        f"{fmt_val(t.metric, t.comp_value)} without ({abs(t.change) * 100:.0f}% {direction}, "
+        f"{grade})"
+    )
+
+
 def _unit_record(u) -> str:
     bits = [
         f'"{u.headline}"',
@@ -85,10 +124,20 @@ def build_brief(run: RunResult) -> str:
     top_units = sorted(run.units, key=lambda u: -u.spend)[:MAX_UNITS_LISTED]
     record = [_unit_record(u) for u in top_units]
 
+    money = money_siblings(run.tests)
+
     def with_units(t: Test) -> str:
         cell = sorted((by_sha[x] for x in t.cell_shas if x in by_sha), key=lambda u: -u.spend)
         examples = "; ".join(f'"{u.headline}"' for u in cell[:3])
-        return pattern_line(ids[id(t)], t) + "\n    cell examples: " + examples
+        line = pattern_line(ids[id(t)], t) + "\n    cell examples: " + examples
+        # Thin lines are left out of the brief, and the purchase lines of an attribute that
+        # wins attention are usually thin. Without them the writer sees the CTR lift and never
+        # the flat purchases beside it, and writes "qualifies buyers" (org 3 read, 2026-09-19).
+        if t.metric not in MONEY_METRICS:
+            down = [downstream(ids[id(m)], m) for m in money.get(_attr(t), [])]
+            if down:
+                line += "\n    downstream, same files: " + "; ".join(down)
+        return line
 
     main = [t for t in run.tests if t.group is None and t.grade != "thin"]
     unflagged = [with_units(t) for t in main if not t.confounds][:MAX_MAIN_UNFLAGGED]
@@ -181,6 +230,9 @@ RULES
 - Flags matter. A seasonality flag means time confounds the comparison: say so or leave it out. A budget concentration flag means one file dominates: name it.
 - Entanglement matters most. When the stratified checks show an effect vanishing once another attribute is held constant, say the two cannot be separated with this data and do not present them as separate findings.
 - Attention, click and conversion are different layers. Say which layer each claim is about. A CTR lift with a CPA penalty is a finding in itself.
+- Follow every attribute to the purchase. Each attention or click line carries a "downstream, same files" line with its purchases per 1,000 impressions and CPA. Read it before you interpret a lift. When it is graded and worse (higher CPA, fewer purchases), the finding must say so and cite its pattern ID. When it shows no clear difference, do not claim the lift reaches the purchase. Words about buyers (intent, qualified, converts, purchase, sales, closer) belong in a title only when a cited purchases or CPA line is suggestive or strong in the good direction. More clicks with flat purchases is more clicks, not better traffic.
+- A finding's confidence is the grade of the weakest graded comparison it cites (lines showing no clear difference aside), or "mixed". One strong line does not make a finding strong.
+- Write only about what the brief measures: the ad, the view, the click, and purchases attributed to the ad. It holds nothing on the landing page, cart or checkout, so make no claim about them; ask for that data in data_needed instead.
 - Every finding must have: a mechanism (drawn from the qualitative record, in hypothesis language), two or three exemplar files named by their exact headline as written in the brief, an exception where one exists (a file in the cell that breaks the pattern or a file outside it that behaves like it), and why_non_obvious: one sentence on what the metric table alone could not show.
 - Rank findings by decision value for the next ad, not by p-value. Three to six findings. Fewer and sharper beats coverage.
 - The overview answers, in prose and before any number: what does this account's creative actually do, and where is it wrong about itself?
@@ -359,6 +411,115 @@ def check_read(
             )
     if not read.findings:
         problems.append("no findings")
+    problems += _off_brief_stages(read, brief)
+    return problems
+
+
+_BUYER_WORDS = re.compile(
+    r"\b(intent|qualif\w*|convert\w*|conversions?|purchas\w*|buyers?|sales?|revenue|closer)\b",
+    re.I,
+)
+# Funnel stages the account read holds no data on. Naming one is a claim with nothing under it
+# (the org 3 read blamed "drop-offs at the checkout stage", 2026-09-19).
+_UNMEASURED_STAGES = ("checkout", "landing page", "add to cart", "add-to-cart", "cart abandon")
+
+
+def _off_brief_stages(read: Read, brief: str) -> list[str]:
+    low_brief = brief.lower()
+    texts = [("overview", read.overview), ("entangled", read.entangled)]
+    texts += [
+        (f"finding '{f.title}'", " ".join((f.title, f.paragraph, f.mechanism, f.why_non_obvious)))
+        for f in read.findings
+    ]
+    return [
+        f"{where}: says '{term}', which the brief holds no data on; drop the claim or move "
+        "the request for that data to data_needed"
+        for where, text in texts
+        for term in _UNMEASURED_STAGES
+        if term in text.lower() and term not in low_brief
+    ]
+
+
+_METRIC_LAYER = {"hook_rate": "attention", "thruplay_rate": "retention", "link_ctr": "click"}
+_LAYER_ORDER = ("attention", "retention", "click")
+
+
+def settle_layers(read: Read, tests: list[Test]) -> None:
+    """File a finding under the layer its evidence is about. The writer reaches for "funnel"
+    or "conversion" when a finding spans hook and click but cites no purchase line; that is a
+    label, so it is corrected here rather than spent as a retry (dry run, 2026-09-20). The
+    furthest stage its cited lines reach is the honest one."""
+    for f in read.findings:
+        if f.layer not in ("conversion", "funnel"):
+            continue
+        cited = [
+            tests[int(p[1:]) - 1]
+            for p in f.pattern_ids
+            if re.fullmatch(r"P\d+", p) and 1 <= int(p[1:]) <= len(tests)
+        ]
+        if any(t.metric in MONEY_METRICS for t in cited):
+            continue
+        reached = [_METRIC_LAYER[t.metric] for t in cited if t.metric in _METRIC_LAYER]
+        if reached:
+            f.layer = max(reached, key=_LAYER_ORDER.index)
+
+
+def check_money(read: Read, tests: list[Test]) -> list[str]:
+    """A finding may not claim more than its purchase and CPA lines show. Every attribute it
+    cites on an attention or click metric must be followed to the purchase, buyer language in
+    a title needs a purchase or CPA line that pays, and confidence is capped by the weakest
+    cited grade."""
+    money = money_siblings(tests)
+    ids = {id(t): f"P{i}" for i, t in enumerate(tests, start=1)}
+    problems: list[str] = []
+    for f in read.findings:
+        cited = [
+            tests[int(p[1:]) - 1]
+            for p in f.pattern_ids
+            if re.fullmatch(r"P\d+", p) and 1 <= int(p[1:]) <= len(tests)
+        ]
+        cited_money = [t for t in cited if t.metric in MONEY_METRICS]
+        # Account-wide lines only: those are the ones the brief prints a downstream line
+        # under. A gate may demand only what the writer was shown (the dry run stalled on a
+        # within-group CPA line, P11176, that appears nowhere in the brief).
+        lifts = [t for t in cited if t.metric not in MONEY_METRICS and t.group is None]
+        for attr in dict.fromkeys(_attr(t) for t in lifts):
+            # Only graded bad news has to be cited. A downstream line with no clear
+            # difference is shown on the page beside the finding either way, and demanding a
+            # citation for each one cost the writer every retry it had (dry run, 2026-09-20).
+            sibs = [m for m in money.get(attr, []) if costs(m)]
+            if sibs and not any(m in cited_money for m in sibs):
+                lines = "; ".join(downstream(ids[id(m)], m) for m in sibs)
+                problems.append(
+                    f"finding '{f.title}' reports an attention or click result for "
+                    f"{label(sibs[0])} and leaves out that the same files do worse "
+                    f"downstream. State it in the paragraph and cite it: {lines}"
+                )
+        if f.layer in ("conversion", "funnel") and not cited_money:
+            problems.append(
+                f"finding '{f.title}' is filed under '{f.layer}' but cites no purchases or CPA "
+                "comparison; cite one or file it under the layer its evidence is about"
+            )
+        # Good or bad, a title about buyers needs a purchase line that is at least a lead.
+        # Whether the title has the direction right is for the reader, who sees the line.
+        word = _BUYER_WORDS.search(f.title)
+        if word and not any(pays(t) or costs(t, "suggestive") for t in cited_money):
+            problems.append(
+                f"finding '{f.title}': the title says '{word.group(0)}', a claim about buyers, "
+                "but no cited purchases or CPA comparison is suggestive or strong. Retitle it "
+                "for what the cited metric shows (more clicks, longer watching), or cite a "
+                "purchases or CPA line that carries it"
+            )
+        # Lines that show no clear difference are reported, not leaned on, so they do not
+        # pull the confidence down; every graded line the finding rests on does.
+        graded = [r for t in cited if (r := GRADE_RANK.get(t.grade, 0)) > 0]
+        claimed = GRADE_RANK.get(f.confidence)
+        if graded and claimed is not None and claimed > min(graded):
+            weakest = next(g for g, r in GRADE_RANK.items() if r == min(graded))
+            problems.append(
+                f"finding '{f.title}': confidence '{f.confidence}' outruns its weakest cited "
+                f"comparison; use '{weakest}' or 'mixed'"
+            )
     return problems
 
 
@@ -400,26 +561,36 @@ async def write_read(
     collapses = entanglement_collapses(run)
     tokens_in = tokens_out = 0
     feedback: list[str] = []
+    draft = ""
     for _ in range(MAX_ATTEMPTS):
         user = brief + (
             "\n\nWrite the overview, findings, entangled, no_evidence, next_tests and data_needed. "
             "Return one JSON object with exactly those keys."
         )
         if feedback:
+            # The draft goes back with its problems. Asked to rewrite from nothing, the model
+            # fixed what was named and broke something new each time (2, then 12, then 4
+            # problems over one dry run, 2026-09-20); asked to correct, it converges.
             user += (
-                "\n\nYour previous draft broke the rules: "
+                "\n\nYour previous draft:\n"
+                + draft
+                + "\n\nYour previous draft broke the rules: "
                 + "; ".join(feedback)
-                + ". Rewrite, citing only numbers and headlines that appear in the brief exactly "
-                "as written, and return a single JSON object."
+                + ". Correct only what is named. Leave every other sentence, number, headline "
+                "and pattern ID exactly as it is, cite only numbers and headlines that appear "
+                "in the brief exactly as written, and return the full JSON object."
             )
         text, ti, to = await writer.complete(SYSTEM, user)
+        draft = text
         tokens_in, tokens_out = tokens_in + ti, tokens_out + to
         try:
             read = parse_read(text)
         except (json.JSONDecodeError, TypeError, AttributeError) as exc:
             feedback = [f"response was not valid JSON: {exc}"]
             continue
+        settle_layers(read, run.tests)
         feedback = check_read(read, brief, len(run.tests), collapses)
+        feedback += check_money(read, run.tests)
         if not feedback:
             return read, [], tokens_in, tokens_out
     return None, feedback, tokens_in, tokens_out
