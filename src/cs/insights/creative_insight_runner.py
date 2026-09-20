@@ -53,7 +53,12 @@ async def write_creative_insight(
     if creative is None:
         return "no_asset"
     fmt = creative["format"]
-    until = until or datetime.now(UTC).date()
+    # Same anchor the creative page uses, so the paragraph and the panel read one window.
+    if until is None:
+        until = (
+            await ingest_repo.account_last_metric_day(ctx.db, org_id, creative["ad_account_id"])
+            or datetime.now(UTC).date()
+        )
     # One worker runs these jobs serially, so the cap count checked here cannot be
     # overtaken before the insert below.
     blocker, diagnosed = await insight_blocker(

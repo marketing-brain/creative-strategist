@@ -163,3 +163,24 @@ async def test_diagnosis_with_no_metrics_is_too_early(client, db):
     assert d["verdict"]["kind"] == "too_early" and d["baseline_creatives"] == 0
     statuses = {t["status"] for t in d["tiers"]}
     assert statuses == {"not_enough_data", "not_applicable", "too_young", "not_measured"}
+
+
+async def test_windows_end_on_the_last_synced_day_not_today(client, db):
+    """A connector that is six days behind must not empty the trailing windows.
+
+    Anchored on the wall clock, the fatigue tier's last 7 days would hold one day of
+    delivery here and fall under its 1,000-impression floor while the creative is running
+    normally."""
+    last_day = datetime.now(UTC).date() - timedelta(days=6)
+    _, target, _, _ = await _seed(db, client, today=last_day)
+
+    d = (await client.get(f"/creatives/{target}/diagnosis", headers=H)).json()
+    assert d["window_end"] == last_day.isoformat()
+    assert d["window_start"] == (last_day - timedelta(days=29)).isoformat()
+    fatigue = {t["key"]: t for t in d["tiers"]}["fatigue"]
+    assert fatigue["status"] in ("on_par", "weak"), fatigue.get("reason")
+    trailing = next(m for m in fatigue["metrics"] if m["key"] == "frequency")
+    assert trailing["lift"] is not None  # the windows compared, so a lift was computed
+
+    s = (await client.get(f"/creatives/{target}/summary", headers=H)).json()
+    assert s["window_end"] == d["window_end"] and s["window_start"] == d["window_start"]

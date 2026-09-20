@@ -50,6 +50,14 @@ def _derived(r) -> dict:
 SCOPE = Query("footage", pattern="^(footage|creative)$")
 
 
+async def _until(db: Database, org_id: UUID, ad_account_id: UUID) -> date:
+    """The day every window on the creative page ends on: the account's newest day with
+    delivery, or today for an account that has none yet. Anchoring on the wall clock instead
+    would spend the trailing days of each window on whatever the connector has not synced."""
+    last = await repo.account_last_metric_day(db, org_id, ad_account_id)
+    return last or datetime.now(UTC).date()
+
+
 async def _scope_ids(db: Database, org_id: UUID, creative_id: UUID, scope: str) -> list[UUID]:
     """The creatives a detail endpoint reads: the whole footage group by default, or just
     the one creative when the caller asks for its own numbers (scope=creative)."""
@@ -315,7 +323,7 @@ async def creative_summary(
     if not c:
         raise HTTPException(404)
     ids = await _scope_ids(db, auth.org_id, creative_id, scope)
-    until = datetime.now(UTC).date()
+    until = await _until(db, auth.org_id, c["ad_account_id"])
     since = until - timedelta(days=WINDOW_DAYS - 1)
     mine = await repo.creative_window_sums(db, auth.org_id, ids, since, until)
     base = await repo.baseline_window_sums(
@@ -375,7 +383,7 @@ async def creative_diagnosis(
         raise HTTPException(404)
     ids = await _scope_ids(db, auth.org_id, creative_id, scope)
     diagnosed = await diagnose_creative(
-        db, auth.org_id, c, datetime.now(UTC).date(), member_ids=ids
+        db, auth.org_id, c, await _until(db, auth.org_id, c["ad_account_id"]), member_ids=ids
     )
     return diagnosed.diagnosis.to_dict()
 
@@ -400,7 +408,7 @@ async def creative_insight(
         return {"paragraph": None, "reason": "rejected"}
     if row is None:
         blocker, _ = await insight_blocker(
-            db, settings, auth.org_id, c, datetime.now(UTC).date(), ids
+            db, settings, auth.org_id, c, await _until(db, auth.org_id, c["ad_account_id"]), ids
         )
         if blocker == "format_limit":
             return {

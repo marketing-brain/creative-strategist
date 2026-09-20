@@ -605,3 +605,19 @@ async def creative_first_metric_day(
         org_id,
         _ids(creative_id),
     )
+
+
+async def account_last_metric_day(db: Database, org_id: UUID, ad_account_id: UUID) -> date | None:
+    """The newest day the account has delivery for.
+
+    Every window on the creative page ends here rather than on the wall clock. Meta reports
+    through Fivetran on its own schedule, and a connector that is late, paused or mid-sync
+    leaves the last few days empty. Anchored on today, the fatigue tier's trailing 7 days
+    can hold one partial day of delivery and fall under its impression floor while the
+    creative is in fact running normally."""
+    return await db.fetchval(
+        "SELECT max(day) FROM metric_daily "
+        "WHERE org_id=$1 AND ad_account_id=$2 AND impressions > 0",
+        org_id,
+        ad_account_id,
+    )

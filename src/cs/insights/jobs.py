@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
 from cs.core import queue
+from cs.core import repo as core_repo
 from cs.core.config import Settings
 from cs.core.db import Database
 from cs.insights import repo
@@ -84,7 +85,9 @@ async def _account(ctx: JobContext):
 @handler("insights.compute_fatigue")
 async def compute_fatigue_job(ctx: JobContext) -> None:
     acct = await _account(ctx)
-    drafts = await compute_fatigue(ctx.db, ctx.job.org_id, acct["id"], date.today())
+    # The trailing window ends on the account's last synced day, not on the wall clock.
+    last = await core_repo.account_last_metric_day(ctx.db, ctx.job.org_id, acct["id"])
+    drafts = await compute_fatigue(ctx.db, ctx.job.org_id, acct["id"], last or date.today())
     await _persist(ctx, drafts[:50], acct["name"])
 
 
