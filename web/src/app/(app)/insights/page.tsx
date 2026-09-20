@@ -10,6 +10,8 @@ export default async function Insights() {
   await requireAuth();
   const accounts = await api.accounts();
   const active = accounts.find((a) => a.status === 'active') ?? accounts[0];
+  // Meta accounts synced without a display name carry their numeric id as the name.
+  const accountLabel = active && !/^\d+$/.test(active.name.trim()) ? active.name : 'this account';
   const accountRead: AccountRead | null = active ? await api.accountRead(active.id).catch(() => ({ status: 'none' as const })) : null;
 
   return (
@@ -17,7 +19,7 @@ export default async function Insights() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Insights</h1>
         <p className="text-sm text-muted-foreground">
-          What {active ? active.name : 'this account'}&apos;s video ads do, what works, and how sure that is.
+          What {accountLabel}&apos;s video ads do, what works, and how sure that is.
         </p>
       </div>
       {active && accountRead ? (

@@ -305,7 +305,7 @@ export function AccountReadSection({ status, nUnits, view, stale = false, curren
         </nav>
         {stale && (
           <p className="max-w-[68ch] text-[13px] leading-6 text-amber-700 dark:text-amber-400">
-            A newer run did not pass its checks. This is the last read that did{b.created_at ? `, from ${fmtDay(b.created_at, true)}` : ''}.
+            A newer run did not finish. This is the last read that did{b.created_at ? `, from ${fmtDay(b.created_at, true)}` : ''}.
           </p>
         )}
       </header>
