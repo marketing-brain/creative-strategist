@@ -85,27 +85,6 @@ async def count_insights(
     )
 
 
-async def insert_brief(
-    db: Database, org_id: UUID, week_start: date, content_md: str, insight_ids: list[UUID]
-) -> UUID | None:
-    row = await db.fetchrow(
-        "INSERT INTO brief (id, org_id, week_start, content_md, insight_ids) "
-        "VALUES ($1,$2,$3,$4,$5) ON CONFLICT (org_id, week_start) DO NOTHING RETURNING id",
-        new_id(),
-        org_id,
-        week_start,
-        content_md,
-        insight_ids,
-    )
-    return row["id"] if row else None
-
-
-async def list_briefs(db: Database, org_id: UUID, limit: int = 12) -> list[asyncpg.Record]:
-    return await db.fetch(
-        "SELECT * FROM brief WHERE org_id=$1 ORDER BY week_start DESC LIMIT $2", org_id, limit
-    )
-
-
 async def get_creative_insight(
     db: Database, org_id: UUID, creative_id: UUID
 ) -> asyncpg.Record | None:

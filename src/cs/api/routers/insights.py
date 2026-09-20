@@ -41,23 +41,6 @@ async def fatigue(
     return {"items": items, "total": total}
 
 
-@router.get("/briefs")
-async def briefs(
-    auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)
-) -> list[dict]:
-    return [_ser(r) for r in await repo.list_briefs(db, auth.org_id)]
-
-
-@router.get("/briefs/{brief_id}")
-async def brief(
-    brief_id: UUID, auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)
-) -> dict:
-    r = await db.fetchrow("SELECT * FROM brief WHERE org_id=$1 AND id=$2", auth.org_id, brief_id)
-    if not r:
-        raise HTTPException(404)
-    return _ser(r)
-
-
 async def _owned_account(db: Database, org_id: UUID, ad_account_id: UUID) -> None:
     owned = await db.fetchval(
         "SELECT 1 FROM ad_account WHERE id=$1 AND org_id=$2", ad_account_id, org_id

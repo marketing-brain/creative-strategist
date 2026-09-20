@@ -30,9 +30,3 @@ async def test_insert_skips_duplicates_and_lists(db, org_id):
     rows = await repo.list_insights(db, org_id, "pattern")
     assert len(rows) == 1 and rows[0]["explanation"] == "because"
     assert await repo.list_insights(db, org_id, "fatigue") == []
-
-
-async def test_briefs(db, org_id):
-    bid = await repo.insert_brief(db, org_id, date(2026, 8, 31), "# Brief", [])
-    assert bid is not None
-    assert (await repo.list_briefs(db, org_id))[0]["content_md"] == "# Brief"

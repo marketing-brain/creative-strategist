@@ -24,7 +24,6 @@ export type Tag = { dimension: string; kind: TagKind; value: string; raw_value: 
 export type Dimension = { name: string; group: string; kind: TagKind; applies_to: string[]; values: string[] | null; description: string };
 export type DimensionValue = { value: string; count: number };
 export type Insight = { id: string; kind: 'pattern' | 'fatigue'; dimension: string; value: string; metric: 'ctr' | 'cpa' | 'roas'; creative_id: string | null; creative_headline?: string | null; window_start: string; window_end: string; sample_creatives: number; sample_spend: number; baseline: number; observed: number; lift: number; explanation: string; suggested_test: string; created_at: string };
-export type Brief = { id: string; week_start: string; content_md: string };
 export type DiagnosisStatus = 'strong' | 'on_par' | 'weak' | 'not_applicable' | 'not_enough_data' | 'too_young' | 'not_measured';
 export type DiagnosisMetric = { key: string; label: string; value: number | null; baseline: number | null; lift: number | null; note: string };
 export type DiagnosisCurvePoint = { p: number; share: number | null; baseline_share: number | null };

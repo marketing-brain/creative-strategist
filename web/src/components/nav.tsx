@@ -5,7 +5,6 @@ import { usePathname } from 'next/navigation';
 import { OrganizationSwitcher, UserButton } from '@clerk/nextjs';
 import {
   BatteryWarning,
-  FileText,
   LayoutGrid,
   MessageCircleQuestion,
   Settings,
@@ -26,7 +25,6 @@ const groups: { label: string; items: NavItem[] }[] = [
       { href: '/insights', label: 'Insights', icon: TrendingUp },
       { href: '/ask', label: 'Ask', icon: MessageCircleQuestion },
       { href: '/fatigue', label: 'Fatigue', icon: BatteryWarning },
-      { href: '/briefs', label: 'Briefs', icon: FileText },
     ],
   },
 ];
