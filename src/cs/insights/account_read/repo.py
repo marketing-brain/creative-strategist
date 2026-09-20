@@ -8,6 +8,7 @@ from uuid import UUID
 from cs.core.db import Database
 from cs.core.ids import new_id
 from cs.insights.account_read.page import PAGE_VERSION, build_page
+from cs.insights.account_read.reliability import FLAG as TAGGER_FLAG
 
 
 async def insert_run(
@@ -156,8 +157,42 @@ async def purge_runs(db: Database, days: int = 30) -> int:
 
 # Grades worth showing beside a single creative. Directional and thin tests are noise there.
 FILE_PATTERN_GRADES = ("strong", "suggestive")
+SAME_IDEA = 0.6  # share of files two attributes must have in common to count as one idea
+OVERFETCH = 3  # rows to rank per kind before de-duplication, as a multiple of the limit
 _FILE_PATTERNS: dict[tuple[UUID, str, int], list[dict]] = {}
 _FILE_PATTERNS_MAX = 2000
+
+
+def _drop_near_duplicates(rows: list, limit: int) -> list[dict]:
+    """Group rows by the idea they are about, then keep the best-ranked row of each idea per
+    kind and metric. Rows arrive in rank order, so the survivor is the stronger evidence.
+
+    Two rows are one idea when their cells overlap by `SAME_IDEA` (Jaccard). Each kept row
+    carries its `idea` id, because the right amount of collapsing differs by surface: a
+    funnel table wants the same attribute on every metric, while a ranked list of tests to
+    run wants one line per idea however many metrics agree. Ids are per call, never stored.
+    """
+
+    def same(a: set[str], b: set[str]) -> bool:
+        return bool(a | b) and len(a & b) / len(a | b) >= SAME_IDEA
+
+    kept: list[dict] = []
+    ideas: list[set[str]] = []
+    per_bucket: set[tuple[bool, str, int]] = set()
+    for r in rows:
+        cell = set(r["cell_key"])
+        idea = next((i for i, o in enumerate(ideas) if same(cell, o)), None)
+        if idea is None:
+            ideas.append(cell)
+            idea = len(ideas) - 1
+        bucket = (r["has"], r["metric"], idea)
+        if bucket in per_bucket:
+            continue
+        if sum(1 for k in kept if k["has"] == r["has"]) >= limit:
+            continue
+        per_bucket.add(bucket)
+        kept.append({k: v for k, v in dict(r).items() if k != "cell_key"} | {"idea": idea})
+    return kept
 
 
 async def patterns_for_file(
@@ -171,6 +206,17 @@ async def patterns_for_file(
     Rows the file lacks are kept only when the pattern points the good way (higher rate,
     lower cost): "videos that do X perform better and this one does not" is a test to run.
     A harmful trait the file lacks is nothing to act on.
+
+    Rows on a trait the tagger flips on are dropped. "This ad has it" and "this ad lacks it"
+    are claims about one file's label, and that label is the thing in doubt.
+
+    Near-duplicates are dropped too. Two attributes can pick out almost the same videos --
+    "the first three seconds show the product" and "the product first appears under 5s" ran
+    as separate rows a place apart -- and a reader takes one idea said twice for two. The
+    lower-ranked row goes when it shares `SAME_IDEA` or more of its files with a row already
+    kept on the same metric, and every row carries the `idea` id it was grouped into so a
+    caller can collapse further. The run's own entanglement pass cannot stand in here: it
+    skips flagged tests, and one of those two carried a budget-concentration flag.
 
     These say "files in this account that do X differ on metric M". They never measure the
     attribute within the file, so a caller must not present one as the cause of this file's
@@ -205,6 +251,7 @@ async def patterns_for_file(
             SELECT t, (t->'cell_shas' ? $3) AS has, (t->>'change')::float8 AS change
             FROM run, jsonb_array_elements(run.tests) t
             WHERE run.is_unit AND t->>'group' IS NULL AND t->>'grade' = ANY($2)
+              AND NOT (t->'confounds' ? $5)
         ),
         ranked AS (
             SELECT *, row_number() OVER (
@@ -217,16 +264,20 @@ async def patterns_for_file(
                t->>'grade' AS grade, change,
                (t->>'n_cell')::int AS n_cell, (t->>'n_complement')::int AS n_complement,
                (t->>'cell_value')::float8 AS cell_value, (t->>'comp_value')::float8 AS comp_value,
-               t->'bin_edges' AS bin_edges, t->'confounds' AS confounds
+               t->'bin_edges' AS bin_edges, t->'confounds' AS confounds,
+               -- Eight hex characters are plenty to tell a few dozen files apart, and keep
+               -- this payload in kilobytes. Never widen it to the full hashes.
+               ARRAY(SELECT left(s, 8) FROM jsonb_array_elements_text(t->'cell_shas') s) AS cell_key
         FROM ranked WHERE rn <= $4
         ORDER BY has DESC, rn
         """,
         run_id,
         list(FILE_PATTERN_GRADES),
         sha256,
-        limit,
+        limit * OVERFETCH,
+        TAGGER_FLAG,
     )
     if len(_FILE_PATTERNS) >= _FILE_PATTERNS_MAX:
         _FILE_PATTERNS.clear()
-    _FILE_PATTERNS[key] = [dict(r) for r in rows]
+    _FILE_PATTERNS[key] = _drop_near_duplicates(rows, limit)
     return _FILE_PATTERNS[key]

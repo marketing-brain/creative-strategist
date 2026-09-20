@@ -111,8 +111,11 @@ function PatternGroup({ title, rows, fmt }: { title: string; rows: CreativePatte
 
 // ---- evidence under each diagnosis layer ---------------------------------------------------
 
+// The API serves opening_shows and first_product_shown where a run has the scenes to derive
+// them, and opening_shot / product_reveal where it does not, never both. Listing all four
+// shows whichever arrived.
 const TIER_TAGS: Record<DiagnosisTier['key'], string[]> = {
-  attention: ['hook_devices', 'opening_shot', 'product_reveal'],
+  attention: ['hook_devices', 'opening_shows', 'opening_shot', 'first_product_shown', 'product_reveal'],
   retention: [],
   conversion: ['offer_elements', 'proof_devices', 'cta_modes'],
   fatigue: [],
@@ -199,31 +202,45 @@ export const PATTERN_FOOTNOTE =
 
 // ---- what to test next ---------------------------------------------------------------------
 
-type Lead = { p: CreativePattern; text: string };
+type Lead = { p: CreativePattern; text: string; why: string | null };
+
+// Why the tagger says this ad has the trait. Shown only for traits the ad has: there is no
+// evidence for an absence, and a label the reader can check is a label they can correct.
+function evidenceFor(p: CreativePattern, tags: Tag[]): string | null {
+  if (!p.has) return null;
+  const t = tags.find((x) => x.dimension === p.dimension && x.value === p.value);
+  return t?.evidence?.trim() || null;
+}
 
 // Leads for the layers that need work: a trait this ad has that goes with worse results
 // there, or a trait it lacks that goes with better ones. Each is phrased as a test to run,
 // which is the honest form of an account-wide effect applied to one ad.
-function leadsFor(diagnosis: Diagnosis, patterns: CreativePattern[], fmt: Formatters): Lead[] {
+function leadsFor(diagnosis: Diagnosis, patterns: CreativePattern[], tags: Tag[], fmt: Formatters): Lead[] {
   const weak = new Set(diagnosis.tiers.filter((t) => t.status === 'weak').map((t) => t.key));
   const relevant = patterns.filter((p) => weak.has(TIER_OF_METRIC[p.metric]));
   const proof = (p: CreativePattern) => `${shown(p, p.cell_value, fmt)} vs ${shown(p, p.comp_value, fmt)}, ${support(p).replaceAll(' · ', ', ')}`;
-  // One lead per trait dimension: "shows the product early" and "shows it in the second
-  // half" are the same test seen from both sides, and the stronger row is listed first.
-  // Keyed on the plain label, not the slug: two taxonomy dimensions both read as "product
-  // first appears", and to the reader they are one idea.
+  // One lead per idea. `idea` groups attributes the API found to cover nearly the same
+  // videos, across metrics as well as dimensions: "the first three seconds show the product"
+  // and "the product first appears under 5s" are one instruction to a buyer, even when one
+  // of them shows up on hook rate and the other on link CTR. The label catches the rest,
+  // since two taxonomy dimensions can both read as "product first appears".
   const seen = new Set<string>();
-  const firstPerDimension = (p: CreativePattern) => (seen.has(label(p.dimension)) ? false : (seen.add(label(p.dimension)), true));
+  const firstPerDimension = (p: CreativePattern) => {
+    const keys = [`i${p.idea}`, label(p.dimension)];
+    if (keys.some((k) => seen.has(k))) return false;
+    keys.forEach((k) => seen.add(k));
+    return true;
+  };
   const hurts = relevant
     .filter((p) => p.has && !isGood(p))
     .filter(firstPerDimension)
     .slice(0, 2)
-    .map((p) => ({ p, text: `This ad has ${trait(p)}. Videos that do run ${signedPct(p.change)} on ${METRIC_LABEL[p.metric]} (${proof(p)}). Test a version without it.` }));
+    .map((p) => ({ p, why: evidenceFor(p, tags), text: `This ad has ${trait(p)}. Videos that do run ${signedPct(p.change)} on ${METRIC_LABEL[p.metric]} (${proof(p)}). Test a version without it.` }));
   const lacks = relevant
     .filter((p) => !p.has)
     .filter(firstPerDimension)
     .slice(0, 3 - Math.min(hurts.length, 1))
-    .map((p) => ({ p, text: `This ad does not have ${trait(p)}. Videos that do run ${signedPct(p.change)} on ${METRIC_LABEL[p.metric]} (${proof(p)}). Test a version with it.` }));
+    .map((p) => ({ p, why: null, text: `This ad does not have ${trait(p)}. Videos that do run ${signedPct(p.change)} on ${METRIC_LABEL[p.metric]} (${proof(p)}). Test a version with it.` }));
   return [...hurts, ...lacks];
 }
 
@@ -241,7 +258,7 @@ export function NextTests({
   fmt: Formatters;
 }) {
   const weak = diagnosis.tiers.filter((t) => t.status === 'weak');
-  const leads = leadsFor(diagnosis, patterns, fmt);
+  const leads = leadsFor(diagnosis, patterns, tags, fmt);
   if (!weak.length || !leads.length) return null;
   const problem = weak
     .map((t) => {
@@ -251,7 +268,7 @@ export function NextTests({
     })
     .join(' ');
   const opening = tags.find((t) => t.dimension === 'hook_verbatim' || t.dimension === 'hook_summary')?.value;
-  const now = ['hook_devices', 'opening_shot', 'product_reveal']
+  const now = ['hook_devices', 'opening_shows', 'opening_shot', 'first_product_shown', 'product_reveal']
     .map((d) => [d, valuesOf(tags, d)] as const)
     .filter(([, v]) => v.length)
     .map(([d, v]) => `${label(d)}: ${v.map((t) => words(t.value)).join(', ')}`);
@@ -262,7 +279,7 @@ export function NextTests({
     now.length ? `Now: ${now.join('; ')}` : null,
     '',
     'Tests to run (patterns across this account, not proof about this ad):',
-    ...leads.map((l, i) => `${i + 1}. ${l.text}`),
+    ...leads.map((l, i) => `${i + 1}. ${l.text}${l.why ? ` (tagged from: "${l.why}")` : ''}`),
   ]
     .filter((l) => l !== null)
     .join('\n');
@@ -273,7 +290,7 @@ export function NextTests({
         <CopyBrief text={brief} />
       </div>
       <ol className="space-y-2.5">
-        {leads.map(({ p }, i) => (
+        {leads.map(({ p, why }, i) => (
           <li key={i} className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-x-2 text-sm">
             <span className="font-semibold text-muted-foreground tabular-nums">{i + 1}.</span>
             <span className="min-w-0">
@@ -283,6 +300,7 @@ export function NextTests({
                 <span className={`font-semibold ${isGood(p) ? 'text-success' : 'text-destructive'}`}>{signedPct(p.change)}</span> on {METRIC_LABEL[p.metric]}: {shown(p, p.cell_value, fmt)} vs{' '}
                 {shown(p, p.comp_value, fmt)} · {support(p)}
               </span>
+              {why && <span className="mt-0.5 block text-xs text-muted-foreground/80 italic">Tagged from: “{why}”</span>}
             </span>
           </li>
         ))}

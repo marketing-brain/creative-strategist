@@ -11,6 +11,7 @@ from cs.core.config import Settings
 from cs.core.db import Database
 from cs.insights.account_read import repo
 from cs.insights.account_read.patterns import run as run_patterns
+from cs.insights.account_read.reliability import measure as measure_reliability
 from cs.insights.account_read.types import to_json
 from cs.insights.account_read.units import build_units
 from cs.insights.account_read.writer import GeminiGatewayAccountReadWriter, write_read
@@ -52,6 +53,7 @@ async def compute_account_read(ctx: JobContext) -> None:
             edges,
             grouping_dims=s.account_read_grouping_dims_list,
             draws=s.account_read_permutation_draws,
+            reliability=await measure_reliability(ctx.db, org_id),
         )
         read, problems, ti, to = await write_read(result, WRITER_FACTORY(s))
     except Exception as exc:  # noqa: BLE001 - a failed run must not hide the previous one

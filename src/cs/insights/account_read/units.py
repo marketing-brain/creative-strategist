@@ -59,7 +59,8 @@ async def build_units(
         with_metrics = [r for r in rs if r["first_day"] is not None]
         if not tagged or not with_metrics:
             continue
-        rep = max(tagged, key=lambda r: r["spend"])
+        # Ties break on id so `tagging.repo.footage_latest_tags` picks the same copy.
+        rep = max(tagged, key=lambda r: (r["spend"], r["id"]))
         tag_rows = [dict(t) for t in await db.fetch(_TAGS, rep["run_id"])]
         duration_ms = max((r["duration_ms"] or 0) for r in rs)
         duration_s = duration_ms / 1000.0 if duration_ms else None

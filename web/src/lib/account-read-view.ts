@@ -26,8 +26,26 @@ export type AccountReadView = {
   entangled: string; no_evidence: string; next_tests: string[]; data_needed: string[];
   basis: { files: number; creatives: number; spend: number; purchases: number; first_day: string | null; last_day: string | null; created_at: string | null };
   grades: { tests: number; strong: number; suggestive: number; directional: number; thin: number; byChance: number };
+  // Attributes the tagger did not apply consistently to files it tagged more than once.
+  tagger: { flagged: number; minAgreement: number; worst: { label: string; agreement: number; files: number }[] } | null;
   citations: Record<string, string>; // "P2" → plain label, for cite tooltips
 };
+
+type FlaggedAttr = { dimension: string; value: string; agreement: number; n_units: number };
+
+// The run measures how often the tagger gives a file the same attribute twice. Below its bar
+// the attribute is still compared, but "this one video has it" is no longer worth saying.
+// Named by how many videos each one touches, not by how badly it scored: the worst scores
+// belong to attributes seen on a single file, which tells the reader nothing.
+function taggerView(raw: unknown): AccountReadView['tagger'] {
+  const a = raw as { min_agreement?: number; flagged?: FlaggedAttr[] } | null | undefined;
+  if (!a?.flagged?.length) return null;
+  const worst = [...a.flagged]
+    .sort((x, y) => (y.n_units ?? 0) - (x.n_units ?? 0) || x.agreement - y.agreement)
+    .slice(0, 3)
+    .map((f) => ({ label: attributeLabel({ ...f, bin_edges: null }), agreement: f.agreement, files: f.n_units ?? 0 }));
+  return { flagged: a.flagged.length, minAgreement: a.min_agreement ?? 0, worst };
+}
 
 // "duration_s" → "duration": the unit suffix is for code, the bin edges carry the seconds
 const words = (s: string) => s.replace(/_s$/, '').replace(/_/g, ' ');
@@ -124,6 +142,7 @@ export function buildAccountReadView(data: AccountRead): AccountReadView | null 
     },
     // "suggestive" is p < 0.10 before any correction, so a tenth of all comparisons clear it by luck alone.
     grades: { tests: nTests, strong: g.strong ?? 0, suggestive: g.suggestive ?? 0, directional: g.directional ?? 0, thin: g.thin ?? 0, byChance: Math.round(nTests * 0.1) },
+    tagger: taggerView(s.tagger_agreement),
     citations,
   };
 }

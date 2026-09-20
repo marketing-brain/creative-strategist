@@ -143,13 +143,31 @@ async def copy_tag_run(
 async def footage_latest_tags(
     db: Database, org_id: UUID, creative_ids: list[UUID]
 ) -> list[asyncpg.Record]:
-    """Tags for a footage group: the first listed creative that has any. Callers list the
-    creative being viewed first, so its own tags win when it has them."""
-    for cid in creative_ids:
-        tags = await latest_tags(db, org_id, cid)
-        if tags:
-            return tags
-    return []
+    """Tags for a footage group: one run stands for the file, the latest done run of the
+    highest-spend copy that has one, v2 runs first. This is the account read's rule
+    (`account_read.units`), on purpose: the page sets these tags beside account patterns
+    whose `has` flag was judged on that copy's run. Copies of one file are tagged
+    separately and can disagree, so any other pick lets the page show "face to camera"
+    above a pattern row that says the ad lacks it."""
+    rid = await db.fetchval(
+        """
+        SELECT r.id
+        FROM tag_run r
+        JOIN taxonomy_version v ON v.id = r.taxonomy_version_id
+        LEFT JOIN (SELECT creative_id, sum(spend) AS spend FROM metric_daily
+                   WHERE org_id = $1 AND creative_id = ANY($2) GROUP BY 1) m
+               ON m.creative_id = r.creative_id
+        WHERE r.org_id = $1 AND r.creative_id = ANY($2) AND r.status = 'done'
+        ORDER BY (split_part(v.version, '.', 1)::int >= 2) DESC,
+                 coalesce(m.spend, 0) DESC, r.creative_id DESC, r.finished_at DESC
+        LIMIT 1
+        """,
+        org_id,
+        creative_ids,
+    )
+    if rid is None:
+        return []
+    return await _run_tags(db, rid)
 
 
 async def fail_tag_run(db: Database, org_id: UUID, run_id: UUID, error: str) -> None:
@@ -173,10 +191,14 @@ async def latest_tags(db: Database, org_id: UUID, creative_id: UUID) -> list[asy
     rid = await latest_run_id(db, org_id, creative_id)
     if rid is None:
         return []
+    return await _run_tags(db, rid)
+
+
+async def _run_tags(db: Database, run_id: UUID) -> list[asyncpg.Record]:
     return await db.fetch(
         "SELECT dimension, value, confidence, evidence, kind, raw_value, t_start_s, ordinal "
         "FROM tag WHERE tag_run_id=$1 ORDER BY dimension, ordinal, t_start_s, value",
-        rid,
+        run_id,
     )
 
 

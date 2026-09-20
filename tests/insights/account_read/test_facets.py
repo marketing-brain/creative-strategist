@@ -46,3 +46,26 @@ def test_tercile_labels_and_edges():
     assert edges == (40.0, 70.0)
     assert labels["u0"] == "low" and labels["u4"] == "mid" and labels["u8"] == "high"
     assert tercile_labels({"a": 1.0, "b": 2.0}) == ({}, None)
+
+
+def test_opening_shows_reads_the_scenes_and_replaces_opening_shot():
+    # opening_shot asks for one of face_to_camera and product_in_hand for an opening that is
+    # both, and the tagger splits on it. The scene flags say both, so both are recorded.
+    rows = [
+        row("opening_shot", "single", "face_to_camera"),
+        row("scenes", "ordered", "talking_head", raw="face|product", t=0, o=0),
+        row("scenes", "ordered", "talking_head", raw="face", t=8, o=1),
+    ]
+    x = extract(rows, duration_s=60.0)
+    assert ("opening_shows", "face") in x.facets
+    assert ("opening_shows", "product") in x.facets
+    assert not any(d == "opening_shot" for d, _ in x.facets)
+
+
+def test_opening_shows_ignores_what_starts_after_the_hook_window():
+    rows = [
+        row("scenes", "ordered", "talking_head", raw="face", t=0, o=0),
+        row("scenes", "ordered", "product_closeup", raw="product", t=9, o=1),
+    ]
+    x = extract(rows, duration_s=60.0)
+    assert {v for d, v in x.facets if d == "opening_shows"} == {"face"}

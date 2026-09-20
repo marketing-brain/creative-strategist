@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 from cs.core import queue
@@ -146,3 +147,152 @@ async def test_latest_run_prefers_the_newest_done_run_over_a_newer_rejected_one(
     row = await repo.latest_run(db, org_id, ad_account_id)
     assert row["id"] == good and row["read"]["overview"] == "good"
     assert row["newer_failed_error"] == "checks failed"
+
+
+def _sha(seed: str) -> str:
+    return hashlib.sha256(seed.encode()).hexdigest()
+
+
+def _shas(seed: str, n: int) -> list[str]:
+    """Real digests: the repo de-duplicates on an eight-character prefix, and stand-in strings
+    like f"{i:064d}" all share one."""
+    return [_sha(f"{seed}{i}") for i in range(n)]
+
+
+async def test_patterns_for_a_file_drop_rows_the_tagger_flips_on(db, org_id, ad_account_id):
+    """ "This ad has it" and "this ad lacks it" are claims about one file's label. Where the
+    tagger disagrees with itself about that label, the row must not reach the creative page."""
+    from cs.insights.account_read.reliability import FLAG
+
+    sha = _sha("mine")
+    test = {
+        "group": None,
+        "metric": "hook_rate",
+        "grade": "strong",
+        "change": 0.3,
+        "n_cell": 10,
+        "n_complement": 20,
+        "cell_value": 0.4,
+        "comp_value": 0.3,
+        "bin_edges": None,
+    }
+    # Distinct cells, so nothing here is dropped as a near-duplicate.
+    cells = [[sha, *_shas(f"{i}-", 9)] for i in range(3)]
+    await repo.insert_run(
+        db,
+        org_id,
+        ad_account_id,
+        status="done",
+        n_units=30,
+        result={
+            "summary": {},
+            "units": [{"sha256": sha}],
+            "tests": [
+                {
+                    **test,
+                    "dimension": "messenger",
+                    "value": "expert",
+                    "confounds": [],
+                    "cell_shas": cells[0],
+                },
+                {
+                    **test,
+                    "dimension": "setting",
+                    "value": "home",
+                    "confounds": [FLAG],
+                    "cell_shas": cells[1],
+                },
+                {
+                    **test,
+                    "dimension": "ending",
+                    "value": "cta_card",
+                    "confounds": ["budget_concentration"],
+                    "cell_shas": cells[2],
+                },
+            ],
+        },
+        read={"overview": "o"},
+        error=None,
+    )
+    rows = await repo.patterns_for_file(db, org_id, ad_account_id, sha)
+    assert [(r["dimension"], r["value"]) for r in rows] == [
+        ("messenger", "expert"),
+        ("ending", "cta_card"),  # other flags still show, with their caution
+    ]
+    assert "cell_key" not in rows[0]  # the dedupe key never leaves the repo
+
+
+async def test_two_attributes_over_the_same_files_are_one_row(db, org_id, ad_account_id):
+    """ "The first three seconds show the product" and "the product first appears under 5s"
+    pick out almost the same videos. Shown a place apart they read as two findings."""
+    sha = _sha("mine")
+    files = _shas("f", 20)
+    test = {
+        "group": None,
+        "metric": "hook_rate",
+        "grade": "strong",
+        "n_cell": 20,
+        "n_complement": 20,
+        "cell_value": 0.4,
+        "comp_value": 0.3,
+        "bin_edges": None,
+        "confounds": [],
+    }
+    await repo.insert_run(
+        db,
+        org_id,
+        ad_account_id,
+        status="done",
+        n_units=40,
+        result={
+            "summary": {},
+            "units": [{"sha256": sha}],
+            "tests": [
+                # Ranked first, and the next row is the same 20 files but one.
+                {
+                    **test,
+                    "dimension": "opening_shows",
+                    "value": "product",
+                    "change": 0.4,
+                    "cell_shas": [sha, *files],
+                },
+                {
+                    **test,
+                    "dimension": "first_product_shown",
+                    "value": "under 5s",
+                    "change": 0.3,
+                    "cell_shas": [sha, *files[:-1]],
+                },
+                # Half the files in common is two ideas, not one.
+                {
+                    **test,
+                    "dimension": "messenger",
+                    "value": "expert",
+                    "change": 0.2,
+                    "cell_shas": [sha, *files[:10]],
+                },
+                # Same attribute, different metric: kept, because a click win that costs more
+                # per purchase is two things worth reading.
+                {
+                    **test,
+                    "metric": "cpa",
+                    "dimension": "opening_shows",
+                    "value": "product",
+                    "change": 0.4,
+                    "cell_shas": [sha, *files],
+                },
+            ],
+        },
+        read={"overview": "o"},
+        error=None,
+    )
+    # Ranked by size of effect, so the two 40% rows lead and `first_product_shown` is gone.
+    rows = await repo.patterns_for_file(db, org_id, ad_account_id, sha)
+    assert [(r["dimension"], r["metric"]) for r in rows] == [
+        ("opening_shows", "hook_rate"),
+        ("opening_shows", "cpa"),
+        ("messenger", "hook_rate"),
+    ]
+    # The two rows over the same videos share an idea, so a caller listing tests to run can
+    # collapse them; the row over half those videos is its own.
+    assert [r["idea"] for r in rows] == [0, 0, 1]

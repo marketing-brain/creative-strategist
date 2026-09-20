@@ -6,6 +6,7 @@ import statistics
 from itertools import combinations
 
 from cs.insights.account_read.facets import DERIVED_SINGLE_DIMS, NUMERIC_DIMS, REVEAL_BINS
+from cs.insights.account_read.reliability import FLAG, MIN_AGREEMENT, Reliability
 from cs.insights.account_read.stats import (
     MIN_PURCHASES,
     benjamini_hochberg,
@@ -72,6 +73,20 @@ def interactions(
                 comp = [u for u in _scope(group, dim, kinds) if not u.has(dim, val)]
                 out += compare(cell, comp, dimension=dim, value=val, group=label, draws=draws)
     return out
+
+
+def flag_tagger_disagreement(tests: list[Test], reliability: Reliability) -> None:
+    """Mark every test whose attribute, or whose grouping value, the tagger flips on. The test
+    still runs: a label applied at random blurs a real difference and seldom invents one, so
+    the account-level number is if anything understated. What the flag rules out is the claim
+    about one ad, "this video has it" or "lacks it", and `repo.patterns_for_file` drops
+    flagged rows for that reason. Everywhere else it rides with the other confound flags."""
+    for t in tests:
+        attrs = [(t.dimension, t.value)]
+        if t.group:
+            attrs.append(tuple(t.group.split("=", 1)))
+        if not all(reliability.reliable(*a) for a in attrs):
+            t.confounds.append(FLAG)
 
 
 def apply_grades(tests: list[Test]) -> None:
@@ -188,17 +203,42 @@ def retention_by_reveal(units: list[Unit]) -> dict[str, dict]:
     return out
 
 
+def _tagger_summary(units: list[Unit], reliability: Reliability | None) -> dict | None:
+    """The attributes this run flagged, worst first, for the page to own up to."""
+    if reliability is None:
+        return None
+    flagged = []
+    for dim, val in sorted({f for u in units for f in u.facets}):
+        s = reliability.score(dim, val)
+        if s is not None and s.agreement < MIN_AGREEMENT:
+            flagged.append(
+                {
+                    "dimension": dim,
+                    "value": val,
+                    "agreement": s.agreement,
+                    "files": s.files,
+                    "own_score": s is reliability.values.get((dim, val)),
+                    "n_units": sum(1 for u in units if u.has(dim, val)),
+                }
+            )
+    flagged.sort(key=lambda r: (r["agreement"], -r["n_units"]))
+    return {"min_agreement": MIN_AGREEMENT, "flagged": flagged}
+
+
 def run(
     units: list[Unit],
     bin_edges: dict[str, tuple[float, float]],
     *,
     grouping_dims: list[str],
     draws: int,
+    reliability: Reliability | None = None,
 ) -> RunResult:
     kinds = _kinds()
     tests = main_effects(units, bin_edges, kinds, draws)
     tests += interactions(units, grouping_dims, kinds, draws)
     apply_grades(tests)
+    if reliability is not None:
+        flag_tagger_disagreement(tests, reliability)
     main = [t for t in tests if t.group is None]
     main.sort(key=lambda t: (GRADE_RANK[t.grade], len(t.confounds), -abs(t.change)))
     inter = [t for t in tests if t.group is not None]
@@ -216,6 +256,7 @@ def run(
         "dimensions": sorted({t.dimension for t in main}),
         "first_day": min(u.first_day for u in units).isoformat() if units else None,
         "last_day": max(u.last_day for u in units).isoformat() if units else None,
+        "tagger_agreement": _tagger_summary(units, reliability),
     }
     return RunResult(
         units=units,
