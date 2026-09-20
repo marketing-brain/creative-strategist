@@ -4,6 +4,10 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Sidebar collapsed to an icon rail. The class is set on <html> before hydration
+   (see the init script in app/layout.tsx) so the rail never flashes open. */
+@custom-variant rail (&:is(.sidebar-collapsed *));
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

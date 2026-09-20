@@ -21,12 +21,16 @@ export const viewport: Viewport = {
 // Runs before hydration so the stored/system theme applies without a flash of the wrong mode.
 const themeInitScript = `(function(){try{var t=localStorage.getItem('theme');var d=t?t==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.classList.toggle('dark',d);}catch(e){}})();`;
 
+// Same idea for the sidebar: apply the stored collapsed state before paint so the
+// panel never renders full width and then snaps to the rail.
+const sidebarInitScript = `(function(){try{document.documentElement.classList.toggle('sidebar-collapsed',localStorage.getItem('sidebar')==='collapsed');}catch(e){}})();`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <ClerkProvider>
       <html lang="en" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable}`}>
         <head>
-          <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+          <script dangerouslySetInnerHTML={{ __html: themeInitScript + sidebarInitScript }} />
         </head>
         <body className="min-h-dvh bg-background font-sans text-foreground antialiased">{children}</body>
       </html>
