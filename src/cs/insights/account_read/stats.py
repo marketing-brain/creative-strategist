@@ -211,4 +211,8 @@ def compare(
                     cell_purchases=pc,
                 )
             )
+    # `make` hands every test the same list object. Later passes flag one test at a time, so
+    # each needs its own copy or a flag on one metric would appear on all of them.
+    for t in out:
+        t.confounds = list(conf)
     return out

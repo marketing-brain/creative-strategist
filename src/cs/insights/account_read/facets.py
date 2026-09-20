@@ -4,11 +4,33 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-SKIP_DIMS = {"beats", "transcript", "hook_verbatim", "concept_summary", "overlay_texts", "scenes"}
+# Two dimensions are skipped for the derived facets that replace them, both read off `scenes`.
+#
+# opening_shot makes the tagger pick one of face_to_camera and product_in_hand for a speaker
+# who is both, and nine runs of one such file split 6 to 3 while agreeing on every scene flag.
+# opening_shows records the same opening as independent yes/no facts.
+#
+# product_reveal asks for something the scene flags already answer, and answers it worse:
+# on org 3 the two agreed on 48 of 56 files, and the tagger reproduced product_reveal on 84%
+# of re-tagged files against 92% for the derived first_product_shown. Asking twice also let
+# one idea take two places in a ranked list and two bites at the false-discovery correction.
+SKIP_DIMS = {
+    "beats",
+    "transcript",
+    "hook_verbatim",
+    "concept_summary",
+    "overlay_texts",
+    "scenes",
+    "opening_shot",
+    "product_reveal",
+}
+# What the tags endpoint serves in place of the two, when a run has the scenes to derive them.
+DERIVED_FROM_SCENES = {"opening_shows": "opening_shot", "first_product_shown": "product_reveal"}
 TEXT_DIMS = ("concept_summary", "hook_verbatim")
 NUMERIC_DIMS = ("duration_s", "cuts_per_10s")
 DERIVED_SINGLE_DIMS = ("first_product_shown", "opening_scene")
 REVEAL_BINS = ("under 5s", "5 to 10s", "10s to midpoint", "second half", "never")
+OPENING_S = 3.0  # the hook-rate window: what a scene starting before this shows, the opening shows
 
 
 @dataclass
@@ -44,8 +66,17 @@ def extract(tag_rows: list[dict], duration_s: float | None) -> Extracted:
             if t.get("ordinal") == 0:
                 x.facets.add(("opening_scene", v))
             raw = t.get("raw_value") or ""
-            if ("product" in raw or "packaging" in raw) and t.get("t_start_s") is not None:
+            shows_product = "product" in raw or "packaging" in raw
+            if shows_product and t.get("t_start_s") is not None:
                 product_ts.append(float(t["t_start_s"]))
+            # Independent yes/no facts, so an opening with a face and a product has both.
+            if t.get("ordinal") == 0 or (
+                t.get("t_start_s") is not None and float(t["t_start_s"]) < OPENING_S
+            ):
+                if "face" in raw:
+                    x.facets.add(("opening_shows", "face"))
+                if shows_product:
+                    x.facets.add(("opening_shows", "product"))
             continue
         if d in SKIP_DIMS:
             continue

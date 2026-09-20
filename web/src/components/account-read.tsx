@@ -208,7 +208,7 @@ function Finding({ v, index, citations, f }: { v: FindingView; index: number; ci
   );
 }
 
-function GradeBar({ g }: { g: AccountReadView['grades'] }) {
+function GradeBar({ g, tagger }: { g: AccountReadView['grades']; tagger: AccountReadView['tagger'] }) {
   const parts = [
     { k: 'strong', n: g.strong, bar: 'bg-success' },
     { k: 'suggestive', n: g.suggestive, bar: 'bg-foreground/70' },
@@ -241,7 +241,22 @@ function GradeBar({ g }: { g: AccountReadView['grades'] }) {
           With {g.tests.toLocaleString()} comparisons, about {g.byChance} would look suggestive by luck alone. Treat a suggestive finding as a reason to run the test, not as a result.
         </p>
       )}
+      {tagger && <TaggerNote t={tagger} />}
     </section>
+  );
+}
+
+/** What the tags themselves are worth. The tagger watches each video alone, so a file tagged
+ *  more than once is a free re-test of its own labels, and the ones it does not reproduce are
+ *  still compared here but never pinned on a single ad. */
+function TaggerNote({ t }: { t: NonNullable<AccountReadView['tagger']> }) {
+  const worst = t.worst.map((w) => `${w.label}, ${Math.round(w.agreement * 100)}% on ${w.files} ${w.files === 1 ? 'video' : 'videos'}`).join('; ');
+  const rest = t.flagged > t.worst.length ? `, and ${t.flagged - t.worst.length} more` : '';
+  return (
+    <p className="mt-3 border-t border-border pt-3 text-[13px] leading-5 text-muted-foreground">
+      {`Some files were tagged more than once, which shows how often the tagger repeats its own labels. ${t.flagged} ${t.flagged === 1 ? 'attribute' : 'attributes'} came back under ${Math.round(t.minAgreement * 100)}%. The ones on the most videos: ${worst}${rest}. `}
+      Those comparisons still run, marked <Flag>tagger disagreement</Flag>, but no single ad is said to have or lack them.
+    </p>
   );
 }
 
@@ -317,7 +332,7 @@ export function AccountReadSection({ status, nUnits, view, stale = false, curren
         )}
       </header>
 
-      <GradeBar g={view.grades} />
+      <GradeBar g={view.grades} tagger={view.tagger} />
 
       <div>
         {view.findings.map((v, i) => (

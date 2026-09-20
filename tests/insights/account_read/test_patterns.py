@@ -112,3 +112,40 @@ def test_retention_by_reveal_bin_has_rows():
     assert set(r.retention_by_reveal) == {"under 5s", "second half"}
     row = r.retention_by_reveal["under 5s"]
     assert row["n"] == 10 and 0 < row["p50"] < 1
+
+
+def test_tagger_disagreement_flags_one_metric_at_a_time():
+    """A flag belongs to the test it was raised on. `compare` hands every metric of a cell one
+    partial, so a shared confounds list would spread one flag across all five."""
+    from cs.insights.account_read.reliability import FLAG
+    from cs.insights.account_read.stats import compare
+
+    units = synth(7)
+    cell = [u for u in units if u.has("hook_devices", "warning_or_risk")]
+    comp = [u for u in units if not u.has("hook_devices", "warning_or_risk")]
+    tests = compare(cell, comp, dimension="hook_devices", value="warning_or_risk")
+    assert len(tests) > 1
+    tests[0].confounds.append(FLAG)
+    assert [FLAG in t.confounds for t in tests] == [True] + [False] * (len(tests) - 1)
+
+
+def test_an_unreliable_attribute_is_flagged_and_a_steady_one_is_not():
+    from cs.insights.account_read.reliability import FLAG, Reliability, Score
+
+    units = synth(3)
+    rel = Reliability(
+        values={
+            ("hook_devices", "warning_or_risk"): Score(0.4, 20),  # the tagger flips on it
+            ("messenger", "expert_on_camera"): Score(0.98, 20),
+        },
+        dimensions={"hook_devices": Score(0.4, 20), "messenger": Score(0.98, 20)},
+    )
+    result = run(units, {}, grouping_dims=[], draws=200, reliability=rel)
+    flagged = {(t.dimension, t.value) for t in result.tests if FLAG in t.confounds}
+    assert ("hook_devices", "warning_or_risk") in flagged
+    assert ("messenger", "expert_on_camera") not in flagged
+    # The tests still run and still carry their grade: a noisy label blurs a real difference
+    # rather than inventing one, so the account-level number stands.
+    assert any(t.dimension == "hook_devices" and t.grade != "ungraded" for t in result.tests)
+    summary = result.summary["tagger_agreement"]
+    assert [r["value"] for r in summary["flagged"]] == ["warning_or_risk"]

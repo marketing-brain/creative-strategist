@@ -22,6 +22,7 @@ const DIMENSION_LABELS: Record<string, string> = {
   product_reveal: 'product first appears',
   first_product_shown: 'product first appears',
   opening_shot: 'opening shot',
+  opening_shows: 'first 3 seconds show',
   duration_s: 'length (s)',
   cuts_per_10s: 'cuts per 10s',
   concept_tags: 'concepts',

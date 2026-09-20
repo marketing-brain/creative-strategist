@@ -8,6 +8,7 @@ from cs.api.deps import get_db
 from cs.core import queue
 from cs.core import repo as ingest_repo
 from cs.core.db import Database
+from cs.insights.account_read.facets import DERIVED_FROM_SCENES, REVEAL_BINS, extract
 from cs.tagging import repo, vocab
 from cs.tagging.taxonomy import load_taxonomy
 
@@ -24,15 +25,65 @@ async def creative_tags(
 ) -> list[dict]:
     if not await ingest_repo.get_creative(db, auth.org_id, creative_id):
         raise HTTPException(404)
-    # Tags describe the file. A copy that was never tagged itself shows the tags of another
-    # creative running the same file; its own tags win when it has them.
+    # Tags describe the file, so every copy of it shows the same run.
     ids = await ingest_repo.footage_member_ids(db, auth.org_id, creative_id)
-    ordered = [creative_id, *[i for i in ids if i != creative_id]]
+    rows = [dict(r) for r in await repo.footage_latest_tags(db, auth.org_id, ids)]
+    derived = _derived_tags(rows)
+    # The page states these the way the account patterns judge them. Where a dimension asks
+    # the tagger for something the scenes already answer, the derived facet replaces it, so
+    # the tags and the patterns beside them can never say different things (`account_read.
+    # facets.SKIP_DIMS`). A run without scenes keeps whatever it was asked.
+    hidden = {"transcript", *(DERIVED_FROM_SCENES[d["dimension"]] for d in derived)}
     return [
-        {**dict(r), "confidence": round(float(r["confidence"]), 4)}
-        for r in await repo.footage_latest_tags(db, auth.org_id, ordered)
-        if r["dimension"] != "transcript"
+        {**r, "confidence": round(float(r["confidence"]), 4)}
+        for r in rows + derived
+        if r["dimension"] not in hidden
     ]
+
+
+def _derived_tags(rows: list[dict]) -> list[dict]:
+    """`opening_shows` and `first_product_shown` as the account read computes them, so the
+    page and the patterns read one source. Empty when the run has no scenes: absence of a
+    scene is not evidence that the product never appears."""
+    scenes = [r for r in rows if r["dimension"] == "scenes"]
+    if not scenes:
+        return []
+    x = extract(rows, _duration_s(rows))
+    confidence = min(float(r["confidence"]) for r in scenes)
+    first = x.first_product_s
+    why = {
+        "opening_shows": "Read off the scenes that start in the first 3 seconds.",
+        "first_product_shown": (
+            f"First scene flagged as showing the product or its packaging, at {first:g}s."
+            if first is not None
+            else "No scene is flagged as showing the product or its packaging."
+        ),
+    }
+    return [
+        {
+            "dimension": d,
+            "kind": "multi" if d == "opening_shows" else "single",
+            "value": v,
+            "raw_value": None,
+            "confidence": confidence,
+            "evidence": why[d],
+            "t_start_s": 0.0 if d == "opening_shows" else first,
+            "ordinal": None,
+        }
+        for d, v in sorted(x.facets)
+        if d in DERIVED_FROM_SCENES
+    ]
+
+
+def _duration_s(rows: list[dict]) -> float | None:
+    """`first_product_shown` bins the reveal against the video's length."""
+    for r in rows:
+        if r["dimension"] == "duration_s":
+            try:
+                return float(r["value"])
+            except (TypeError, ValueError):
+                return None
+    return None
 
 
 @router.get("/creatives/{creative_id}/transcript")
@@ -82,6 +133,25 @@ async def dimensions(auth: AuthContext = Depends(current_auth)) -> list[dict]:
             "kind": d.kind,
         }
         for d in t.dimensions
+    ] + [
+        {
+            "name": "opening_shows",
+            "group": "structure",
+            "applies_to": ["video"],
+            "values": ["face", "product"],
+            "description": "What the scenes starting in the first 3 seconds show. Read off "
+            "the scene flags, not asked of the tagger.",
+            "kind": "multi",
+        },
+        {
+            "name": "first_product_shown",
+            "group": "structure",
+            "applies_to": ["video"],
+            "values": list(REVEAL_BINS),
+            "description": "When the product or its packaging first appears, binned against "
+            "the video's length. Read off the scene flags, not asked of the tagger.",
+            "kind": "single",
+        },
     ]
 
 

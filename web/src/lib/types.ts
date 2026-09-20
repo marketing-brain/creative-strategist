@@ -17,7 +17,7 @@ export type SummaryRates = { spend: number; impressions: number; link_clicks: nu
 export type CreativeSummary = { window_start: string; window_end: string; totals: SummaryRates; baseline: SummaryRates; baseline_creatives: number };
 // A graded account-wide main effect whose cell includes this creative's file. Evidence about
 // the account, shown beside the creative; it never measures the attribute within the file.
-export type CreativePattern = { has: boolean; dimension: string; value: string; metric: 'hook_rate' | 'link_ctr' | 'thruplay_rate' | 'cpa' | 'purchases_per_1k'; grade: 'strong' | 'suggestive'; change: number; n_cell: number; n_complement: number; cell_value: number | null; comp_value: number | null; bin_edges: [number, number] | null; confounds: string[] };
+export type CreativePattern = { has: boolean; idea: number; dimension: string; value: string; metric: 'hook_rate' | 'link_ctr' | 'thruplay_rate' | 'cpa' | 'purchases_per_1k'; grade: 'strong' | 'suggestive'; change: number; n_cell: number; n_complement: number; cell_value: number | null; comp_value: number | null; bin_edges: [number, number] | null; confounds: string[] };
 export type MetricDay = { day: string; spend: number; impressions: number; clicks: number; conversions: number; conversion_value: number; ctr: number | null; cpa: number | null; roas: number | null };
 export type TagKind = 'numeric' | 'single' | 'multi' | 'ordered' | 'open' | 'text' | 'series';
 export type Tag = { dimension: string; kind: TagKind; value: string; raw_value: string | null; confidence: number; evidence: string; t_start_s: number | null; ordinal: number | null };
