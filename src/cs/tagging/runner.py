@@ -150,6 +150,18 @@ async def tag_creative(ctx: JobContext, creative_id: UUID, tagger: Tagger) -> UU
     if run_id is None:
         return None
     try:
+        # Meta mints a new creative for every copy of an ad, so the same file with the same
+        # copy arrives many times. Identical input gets the finished run's tags, not another
+        # model call. One worker runs these serially, so a twin is either done or not started.
+        twin = await repo.twin_tag_run(ctx.db, org_id, creative_id, tv_id, model)
+        if twin is not None:
+            copied = await repo.copy_tag_run(ctx.db, org_id, run_id, twin)
+            # Vocab counts are per creative carrying the slug, so a copy counts like a run.
+            for d in taxonomy.open_dimensions(fmt):
+                await vocab.bump_counts(
+                    ctx.db, org_id, d.name, [r["value"] for r in copied if r["dimension"] == d.name]
+                )
+            return run_id
         if taxonomy.is_nested(fmt):
             await _tag_video(ctx, creative, taxonomy, tagger, run_id)
             return run_id

@@ -1,5 +1,7 @@
-from fastapi import FastAPI
+import asyncpg
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from cs.api.routers import (
     accounts,
@@ -24,6 +26,14 @@ def create_app(settings: Settings, db: Database, blobs_store: BlobStore) -> Fast
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # A query that outran the pool's statement timeout was cancelled to protect the
+    # database. Say so, rather than a bare 500, so the page can ask for a retry.
+    async def _query_too_slow(_: Request, __: Exception) -> JSONResponse:
+        return JSONResponse({"detail": "That took too long to load. Try again."}, status_code=503)
+
+    app.add_exception_handler(asyncpg.exceptions.QueryCanceledError, _query_too_slow)
+    app.add_exception_handler(TimeoutError, _query_too_slow)
     app.state.settings = settings
     app.state.db = db
     app.state.blobs = blobs_store

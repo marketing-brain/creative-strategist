@@ -67,12 +67,12 @@ async def _seed(db, client, *, today: date):
 
     target = await creative("t", "video")
     aid = await repo.insert_asset(
-        db, org_id, target, "original_video", "o/t.mp4", "sha", "video/mp4", duration_ms=24_000
+        db, org_id, target, "original_video", "o/t.mp4", "sha_t", "video/mp4", duration_ms=24_000
     )
     await repo.set_primary_asset(db, org_id, target, aid)
     peer_video = await creative("pv", "video")
     pv_asset = await repo.insert_asset(
-        db, org_id, peer_video, "original_video", "o/pv.mp4", "sha", "video/mp4",
+        db, org_id, peer_video, "original_video", "o/pv.mp4", "sha_pv", "video/mp4",
         duration_ms=28_000,
     )  # fmt: skip
     await repo.set_primary_asset(db, org_id, peer_video, pv_asset)
@@ -80,7 +80,7 @@ async def _seed(db, client, *, today: date):
     # attention baseline but never toward retention, which compares like-length videos only.
     long_video = await creative("lv", "video")
     lv_asset = await repo.insert_asset(
-        db, org_id, long_video, "original_video", "o/lv.mp4", "sha", "video/mp4",
+        db, org_id, long_video, "original_video", "o/lv.mp4", "sha_lv", "video/mp4",
         duration_ms=90_000,
     )  # fmt: skip
     await repo.set_primary_asset(db, org_id, long_video, lv_asset)

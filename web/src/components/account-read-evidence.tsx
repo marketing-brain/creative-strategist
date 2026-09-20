@@ -1,5 +1,3 @@
-'use client';
-
 import Link from 'next/link';
 import { cn } from 'cn';
 import type { AccountReadTest, AccountReadUnit } from '@/lib/types';
@@ -54,7 +52,8 @@ export function EvidenceList({ ids, tests, units }: { ids: string[]; tests: Acco
   return (
     <ol className="mt-3 divide-y divide-border border-y border-border text-[13px] leading-6 text-muted-foreground">
       {ids.map((pid) => {
-        const t = pid.startsWith('P') ? tests[Number(pid.slice(1)) - 1] : undefined;
+        // a trimmed list tags each test with its id; a full one is indexed by position
+        const t = tests.find((x) => x.pid === pid) ?? (pid.startsWith('P') && !tests.some((x) => x.pid) ? tests[Number(pid.slice(1)) - 1] : undefined);
         if (!t) return null;
         const good = t.metric === 'cpa' ? t.change < 0 : t.change > 0;
         const cell = t.cell_shas

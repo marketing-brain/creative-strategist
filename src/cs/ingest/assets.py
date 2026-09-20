@@ -8,6 +8,7 @@ import httpx
 
 from cs.core import queue, repo
 from cs.core.blobs import sha256_hex
+from cs.ingest.posters import ensure_poster
 from cs.jobs.registry import JobContext
 from cs.tagging.video import probe_duration_ms
 
@@ -20,6 +21,17 @@ async def _fetch(http: httpx.AsyncClient, url: str) -> tuple[bytes, str]:
     resp = await http.get(url, follow_redirects=True, timeout=120)
     resp.raise_for_status()
     return resp.content, resp.headers.get("content-type", "application/octet-stream").split(";")[0]
+
+
+async def _poster(ctx: JobContext, creative_id: UUID, key: str, data: bytes, mime: str) -> None:
+    """Display only, so a file that cannot be read still ingests; the grid falls back to the
+    file itself."""
+    try:
+        await ensure_poster(
+            ctx.db, ctx.blobs, ctx.job.org_id, creative_id, key, sha256_hex(data), mime, data
+        )
+    except Exception as exc:
+        log.warning("no poster for creative %s: %s", creative_id, exc)
 
 
 async def download_creative(
@@ -51,6 +63,7 @@ async def download_creative(
         ctx.db, org_id, creative_id, kind, key, sha256_hex(data), mime, duration_ms=duration_ms
     )
     await repo.set_primary_asset(ctx.db, org_id, creative_id, asset_id)
+    await _poster(ctx, creative_id, key, data, mime)
     if verdict is not None:
         await repo.set_creative_format(ctx.db, org_id, creative_id, *verdict)
     if kind != "original_video" or ctx.settings.video_tagging_enabled:
@@ -80,6 +93,8 @@ async def download_carousel(
             asset_id = await repo.insert_asset(
                 ctx.db, org_id, creative_id, "original_image", key, sha256_hex(data), mime, seq=i
             )
+            if i == 0:
+                await _poster(ctx, creative_id, key, data, mime)
         if i == 0:
             primary_id = asset_id
     if primary_id is not None:

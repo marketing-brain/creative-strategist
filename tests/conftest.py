@@ -11,10 +11,13 @@ import cs.jobs.all_handlers  # noqa: F401
 from cs.api.app import create_app
 from cs.api.auth import AuthContext, current_auth
 from cs.api.deps import get_db
+from cs.core import repo
 from cs.core.blobs import LocalBlobStore
 from cs.core.config import Settings
 from cs.core.db import Database
 from cs.core.ids import new_id
+from cs.core.repo import metrics as metrics_repo
+from cs.core.repo import rollups
 from cs.orgs.repo import ensure_membership, get_or_create_org
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,8 +62,24 @@ async def db(settings):
     names = ", ".join(f'"{t["tablename"]}"' for t in tables)
     if names:
         await database.execute(f"TRUNCATE {names} CASCADE")
+    await rollups.refresh(database)  # TRUNCATE does not empty a materialized view
     yield database
     await database.close()
+
+
+@pytest.fixture(autouse=True)
+def _rollups_follow_metrics(monkeypatch):
+    """In production the thirty-day rollups refresh when a sync ends and hourly. A test that
+    writes metrics expects to read them back at once, so here every write refreshes them."""
+    real = metrics_repo.upsert_metrics
+
+    async def upsert_then_refresh(db, *args, **kwargs):
+        out = await real(db, *args, **kwargs)
+        await rollups.refresh(db)
+        return out
+
+    for mod in (repo, metrics_repo):
+        monkeypatch.setattr(mod, "upsert_metrics", upsert_then_refresh)
 
 
 @pytest.fixture

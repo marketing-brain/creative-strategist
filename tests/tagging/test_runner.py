@@ -289,6 +289,9 @@ async def test_second_video_sees_vocabulary_hints_and_reuses_canonical(
         org_id,
     )
     second = await _make_video_creative(db, blobs, settings, org_id, tmp_path / "b")
+    # different copy: the same file with the same copy would take the first run's tags
+    # without a model call, and this test is about what the model is shown
+    await db.execute("UPDATE creative SET headline='A different headline' WHERE id=$1", second)
     tagger = FakeTagger()
     await runner.tag_creative(_ctx(db, blobs, settings, org_id, {}), second, tagger)
     text = tagger.calls[0]["user_text"]

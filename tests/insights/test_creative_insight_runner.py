@@ -51,6 +51,7 @@ async def _account(db, org_id) -> UUID:
 async def _creative(
     db, blobs, org_id, acct, pid: str, fmt: str, *, daily_impressions: int, ctr: float,
     data: bytes | None = None,
+    sha: str | None = None,  # files sharing a hash are one footage group; default: its own
 ) -> UUID:  # fmt: skip
     cid, _ = await ingest_repo.upsert_creative(
         db,
@@ -69,7 +70,7 @@ async def _creative(
         )  # fmt: skip
         key = f"{org_id}/creatives/{cid}/original.{ext}"
         await blobs.put(key, data, mime)
-        aid = await ingest_repo.insert_asset(db, org_id, cid, kind, key, "sha", mime)
+        aid = await ingest_repo.insert_asset(db, org_id, cid, kind, key, sha or f"sha-{pid}", mime)
         await ingest_repo.set_primary_asset(db, org_id, cid, aid)
     clicks = int(daily_impressions * ctr)
     video = fmt == "video"

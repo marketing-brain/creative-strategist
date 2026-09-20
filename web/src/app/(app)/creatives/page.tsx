@@ -1,9 +1,12 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { ImageOff } from 'lucide-react';
-import { CreativeCard } from '@/components/creative-card';
+import { SearchX } from 'lucide-react';
+import { CreativeCard, extraFor } from '@/components/creative-card';
+import { RememberGridUrl } from '@/components/creative-detail-client';
 import { CreativeFilters } from '@/components/creative-filters';
 import { Pagination } from '@/components/pagination';
 import { api } from '@/lib/api';
+import { formatters, type Formatters } from '@/lib/format';
 import { requireAuth } from '@/lib/require-auth.server';
 
 export const metadata = { title: 'Creatives' };
@@ -14,8 +17,14 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
   await requireAuth();
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page) || 1);
+  const ungrouped = sp.group === 'creative';
+  const showAll = sp.delivery === 'all';
+  const sort = sp.sort ?? 'spend';
+  const search = sp.q?.trim() || undefined;
 
-  const makeQuery = (p: number) => {
+  // One builder for the page's own links and the API query, so a filter can never be on
+  // screen but missing from page 2. `over` replaces or, with null, drops a parameter.
+  const params = (over: Record<string, string | null> = {}) => {
     const q = new URLSearchParams();
     if (sp.account_id) q.set('account_id', sp.account_id);
     if (sp.format) q.set('format', sp.format);
@@ -25,60 +34,121 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
       q.set('dimension', sp.dimension);
       q.set('value', sp.value);
     }
+    if (search) q.set('q', search);
     if (sp.sort) q.set('sort', sp.sort);
     if (sp.order) q.set('order', sp.order);
-    q.set('limit', String(PAGE_SIZE));
-    q.set('offset', String((p - 1) * PAGE_SIZE));
+    if (ungrouped) q.set('group', 'creative');
+    if (showAll) q.set('delivery', 'all');
+    for (const [k, v] of Object.entries(over)) {
+      if (v === null) q.delete(k);
+      else q.set(k, v);
+    }
     return q;
   };
-  // Pagination links carry the sort too, or page 2 would silently revert to newest-first.
-  const makeHref = (p: number) => {
-    const q = new URLSearchParams();
-    if (sp.account_id) q.set('account_id', sp.account_id);
-    if (sp.format) q.set('format', sp.format);
-    if (sp.dimension && sp.value) {
-      q.set('dimension', sp.dimension);
-      q.set('value', sp.value);
-    }
-    if (sp.sort) q.set('sort', sp.sort);
-    if (sp.order) q.set('order', sp.order);
-    if (p > 1) q.set('page', String(p));
+  const href = (q: URLSearchParams) => {
     const s = q.toString();
     return `/creatives${s ? `?${s}` : ''}`;
   };
+  const makeHref = (p: number) => href(params(p > 1 ? { page: String(p) } : {}));
+  const apiQuery = params({
+    // Cost per purchase reads cheapest first unless the reader flips it.
+    order: sp.order ?? (sort === 'cpa' ? 'asc' : 'desc'),
+    limit: String(PAGE_SIZE),
+    offset: String((page - 1) * PAGE_SIZE),
+  });
 
-  const [{ items: creatives, total }, accounts, dimensions] = await Promise.all([
-    api.creatives(`?${makeQuery(page)}`),
-    api.accounts(),
-    api.dimensions(),
-  ]);
+  const [list, accounts, dimensions] = await Promise.all([api.creatives(`?${apiQuery}`), api.accounts(), api.dimensions()]);
+  const { items: creatives, total } = list;
   const selectedDim = dimensions.find((d) => d.name === sp.dimension);
   const openValues = selectedDim?.kind === 'open' ? await api.dimensionValues(selectedDim.name) : undefined;
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   if (page > totalPages) redirect(makeHref(totalPages));
 
+  // Money is shown in each card's own account currency, never an assumed one.
+  const currencyOf = new Map(accounts.map((a) => [a.id, a.currency]));
+  const fmts = new Map<string, Formatters>();
+  const fmtFor = (accountId: string) => {
+    const currency = currencyOf.get(accountId) ?? 'USD';
+    if (!fmts.has(currency)) fmts.set(currency, formatters(currency));
+    return fmts.get(currency)!;
+  };
+
+  const all = list.total_all ?? total;
+  const active = list.total_active ?? total;
+  const idle = all - active;
+  const noun = (n: number) => (ungrouped ? (n === 1 ? 'Meta creative' : 'Meta creatives') : n === 1 ? 'creative' : 'creatives');
+  const count = (n: number) => n.toLocaleString('en-US');
+  const filtered = !!(sp.account_id || sp.format || (sp.dimension && sp.value) || search);
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Creatives</h1>
-          <p className="text-sm text-muted-foreground">Every ad creative synced from your connected accounts.</p>
-        </div>
-        <CreativeFilters accounts={accounts} dimensions={dimensions} openValues={openValues} />
+    <div className="space-y-4">
+      <RememberGridUrl />
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Creatives</h1>
+        <p className="text-sm text-muted-foreground">
+          {ungrouped
+            ? 'Every Meta creative from your connected accounts, copies included. Numbers cover the last 30 days.'
+            : 'Copies of the same file are shown once, with their numbers combined. Numbers cover the last 30 days.'}
+        </p>
       </div>
+      <CreativeFilters accounts={accounts} dimensions={dimensions} openValues={openValues} />
+      {/* What the grid is showing and what it is leaving out, with the switch beside the
+          count it changes. */}
+      <p className="text-sm text-muted-foreground" aria-live="polite">
+        {showAll ? (
+          <>
+            <span className="font-medium text-foreground tabular-nums">
+              {count(all)} {noun(all)}
+            </span>
+            {idle > 0 && (
+              <>
+                , {count(idle)} with no delivery in the last 30 days.{' '}
+                <Link href={href(params({ delivery: null, page: null }))} className="font-medium text-foreground underline underline-offset-4 hover:no-underline">
+                  Hide those
+                </Link>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <span className="font-medium text-foreground tabular-nums">
+              {count(active)} {noun(active)}
+            </span>{' '}
+            with delivery in the last 30 days.
+            {idle > 0 && (
+              <>
+                {' '}
+                <Link href={href(params({ delivery: 'all', page: null }))} className="font-medium text-foreground underline underline-offset-4 hover:no-underline">
+                  Show {count(idle)} more with none
+                </Link>
+              </>
+            )}
+          </>
+        )}{' '}
+        <span className="hidden lg:inline">Percentages are the gap to the rest of the account, same format.</span>
+      </p>
       {creatives.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border py-20 text-center">
-          <ImageOff className="size-8 text-muted-foreground" aria-hidden="true" />
+          <SearchX className="size-8 text-muted-foreground" aria-hidden="true" />
           <p className="max-w-sm text-sm text-muted-foreground">
-            No creatives match these filters yet. They will appear here once an account finishes syncing.
+            {filtered
+              ? 'No creatives match these filters.'
+              : all > 0
+                ? 'Nothing has delivered in the last 30 days.'
+                : 'No creatives yet. They will appear here once an account finishes syncing.'}
           </p>
+          {filtered && (
+            <Link href="/creatives" className="text-sm font-medium underline underline-offset-4 hover:no-underline">
+              Clear filters
+            </Link>
+          )}
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-            {creatives.map((c) => (
-              <CreativeCard key={c.id} creative={c} />
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            {creatives.map((c, i) => (
+              <CreativeCard key={c.id} creative={c} fmt={fmtFor(c.ad_account_id)} extra={extraFor(sort, c.format)} ungrouped={ungrouped} eager={i < 10} />
             ))}
           </div>
           <Pagination page={page} totalPages={totalPages} makeHref={makeHref} />

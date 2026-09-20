@@ -98,12 +98,15 @@ async def test_account_read_states_and_cross_org(client, db):
         status="done",
         n_units=12,
         result=result,
-        read={"overview": "o", "findings": []},
+        read={"overview": "o", "findings": [{"pattern_ids": ["P2"], "paragraph": "Humor (P2)."}]},
         error=None,
     )
     body = (await client.get(f"/insights/account-read?ad_account_id={aid}", headers=H)).json()
     assert body["status"] == "done" and body["read"]["overview"] == "o"
-    assert [t["grade"] for t in body["tests"]] == ["suggestive", "thin"]  # stored order: P<n>
+    # only what the read cites crosses the wire, tagged with its place in the run's full list
+    assert [(t["pid"], t["grade"]) for t in body["tests"]] == [("P2", "thin")]
+    assert body["sibling_tests"] == [] and "stratified" not in body
+    assert body["units"][0]["sha256"] == "a" and body["units"][0]["poster_url"] is None
     other = await client.get(
         f"/insights/account-read?ad_account_id={aid}", headers=dev_headers(org="org_other")
     )

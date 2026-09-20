@@ -81,7 +81,12 @@ async def test_job_stores_done_run_with_read(
     assert await run_once(db, blobs, settings, "w1") is True
     row = await repo.latest_run(db, org_id, ad_account_id)
     assert row["status"] == "done" and row["n_units"] == 12
-    result, read = row["result"], row["read"]
+    # the page slice rides on the run; the full payload is fetched by id, on its own
+    assert "result" not in row and row["page"]["summary"]["units"] == 12
+    assert {t["pid"] for t in row["page"]["tests"]} >= set(
+        row["read"]["findings"][0]["pattern_ids"]
+    )
+    result, read = await repo.run_result(db, row["id"]), row["read"]
     assert result["summary"]["units"] == 12 and isinstance(result["tests"], list)
     assert len(result["units"]) == 12 and result["units"][0]["facets"]
     assert read["findings"][0]["title"] == "Creators earn the click"

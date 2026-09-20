@@ -90,7 +90,7 @@ describe('DiagnosisPanel', () => {
   it('renders the verdict, baseline note, and every tier with its status label', () => {
     render(<DiagnosisPanel diagnosis={broken} />);
     expect(screen.getByText(/Broken layer: Retention/)).toBeInTheDocument();
-    expect(screen.getByText('Compared with 41 other video creatives in this account')).toBeInTheDocument();
+    expect(screen.getByText('Compared with 41 other videos in this account')).toBeInTheDocument();
     expect(screen.getByText('Strong')).toBeInTheDocument();
     expect(screen.getAllByText('Weak')).toHaveLength(1); // fatigue's weak is labelled differently
     expect(screen.getByText('Early decay')).toBeInTheDocument();
@@ -100,19 +100,37 @@ describe('DiagnosisPanel', () => {
 
   it('formats ratios as percentages with baseline and lift, and frequency as a plain number', () => {
     render(<DiagnosisPanel diagnosis={broken} />);
-    expect(screen.getByText('38%')).toBeInTheDocument();
-    expect(screen.getByText('vs 31%')).toBeInTheDocument();
-    expect(screen.getByText('+23%')).toBeInTheDocument();
-    expect(screen.getByText('−38%')).toBeInTheDocument();
-    expect(screen.getByText('2.3')).toBeInTheDocument();
-    expect(screen.getByText('was 1.4')).toBeInTheDocument();
-    expect(screen.getByText('$41')).toBeInTheDocument();
+    // Each layer's headline number shows twice: in its one-line summary and in its body.
+    const once = (text: string) => expect(screen.getAllByText(text).length).toBeGreaterThan(0);
+    once('38%');
+    once('vs 31%');
+    once('+23%');
+    once('−38%');
+    once('2.3');
+    once('was 1.4');
+    once('$41');
   });
 
   it('shows the decision only on weak tiers and the reason otherwise', () => {
     render(<DiagnosisPanel diagnosis={broken} />);
-    expect(screen.getByText('Attention drops between 25% and 50%.')).toBeInTheDocument();
+    // The broken layer's decision is the verdict; the layer does not repeat it underneath.
+    expect(screen.getByText('Broken layer: Retention. Attention drops between 25% and 50%.')).toBeInTheDocument();
+    expect(screen.queryByText('Attention drops between 25% and 50%.')).not.toBeInTheDocument();
     expect(screen.getByText('Nothing to change here.')).toBeInTheDocument();
+  });
+
+  it('opens the layers that need work and folds the rest to one line', () => {
+    const { container } = render(<DiagnosisPanel diagnosis={broken} />);
+    const layers = [...container.querySelectorAll('details')];
+    expect(layers.length).toBe(broken.tiers.length);
+    for (const [i, t] of broken.tiers.entries()) expect(layers[i].open).toBe(t.status === 'weak');
+  });
+
+  it('prints a cost change the way a buyer reads it: cheaper is minus', () => {
+    const cheaper = { ...broken, tiers: broken.tiers.map((t) => (t.key === 'conversion' ? { ...t, metrics: [{ key: 'cpa', label: 'CPA', value: 48, baseline: 60, lift: 0.2, note: '' }] } : t)) };
+    render(<DiagnosisPanel diagnosis={cheaper} />);
+    expect(screen.getAllByText('−20%').length).toBeGreaterThan(0);
+    expect(screen.queryByText('+20%')).not.toBeInTheDocument();
   });
 
   it('draws the retention curve with point labels and marks unreadable steps', () => {

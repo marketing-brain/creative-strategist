@@ -51,7 +51,7 @@ async def _siblings(
     db: Database,
     org_id: UUID,
     account_id: UUID,
-    creative_id: UUID,
+    creative_id: UUID | list[UUID],
     fmt: str,
     since: date,
     until: date,
@@ -82,8 +82,13 @@ async def diagnose_creative(
     creative: Mapping[str, Any],
     until: date,
     duration_ms: int | None = None,
+    member_ids: list[UUID] | None = None,
 ) -> DiagnosedCreative:
-    creative_id = creative["id"]
+    """With `member_ids` (the creative's footage group, see cs.core.repo.footage) every sum
+    pools the group and every baseline and peer set leaves the whole group out. One video
+    copied into six campaigns is one piece of footage: read copy by copy, each is too thin to
+    measure and the others would sit in its baseline as if they were different ads."""
+    creative_id: UUID | list[UUID] = member_ids or creative["id"]
     since = until - timedelta(days=WINDOW_DAYS - 1)
     window = Sums.from_record(
         await repo.creative_window_sums(db, org_id, creative_id, since, until)

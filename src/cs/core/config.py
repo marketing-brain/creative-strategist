@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     # connections instead of each pinning a session-mode slot; migrations and psql keep
     # using DATABASE_URL. Empty means "same as DATABASE_URL".
     database_pool_url: str = ""
+    # Longest any one API query may run before Postgres cancels it. 0 turns the bound off.
+    api_statement_timeout_ms: int = 15000
 
     blob_backend: Literal["local", "s3"] = "local"
     blob_root: str = "./var/blobs"

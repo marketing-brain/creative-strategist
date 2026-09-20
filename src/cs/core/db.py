@@ -43,18 +43,39 @@ async def _init_conn(conn: asyncpg.Connection) -> None:
 POOL_IDLE_LIFETIME = 60.0
 
 
-def pool_kwargs(url: str) -> dict:
+def _transaction_pooler(url: str) -> bool:
+    return ":6543/" in url or url.rstrip("/").endswith(":6543")
+
+
+def pool_kwargs(url: str, statement_timeout_ms: int | None = None) -> dict:
     """Pool settings for `url`. Behind a transaction-mode pooler (PgBouncer, Supabase port
     6543) server connections are shared per transaction, so asyncpg's prepared-statement
     cache must be off: a statement prepared on one server connection does not exist on
-    the next."""
+    the next.
+
+    `statement_timeout_ms` bounds every query on the pool. The API sets it; the worker and
+    scheduler do not, since a sync or a rollup refresh is long on purpose. Without a bound a
+    slow read never dies, each page reload stacks another behind it, and the instance stops
+    answering (2026-09-18, 2026-09-20). The server-side timeout is what frees the database;
+    the client-side one, a little longer, only covers a server that has stopped replying."""
+
+    async def init(conn: asyncpg.Connection) -> None:
+        await _init_conn(conn)
+        # A session SET holds on a direct or session-mode connection. A transaction-mode
+        # pooler hands each transaction a different server connection, so there it would
+        # land on whichever one ran this statement and nowhere else.
+        if statement_timeout_ms and not _transaction_pooler(url):
+            await conn.execute(f"SET statement_timeout = {int(statement_timeout_ms)}")
+
     kwargs: dict = {
         "min_size": 1,
         "max_size": 10,
-        "init": _init_conn,
+        "init": init,
         "max_inactive_connection_lifetime": POOL_IDLE_LIFETIME,
     }
-    if ":6543/" in url or url.rstrip("/").endswith(":6543"):
+    if statement_timeout_ms:
+        kwargs["command_timeout"] = statement_timeout_ms / 1000 + 5
+    if _transaction_pooler(url):
         kwargs["statement_cache_size"] = 0
     return kwargs
 
@@ -75,8 +96,8 @@ class Database:
         self._conn = conn
 
     @classmethod
-    async def connect(cls, url: str) -> Database:
-        pool = await asyncpg.create_pool(url, **pool_kwargs(url))
+    async def connect(cls, url: str, statement_timeout_ms: int | None = None) -> Database:
+        pool = await asyncpg.create_pool(url, **pool_kwargs(url, statement_timeout_ms))
         return cls(pool)
 
     async def close(self) -> None:

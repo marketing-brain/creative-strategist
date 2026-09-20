@@ -93,6 +93,65 @@ async def finish_tag_run(
         )
 
 
+async def twin_tag_run(
+    db: Database, org_id: UUID, creative_id: UUID, taxonomy_version_id: UUID, model: str
+) -> UUID | None:
+    """A finished run, under this taxonomy and model, on another creative whose model input
+    was identical: same format, byte-identical primary file, and the same copy, since the
+    copy is part of the tagging prompt. Same file with different copy is a different input
+    and is tagged on its own. Carousels are excluded: their input is every card, and only
+    the first is the primary file."""
+    return await db.fetchval(
+        """
+        SELECT tr.id FROM creative c
+        JOIN asset a ON a.id = c.primary_asset_id
+        JOIN creative peer ON peer.org_id = c.org_id AND peer.id <> c.id
+                          AND peer.format = c.format
+                          AND (peer.headline, peer.primary_text, peer.description,
+                               peer.cta_type, peer.link_url)
+                              IS NOT DISTINCT FROM
+                              (c.headline, c.primary_text, c.description, c.cta_type, c.link_url)
+        JOIN asset pa ON pa.id = peer.primary_asset_id AND pa.sha256 = a.sha256
+        JOIN tag_run tr ON tr.creative_id = peer.id AND tr.status = 'done'
+                       AND tr.taxonomy_version_id = $3 AND tr.model = $4
+        WHERE c.org_id = $1 AND c.id = $2 AND c.format IN ('image', 'video')
+        ORDER BY tr.finished_at DESC LIMIT 1
+        """,
+        org_id,
+        creative_id,
+        taxonomy_version_id,
+        model,
+    )
+
+
+async def copy_tag_run(
+    db: Database, org_id: UUID, run_id: UUID, source_run_id: UUID
+) -> list[asyncpg.Record]:
+    """Finish `run_id` with the source run's tags instead of a model call, and return them.
+    The run keeps the source's prompt hash, since that is the prompt its tags came from, and
+    records zero tokens, since it spent none."""
+    source = await db.fetchrow("SELECT prompt_sha256 FROM tag_run WHERE id=$1", source_run_id)
+    rows = await db.fetch(
+        "SELECT dimension, value, confidence, evidence, kind, raw_value, t_start_s, ordinal "
+        "FROM tag WHERE tag_run_id=$1",
+        source_run_id,
+    )
+    await finish_tag_run(db, org_id, run_id, [dict(r) for r in rows], source["prompt_sha256"], 0, 0)
+    return rows
+
+
+async def footage_latest_tags(
+    db: Database, org_id: UUID, creative_ids: list[UUID]
+) -> list[asyncpg.Record]:
+    """Tags for a footage group: the first listed creative that has any. Callers list the
+    creative being viewed first, so its own tags win when it has them."""
+    for cid in creative_ids:
+        tags = await latest_tags(db, org_id, cid)
+        if tags:
+            return tags
+    return []
+
+
 async def fail_tag_run(db: Database, org_id: UUID, run_id: UUID, error: str) -> None:
     await db.execute(
         "UPDATE tag_run SET status='failed', error=$2, finished_at=now() WHERE id=$1",

@@ -7,6 +7,7 @@ import asyncpg
 
 from cs.core.db import Database
 from cs.core.ids import new_id
+from cs.core.repo.footage import FOOTAGE_KEY_SQL
 from cs.insights.types import InsightDraft
 
 
@@ -113,6 +114,20 @@ async def get_creative_insight(
     )
 
 
+async def get_footage_insight(
+    db: Database, org_id: UUID, creative_ids: list[UUID]
+) -> asyncpg.Record | None:
+    """The insight for a footage group: whichever of its creatives holds one. Groups written
+    before insights were shared can hold several, so a shown one beats a rejected one and the
+    newest wins among equals."""
+    return await db.fetchrow(
+        "SELECT * FROM creative_insight WHERE org_id=$1 AND creative_id = ANY($2) "
+        "ORDER BY (status = 'done') DESC, created_at DESC, creative_id LIMIT 1",
+        org_id,
+        creative_ids,
+    )
+
+
 async def insert_creative_insight(
     db: Database,
     org_id: UUID,
@@ -176,24 +191,38 @@ async def creative_insight_candidates(
     limit: int,
     limit_per_format: int,
 ) -> list[asyncpg.Record]:
-    """Creatives in active accounts with a stored file and no insight yet, that delivered
-    enough in the window to possibly be readable. Highest spend first. Formats an org has
-    already reached its insight cap for are left out."""
+    """One creative per footage group (see cs.core.repo.footage) in active accounts, with a
+    stored file, where no creative of the group has an insight yet and the group delivered
+    enough in the window to possibly be readable. The group's highest-spend creative stands
+    for it. Highest pooled spend first. Formats an org has already reached its insight cap
+    for are left out."""
     return await db.fetch(
-        """
-        SELECT c.id, c.org_id, c.format FROM creative c
-        JOIN ad_account aa ON aa.id = c.ad_account_id AND aa.status = 'active'
-        JOIN metric_daily m ON m.creative_id = c.id AND m.day BETWEEN $1 AND $2
-        WHERE c.primary_asset_id IS NOT NULL AND c.format = ANY($3)
-          AND NOT EXISTS (SELECT 1 FROM creative_insight ci WHERE ci.creative_id = c.id)
-          AND (
-                SELECT count(*) FROM creative_insight ci
-                JOIN creative cf ON cf.id = ci.creative_id
-                WHERE ci.org_id = c.org_id AND cf.format = c.format
-              ) < $6
-        GROUP BY c.id, c.org_id, c.format
-        HAVING sum(m.impressions) >= $4
-        ORDER BY sum(m.spend) DESC, c.id
+        f"""
+        WITH per AS (
+            SELECT c.id, c.org_id, c.format, {FOOTAGE_KEY_SQL} AS gkey,
+                   COALESCE(sum(m.impressions), 0) AS impressions,
+                   COALESCE(sum(m.spend), 0) AS spend,
+                   EXISTS (SELECT 1 FROM creative_insight ci WHERE ci.creative_id = c.id)
+                       AS has_insight
+            FROM creative c
+            JOIN ad_account aa ON aa.id = c.ad_account_id AND aa.status = 'active'
+            JOIN asset a ON a.id = c.primary_asset_id
+            LEFT JOIN metric_daily m ON m.creative_id = c.id AND m.day BETWEEN $1 AND $2
+            WHERE c.format = ANY($3)
+              AND (
+                    SELECT count(*) FROM creative_insight ci
+                    JOIN creative cf ON cf.id = ci.creative_id
+                    WHERE ci.org_id = c.org_id AND cf.format = c.format
+                  ) < $6
+            GROUP BY c.id, c.org_id, c.format, a.sha256
+        ),
+        g AS (
+            SELECT gkey, sum(spend) AS spend FROM per
+            GROUP BY gkey HAVING sum(impressions) >= $4 AND NOT bool_or(has_insight)
+        ),
+        rep AS (SELECT DISTINCT ON (gkey) * FROM per ORDER BY gkey, spend DESC, id)
+        SELECT rep.id, rep.org_id, rep.format FROM g JOIN rep USING (gkey)
+        ORDER BY g.spend DESC, rep.id
         LIMIT $5
         """,
         since,

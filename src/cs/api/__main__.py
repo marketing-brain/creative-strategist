@@ -11,7 +11,7 @@ from cs.core.logging import configure_logging
 
 async def _serve() -> None:
     settings = get_settings()
-    db = await Database.connect(settings.pool_url)
+    db = await Database.connect(settings.pool_url, settings.api_statement_timeout_ms or None)
     app = create_app(settings, db, blob_store_from_settings(settings))
     config = uvicorn.Config(app, host="0.0.0.0", port=8000, log_level="info")
     await uvicorn.Server(config).serve()

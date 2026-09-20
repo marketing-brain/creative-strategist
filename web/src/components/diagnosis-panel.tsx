@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, Clock, Lock } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronRight, Clock, Lock } from 'lucide-react';
 import { cn } from 'cn';
 import type { Diagnosis, DiagnosisAudienceSlice, DiagnosisCurve, DiagnosisMetric, DiagnosisPlacement, DiagnosisStatus, DiagnosisStep, DiagnosisTier } from '@/lib/types';
 
@@ -63,6 +63,12 @@ function liftClass(tier: DiagnosisTier, m: DiagnosisMetric): string {
   return m.lift >= 0.15 ? 'text-success' : m.lift <= -0.15 ? 'text-destructive' : 'text-muted-foreground';
 }
 
+// The API's lift is signed so that positive always means better, which for a cost means the
+// number went down. A media buyer reads "+4%" on cost per purchase as "it got dearer", so
+// the page prints the arithmetic change and leaves "better or worse" to the colour.
+const COST_METRICS = new Set(['cpa']);
+const shownChange = (m: DiagnosisMetric) => (COST_METRICS.has(m.key) ? -(m.lift ?? 0) : (m.lift ?? 0));
+
 function Pill({ tier }: { tier: DiagnosisTier }) {
   return (
     <span className={cn('inline-flex h-6 w-fit items-center gap-1.5 rounded-4xl px-2.5 text-sm font-medium', pillClass[tier.status])}>
@@ -80,7 +86,7 @@ function MetricBlock({ tier, m }: { tier: DiagnosisTier; m: DiagnosisMetric }) {
       <div className="flex items-baseline gap-2.5">
         <span className="text-2xl leading-none font-semibold tabular-nums">{fmtValue(m, m.value)}</span>
         {m.baseline != null && <span className="text-sm text-muted-foreground tabular-nums">{`${compare} ${fmtValue(m, m.baseline)}`}</span>}
-        {m.lift != null && <span className={cn('text-sm font-semibold tabular-nums', liftClass(tier, m))}>{signed(m.lift)}</span>}
+        {m.lift != null && <span className={cn('text-sm font-semibold tabular-nums', liftClass(tier, m))}>{signed(shownChange(m))}</span>}
       </div>
     </div>
   );
@@ -229,48 +235,64 @@ function AudienceLine({ audience }: { audience: DiagnosisAudienceSlice[] }) {
   );
 }
 
-function TierRow({ tier, broken, last, format }: { tier: DiagnosisTier; broken: boolean; last: boolean; format: Diagnosis['format'] }) {
+function TierBody({ tier, broken, format, evidence }: { tier: DiagnosisTier; broken: boolean; format: Diagnosis['format']; evidence?: React.ReactNode }) {
   const weak = tier.status === 'weak';
-  const text = weak ? tier.decision : tier.reason;
+  // The verdict above already carries the broken layer's decision word for word.
+  const text = broken ? null : weak ? tier.decision : tier.reason;
   return (
-    <div
-      className={cn(
-        'grid gap-x-6 gap-y-3 px-6 py-5 @2xl:grid-cols-[180px_minmax(0,1fr)]',
-        !last && 'border-b border-border',
-        broken && 'bg-destructive/[0.03] shadow-[inset_3px_0_0_var(--destructive)]'
-      )}
-    >
-      <div className="flex items-start gap-3">
-        <div className={cn('flex size-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold tabular-nums', railClass[tier.status])}>{tier.tier}</div>
-        <div className="flex flex-col gap-2">
-          <span className={cn('text-base leading-7 font-semibold', tier.status === 'not_measured' && 'text-muted-foreground')} title={tier.question}>
-            {tier.name}
-          </span>
-          <Pill tier={tier} />
+    <div className="flex min-w-0 flex-col gap-4">
+      {text && <p className={cn('max-w-prose text-sm leading-relaxed', weak ? 'font-semibold' : 'text-muted-foreground')}>{text}</p>}
+      {tier.metrics.length > 0 && (
+        <div className="flex flex-wrap gap-x-10 gap-y-4">
+          {tier.metrics.map((m) => (
+            <MetricBlock key={m.key} tier={tier} m={m} />
+          ))}
         </div>
-      </div>
-      <div className="flex min-w-0 flex-col gap-4">
-        {text && <p className={cn('text-sm leading-relaxed', weak ? 'font-semibold' : 'text-muted-foreground')}>{text}</p>}
-        {tier.metrics.length > 0 && (
-          <div className="flex flex-wrap gap-x-10 gap-y-4">
-            {tier.metrics.map((m) => (
-              <MetricBlock key={m.key} tier={tier} m={m} />
-            ))}
-          </div>
-        )}
-        {tier.curve && <RetentionCurve curve={tier.curve} />}
-        {tier.steps && tier.steps.length > 0 && <StepChain steps={tier.steps} />}
-        {tier.placements && tier.placements.length > 0 && (
-          <div className="flex flex-col gap-2">
-            <span className="text-sm text-muted-foreground">
-              {`Where Meta ran it · share of delivery and fit vs ${tier.comparison ?? 'the baseline'}`}
-            </span>
-            <PlacementCards placements={tier.placements} format={format} />
-          </div>
-        )}
-        {tier.audience && tier.audience.length > 0 && <AudienceLine audience={tier.audience} />}
-      </div>
+      )}
+      {tier.curve && <RetentionCurve curve={tier.curve} />}
+      {tier.steps && tier.steps.length > 0 && <StepChain steps={tier.steps} />}
+      {tier.placements && tier.placements.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <span className="text-sm text-muted-foreground">
+            {`Where Meta ran it · share of delivery and fit vs ${tier.comparison ?? 'the baseline'}`}
+          </span>
+          <PlacementCards placements={tier.placements} format={format} />
+        </div>
+      )}
+      {tier.audience && tier.audience.length > 0 && <AudienceLine audience={tier.audience} />}
+      {evidence}
     </div>
+  );
+}
+
+// A layer that needs work opens with everything it has. A layer that is fine, or cannot be
+// read yet, is one line: its name, its status and its headline number. After "fix attention,
+// keep the rest", a screen of proof per healthy layer is a screen between the reader and
+// the next thing to do; it stays one click away.
+function TierRow({ tier, broken, format, evidence }: { tier: DiagnosisTier; broken: boolean; format: Diagnosis['format']; evidence?: React.ReactNode }) {
+  const open = tier.status === 'weak';
+  const head = tier.metrics[0];
+  return (
+    <details open={open} className={cn('group/tier border-b border-border', broken && 'bg-destructive/[0.03] shadow-[inset_3px_0_0_var(--destructive)]')}>
+      <summary className="flex cursor-pointer list-none items-center gap-3 px-6 py-3.5 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset [&::-webkit-details-marker]:hidden">
+        <div className={cn('flex size-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold tabular-nums', railClass[tier.status])}>{tier.tier}</div>
+        <span className={cn('w-24 shrink-0 text-base font-semibold', tier.status === 'not_measured' && 'text-muted-foreground')} title={tier.question}>
+          {tier.name}
+        </span>
+        <Pill tier={tier} />
+        {head && head.value != null && (
+          <span className="hidden min-w-0 truncate text-sm text-muted-foreground tabular-nums group-open/tier:hidden @xl:inline">
+            {head.label} <span className="font-medium text-foreground">{fmtValue(head, head.value)}</span>
+            {head.baseline != null && ` ${tier.key === 'fatigue' ? 'was' : 'vs'} ${fmtValue(head, head.baseline)}`}
+            {head.lift != null && <span className={cn('ml-1.5 font-semibold', liftClass(tier, head))}>{signed(shownChange(head))}</span>}
+          </span>
+        )}
+        <ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground transition-transform group-open/tier:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
+      </summary>
+      <div className="px-6 pt-1 pb-5 @2xl:pl-[4.25rem]">
+        <TierBody tier={tier} broken={broken} format={format} evidence={evidence} />
+      </div>
+    </details>
   );
 }
 
@@ -283,14 +305,28 @@ const formulas: [string, string][] = [
   ['Steps', 'each as a share of the previous one'],
 ];
 
-export function DiagnosisPanel({ diagnosis: d }: { diagnosis: Diagnosis }) {
+// `evidence` is optional per-layer content from outside the diagnosis: what the tags say was
+// in the ad at that layer, and account patterns the ad belongs to. The numbers stay the
+// panel's own; evidence only ever sits under them.
+// `afterVerdict` sits directly under the verdict: what to do about it belongs next to it.
+export function DiagnosisPanel({
+  diagnosis: d,
+  evidence,
+  afterVerdict,
+  footnote,
+}: {
+  diagnosis: Diagnosis;
+  evidence?: Partial<Record<DiagnosisTier['key'], React.ReactNode>>;
+  afterVerdict?: React.ReactNode;
+  footnote?: React.ReactNode;
+}) {
   const v = d.verdict;
   const Icon = v.kind === 'broken' ? AlertCircle : v.kind === 'healthy' ? CheckCircle2 : Clock;
   return (
     <section className="@container space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h2 className="text-sm font-semibold">Diagnosis (last 30 days)</h2>
-        <span className="text-sm text-muted-foreground">{`Compared with ${d.baseline_creatives} other ${d.format} creatives in this account`}</span>
+        <span className="text-sm text-muted-foreground">{`Compared with ${d.baseline_creatives} other ${d.format}${d.baseline_creatives === 1 ? '' : 's'} in this account`}</span>
       </div>
       <div className="overflow-hidden rounded-xl border border-border bg-card">
         <div
@@ -307,8 +343,9 @@ export function DiagnosisPanel({ diagnosis: d }: { diagnosis: Diagnosis }) {
             <span className="text-sm leading-relaxed text-muted-foreground">{v.detail}</span>
           </div>
         </div>
+        {afterVerdict}
         {d.tiers.map((t) => (
-          <TierRow key={t.key} tier={t} broken={t.tier === d.broken_tier} last={false} format={d.format} />
+          <TierRow key={t.key} tier={t} broken={t.tier === d.broken_tier} format={d.format} evidence={evidence?.[t.key]} />
         ))}
         <div className="flex flex-wrap gap-x-6 gap-y-1.5 bg-sidebar px-6 py-3.5 text-sm text-muted-foreground">
           {formulas.map(([name, def]) => (
@@ -317,6 +354,7 @@ export function DiagnosisPanel({ diagnosis: d }: { diagnosis: Diagnosis }) {
               {` = ${def}`}
             </span>
           ))}
+          {footnote && <p className="w-full pt-1">{footnote}</p>}
         </div>
       </div>
     </section>

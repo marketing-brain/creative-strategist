@@ -8,22 +8,24 @@ from cs.core.repo.partitions import ensure_metric_partition
 
 METRIC_CHUNK_SIZE = 1000
 
+# `MetricRow.raw` is not stored: the source row stays in the connector's own schema, and a
+# copy on every daily row only widened what each aggregate had to read past.
 _UPSERT_METRIC_SQL = """
     INSERT INTO metric_daily (org_id, ad_account_id, creative_id, ad_id, day, placement,
         spend, impressions, clicks, link_clicks, conversions, conversion_value,
-        video_3s_views, video_thruplay, video_p50, video_p100, raw,
+        video_3s_views, video_thruplay, video_p50, video_p100,
         reach, video_plays, video_p25, video_p75, video_p95, video_watch_seconds,
         landing_page_views, content_views, add_to_carts, checkouts, purchases,
         post_reactions, comments, saves,
         purchases_click_7d, purchases_view_1d, purchase_value_click_7d, purchase_value_view_1d)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
-            $18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+            $17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34)
     ON CONFLICT (creative_id, ad_id, day, placement) DO UPDATE SET
         spend=EXCLUDED.spend, impressions=EXCLUDED.impressions, clicks=EXCLUDED.clicks,
         link_clicks=EXCLUDED.link_clicks, conversions=EXCLUDED.conversions,
         conversion_value=EXCLUDED.conversion_value,
         video_3s_views=EXCLUDED.video_3s_views, video_thruplay=EXCLUDED.video_thruplay,
-        video_p50=EXCLUDED.video_p50, video_p100=EXCLUDED.video_p100, raw=EXCLUDED.raw,
+        video_p50=EXCLUDED.video_p50, video_p100=EXCLUDED.video_p100,
         reach=EXCLUDED.reach, video_plays=EXCLUDED.video_plays, video_p25=EXCLUDED.video_p25,
         video_p75=EXCLUDED.video_p75, video_p95=EXCLUDED.video_p95,
         video_watch_seconds=EXCLUDED.video_watch_seconds,
@@ -79,7 +81,6 @@ async def upsert_metrics(
                 r.video_thruplay,
                 r.video_p50,
                 r.video_p100,
-                r.raw,
                 r.reach,
                 r.video_plays,
                 r.video_p25,

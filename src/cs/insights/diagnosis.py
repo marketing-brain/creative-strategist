@@ -799,9 +799,9 @@ def context_tier(
         return tier
     tier.status = "on_par"
     tier.reason = (
-        f"The creative travels: no placement carrying {PLACEMENT_SHARE_FLOOR:.0%} or more of "
-        f"delivery is {LIFT_THRESHOLD:.0%} off its own average once the placement pattern of "
-        f"{tier.comparison} is taken out."
+        f"Performs evenly across placements. No placement with {PLACEMENT_SHARE_FLOOR:.0%} or "
+        f"more of delivery runs {LIFT_THRESHOLD:.0%} above or below this ad's own average, "
+        f"after adjusting for how {tier.comparison} do there."
     )
     return tier
 

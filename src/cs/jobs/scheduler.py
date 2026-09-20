@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from cs.core import queue
 from cs.core.config import Settings, get_settings
 from cs.core.db import Database
+from cs.core.repo import rollups
 
 log = logging.getLogger("cs.scheduler")
 
@@ -37,6 +38,13 @@ async def load_schedule_state(db: Database) -> dict[str, float]:
     """Last run of every schedule, as epoch seconds, so restarts do not re-fire."""
     rows = await db.fetch("SELECT name, last_run_at FROM schedule_state")
     return {r["name"]: r["last_run_at"].timestamp() for r in rows}
+
+
+async def schedule_paused(db: Database, name: str) -> bool:
+    """A schedule is paused by setting its last run far in the future, so it never comes due."""
+    return bool(
+        await db.fetchval("SELECT last_run_at > now() FROM schedule_state WHERE name = $1", name)
+    )
 
 
 async def _record_run(db: Database, name: str, now: float) -> None:
@@ -79,6 +87,13 @@ async def purge_done_jobs(db: Database, settings: Settings) -> None:
     n = await queue.purge_done(db, settings.job_retention_days)
     if n:
         log.info("purged finished jobs", extra={"count": n})
+
+
+@register_schedule("core.refresh_metric_rollups", every_seconds=3600)
+async def refresh_metric_rollups(db: Database, settings: Settings) -> None:
+    # The rollups cover "the last thirty days" as of their last refresh, so the window has
+    # to keep moving on days when no sync lands. Costs no paid call, so it is never paused.
+    await rollups.refresh(db)
 
 
 async def run_scheduler(settings: Settings | None = None) -> None:

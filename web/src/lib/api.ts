@@ -31,9 +31,14 @@ export const api = {
   creatives: (q: string) =>
     apiFetch<import('./types').Paginated<import('./types').Creative>>(`/creatives${q}`),
   creative: (id: string) => apiFetch<import('./types').Creative>(`/creatives/${id}`),
-  creativeMetrics: (id: string, since: string, until: string) =>
-    apiFetch<import('./types').MetricDay[]>(`/creatives/${id}/metrics?since=${since}&until=${until}`),
-  creativeDiagnosis: (id: string) => apiFetch<import('./types').Diagnosis>(`/creatives/${id}/diagnosis`),
+  creativeSummary: (id: string, scope: import('./types').Scope = 'footage') =>
+    apiFetch<import('./types').CreativeSummary>(`/creatives/${id}/summary?scope=${scope}`),
+  creativePatterns: (id: string) => apiFetch<import('./types').CreativePattern[]>(`/creatives/${id}/patterns`),
+  creativeFootage: (id: string) => apiFetch<import('./types').Footage>(`/creatives/${id}/footage`),
+  creativeMetrics: (id: string, since: string, until: string, scope: import('./types').Scope = 'footage') =>
+    apiFetch<import('./types').MetricDay[]>(`/creatives/${id}/metrics?since=${since}&until=${until}&scope=${scope}`),
+  creativeDiagnosis: (id: string, scope: import('./types').Scope = 'footage') =>
+    apiFetch<import('./types').Diagnosis>(`/creatives/${id}/diagnosis?scope=${scope}`),
   creativeInsight: (id: string) => apiFetch<import('./types').CreativeInsight>(`/creatives/${id}/insight`),
   creativeTags: (id: string) => apiFetch<import('./types').Tag[]>(`/creatives/${id}/tags`),
   dimensions: () => apiFetch<import('./types').Dimension[]>('/tags/dimensions'),

@@ -10,6 +10,7 @@ from cs.connectors.fivetran import client as fivetran_client
 from cs.core import queue, repo
 from cs.core.config import Settings
 from cs.core.db import Database
+from cs.core.repo import rollups
 from cs.ingest import assets, facebook_video, instagram_scrape
 from cs.ingest.fivetran import insights, transform
 from cs.jobs.registry import JobContext, handler
@@ -96,6 +97,12 @@ async def sync_from_fivetran(ctx: JobContext) -> None:
             "custom report not yet configured in Fivetran",
             extra={"org_id": str(ctx.job.org_id), "error": str(exc)[:500]},
         )
+    # The grid reads thirty-day totals from the rollups, so new metrics show only after this.
+    # A failed refresh leaves the last totals in place and the hourly schedule retries it.
+    try:
+        await rollups.refresh(ctx.db)
+    except Exception:  # noqa: BLE001
+        log.exception("metric rollup refresh failed", extra={"org_id": str(ctx.job.org_id)})
     await repo.set_meta_connection_status(
         ctx.db, conn_id, "ready", last_synced_at=datetime.now(UTC)
     )

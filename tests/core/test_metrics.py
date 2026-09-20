@@ -1,7 +1,6 @@
 from decimal import Decimal
 
 from cs.core.metrics import derived_metrics
-from cs.insights.patterns import metrics_from_sums
 
 
 def test_derived_metrics_formula_and_nulls():
@@ -15,7 +14,3 @@ def test_derived_metrics_formula_and_nulls():
         "cpa": None,
         "roas": None,
     }
-
-
-def test_insights_reexports_the_same_function():
-    assert metrics_from_sums is derived_metrics

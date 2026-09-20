@@ -28,14 +28,14 @@ describe('CreativeFilters', () => {
   it('offers only dimensions with enumerated values, not free-text ones', async () => {
     render(<CreativeFilters accounts={[]} dimensions={dimensions} />);
     await userEvent.click(screen.getByLabelText(/tag dimension/i));
-    expect(await screen.findByRole('option', { name: 'hook_type' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: 'hook type' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'hook_summary' })).not.toBeInTheDocument();
   });
 
   it('pushes the dimension alone when no value is picked yet', async () => {
     render(<CreativeFilters accounts={[]} dimensions={dimensions} />);
     await userEvent.click(screen.getByLabelText(/tag dimension/i));
-    await userEvent.click(await screen.findByRole('option', { name: 'hook_type' }));
+    await userEvent.click(await screen.findByRole('option', { name: 'hook type' }));
     expect(push).toHaveBeenCalledWith('/creatives?dimension=hook_type');
   });
 
@@ -47,33 +47,47 @@ describe('CreativeFilters', () => {
     expect(push).toHaveBeenCalledWith('/creatives?dimension=hook_type&value=question');
   });
 
-  it('pushes the sort metric, and drops it again for the newest-first default', async () => {
+  it('pushes the sort metric, and drops it again for the spend default', async () => {
     render(<CreativeFilters accounts={[]} dimensions={[]} />);
     await userEvent.click(screen.getByLabelText(/sort by/i));
-    await userEvent.click(await screen.findByRole('option', { name: 'Spend (30d)' }));
-    expect(push).toHaveBeenCalledWith('/creatives?sort=spend');
+    await userEvent.click(await screen.findByRole('option', { name: 'ROAS' }));
+    expect(push).toHaveBeenCalledWith('/creatives?sort=roas');
 
-    params = new URLSearchParams('sort=spend');
+    params = new URLSearchParams('sort=roas&order=asc');
     cleanup();
     render(<CreativeFilters accounts={[]} dimensions={[]} />);
     await userEvent.click(screen.getByLabelText(/sort by/i));
-    await userEvent.click(await screen.findByRole('option', { name: 'Newest' }));
+    await userEvent.click(await screen.findByRole('option', { name: 'Spend' }));
     expect(push).toHaveBeenCalledWith('/creatives');
   });
 
   it('toggles sort direction and keeps the chosen metric', async () => {
-    params = new URLSearchParams('sort=ctr');
+    params = new URLSearchParams('sort=link_ctr');
     render(<CreativeFilters accounts={[]} dimensions={[]} />);
     await userEvent.click(screen.getByLabelText(/high to low/i));
-    expect(push).toHaveBeenCalledWith('/creatives?sort=ctr&order=asc');
+    expect(push).toHaveBeenCalledWith('/creatives?sort=link_ctr&order=asc');
+  });
+
+  it('reads cost per purchase cheapest first, and only records a flip away from that', async () => {
+    params = new URLSearchParams('sort=cpa');
+    render(<CreativeFilters accounts={[]} dimensions={[]} />);
+    await userEvent.click(screen.getByLabelText(/low to high/i));
+    expect(push).toHaveBeenCalledWith('/creatives?sort=cpa&order=desc');
   });
 
   it('returns to page 1 when the sort changes', async () => {
-    params = new URLSearchParams('sort=spend&page=4');
+    params = new URLSearchParams('sort=roas&page=4');
     render(<CreativeFilters accounts={[]} dimensions={[]} />);
     await userEvent.click(screen.getByLabelText(/sort by/i));
-    await userEvent.click(await screen.findByRole('option', { name: 'CTR (30d)' }));
-    expect(push).toHaveBeenCalledWith('/creatives?sort=ctr');
+    await userEvent.click(await screen.findByRole('option', { name: 'Link CTR' }));
+    expect(push).toHaveBeenCalledWith('/creatives?sort=link_ctr');
+  });
+
+  it('searches after a pause in typing and returns to page 1', async () => {
+    params = new URLSearchParams('format=video&page=3');
+    render(<CreativeFilters accounts={[]} dimensions={[]} />);
+    await userEvent.type(screen.getByLabelText(/search creatives/i), 'cortisol');
+    await vi.waitFor(() => expect(push).toHaveBeenLastCalledWith('/creatives?format=video&q=cortisol'));
   });
 
   it('clears a stale value when the dimension changes', async () => {

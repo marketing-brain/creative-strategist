@@ -9,7 +9,8 @@ from cs.core.db import Database
 from cs.insights import repo
 from cs.insights.brief import render_brief
 from cs.insights.creative_insight import GeminiGatewayInsightWriter, InsightWriter
-from cs.insights.creative_insight_runner import FORMATS, write_creative_insight
+from cs.insights.creative_insight_gates import FORMATS, NIGHTLY_SCHEDULE
+from cs.insights.creative_insight_runner import write_creative_insight
 from cs.insights.diagnosis import ATTENTION_FLOOR
 from cs.insights.explain import Explainer, GeminiGatewayExplainer
 from cs.insights.fatigue import compute_fatigue
@@ -142,7 +143,7 @@ async def creative_insight(ctx: JobContext) -> None:
     await write_creative_insight(ctx, creative_id, INSIGHT_WRITER_FACTORY(ctx.settings))
 
 
-@register_schedule("insights.nightly_creative_insights", every_seconds=86400)
+@register_schedule(NIGHTLY_SCHEDULE, every_seconds=86400)
 async def nightly_creative_insights(db: Database, settings: Settings) -> None:
     """Pick up creatives that were too new to read when they were tagged, and videos, which
     are not tagged while video tagging is off. Each still gets one insight at most;

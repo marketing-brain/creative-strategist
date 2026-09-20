@@ -7,16 +7,15 @@ from typing import Literal
 from uuid import UUID
 
 from cs.core import repo as ingest_repo
-from cs.ingest.durations import unprobed_video_creatives
 from cs.insights import repo
 from cs.insights.creative_insight import (
     SYSTEM,
     InsightWriter,
     grounding_problems,
-    is_readable,
     render_brief,
     user_text,
 )
+from cs.insights.creative_insight_gates import insight_blocker
 from cs.insights.diagnose_creative import diagnose_creative
 from cs.jobs.registry import JobContext
 from cs.tagging.prompts import prompt_sha
@@ -24,8 +23,6 @@ from cs.tagging.runner import load_media
 from cs.tagging.video import probe_duration_ms
 
 log = logging.getLogger("cs.insights.creative_insight")
-
-FORMATS = ("image", "video", "carousel")
 
 Outcome = Literal[
     "exists",
@@ -42,35 +39,29 @@ Outcome = Literal[
 async def write_creative_insight(
     ctx: JobContext, creative_id: UUID, writer: InsightWriter, until: date | None = None
 ) -> Outcome:
-    """Write the creative's one insight paragraph, if it has none yet and its metrics are
-    readable. Unreadable creatives get nothing, so the nightly sweep can try again later.
+    """Write the creative's one insight paragraph, if its footage has none yet and its
+    metrics are readable. The paragraph is about the file, so it is written once per footage
+    group over the group's pooled numbers, and every copy of the file shows it. Unreadable
+    creatives get nothing, so the nightly sweep can try again later.
     A draft that fails the grounding check is retried once with the problems named; a
     second failure is stored as 'rejected' and never shown."""
     org_id = ctx.job.org_id
-    if await repo.get_creative_insight(ctx.db, org_id, creative_id) is not None:
+    member_ids = await ingest_repo.footage_member_ids(ctx.db, org_id, creative_id)
+    if await repo.get_footage_insight(ctx.db, org_id, member_ids) is not None:
         return "exists"
     creative = await ingest_repo.get_creative(ctx.db, org_id, creative_id)
-    if creative is None or not creative["primary_asset_path"]:
+    if creative is None:
         return "no_asset"
     fmt = creative["format"]
-    if fmt not in FORMATS:
-        return "unresolved"
-    cap = ctx.settings.creative_insight_limit_per_format
-    if await repo.count_creative_insights(ctx.db, org_id, fmt) >= cap:
-        # Checked before any model call. One worker runs these jobs serially, so the count
-        # cannot be overtaken between this check and the insert below.
-        return "format_limit"
-    if fmt == "video" and await unprobed_video_creatives(
-        ctx.db, 1, creative["ad_account_id"], exclude_creative_id=creative_id
-    ):
-        # Retention compares only videos of similar length. Writing this once while peers'
-        # lengths are still being backfilled would leave retention unreadable for good;
-        # the nightly sweep tries again once they are probed.
-        return "lengths_pending"
     until = until or datetime.now(UTC).date()
-    diagnosed = await diagnose_creative(ctx.db, org_id, creative, until)
-    if not is_readable(diagnosed):
-        return "unreadable"
+    # One worker runs these jobs serially, so the cap count checked here cannot be
+    # overtaken before the insert below.
+    blocker, diagnosed = await insight_blocker(
+        ctx.db, ctx.settings, org_id, creative, until, member_ids
+    )
+    if blocker is not None:
+        return blocker
+    assert diagnosed is not None
 
     images, video = await load_media(ctx, creative)
     duration_ms = creative["primary_asset_duration_ms"]
@@ -81,7 +72,9 @@ async def write_creative_insight(
         await ingest_repo.set_asset_duration(
             ctx.db, org_id, creative["primary_asset_id"], duration_ms
         )
-        diagnosed = await diagnose_creative(ctx.db, org_id, creative, until, duration_ms)
+        diagnosed = await diagnose_creative(
+            ctx.db, org_id, creative, until, duration_ms, member_ids
+        )
 
     brief = render_brief(creative, diagnosed, duration_ms)
     feedback: list[str] | None = None

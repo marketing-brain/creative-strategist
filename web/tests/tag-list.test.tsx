@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { TagList } from '@/components/tag-list';
+import { ConceptSummary, TagList } from '@/components/tag-list';
 import type { Dimension, Tag } from '@/lib/types';
 
 const dim = (name: string, group: string, kind: Dimension['kind']): Dimension => ({
@@ -36,12 +36,43 @@ describe('TagList', () => {
     );
     expect(screen.getByText('90%')).toBeInTheDocument();
     expect(screen.getByText('93.2')).toBeInTheDocument();
-    expect(screen.getByText('warning_or_risk')).toBeInTheDocument();
-    expect(screen.getByText('@1.5s')).toBeInTheDocument();
-    expect(screen.getByText('hook 0s → problem 5s')).toBeInTheDocument();
-    const chip = screen.getByText('pharmacist_warning');
-    expect(chip).toBeInTheDocument();
+    // Slugs read as words; a lone group preview repeats the value, so match the chip.
+    expect(screen.getAllByText('warning or risk').length).toBeGreaterThan(0);
+    expect(screen.getByText('1.5s')).toBeInTheDocument();
+    const beats = screen.getByText('beats').closest('li');
+    expect(beats?.textContent).toBe('beatshook0sproblem5s');
+    // The group's collapsed preview repeats the value; the chip is the one inside a list item.
+    const chip = screen.getAllByText('pharmacist warning').find((el) => el.closest('li'))!;
     expect(chip.closest('li')?.textContent).not.toMatch(/%/);
+    // The opening line is lifted out to sit beside the insight, not listed among the tags.
+    expect(screen.queryByText('Worst OTC Sleep Aids!!')).not.toBeInTheDocument();
+  });
+
+  it('collapses each group behind a summary with its count', () => {
+    const { container } = render(
+      <TagList
+        dimensions={[dim('hook_devices', 'hook', 'multi')]}
+        tags={[tag({ dimension: 'hook_devices', kind: 'multi', value: 'question', t_start_s: 0 })]}
+      />,
+    );
+    const details = container.querySelector('details');
+    expect(details?.open).toBe(false);
+    expect(details?.querySelector('summary')?.textContent).toContain('Hook1');
+  });
+
+  it('makes timestamps seek the video only when asked to', () => {
+    const tags = [tag({ dimension: 'hook_devices', kind: 'multi', value: 'question', t_start_s: 4 })];
+    const dims = [dim('hook_devices', 'hook', 'multi')];
+    const { unmount } = render(<TagList dimensions={dims} tags={tags} />);
+    expect(screen.queryByRole('button', { hidden: true })).not.toBeInTheDocument();
+    unmount();
+    render(<TagList dimensions={dims} tags={tags} seekable />);
+    expect(screen.getByRole('button', { name: 'Play the video from 4s', hidden: true })).toBeInTheDocument();
+  });
+
+  it('lifts the concept and opening line into the summary', () => {
+    render(<ConceptSummary tags={[tag({ dimension: 'hook_verbatim', kind: 'text', value: 'Worst OTC Sleep Aids!!' })]} />);
+    expect(screen.getByText('Opening line')).toBeInTheDocument();
     expect(screen.getByText('Worst OTC Sleep Aids!!')).toBeInTheDocument();
   });
 });

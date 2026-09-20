@@ -86,7 +86,7 @@ async def test_member_cannot_activate(client, db, settings):
 
 async def test_creatives_list_detail_metrics(client, db, settings):
     _, _, cid, _ = await _seed(db, settings, client)
-    r = await client.get("/creatives", headers=H)
+    r = await client.get("/creatives?delivery=all", headers=H)
     body = r.json()
     assert r.status_code == 200 and body["total"] == 1
     assert body["items"][0]["primary_asset_url"].endswith("/blobs/o/c1/original.png")
@@ -105,10 +105,14 @@ async def test_other_org_cannot_see_creatives(client, db, settings):
 
 async def test_creatives_limit_is_validated(client, db, settings):
     await _seed(db, settings, client)
-    assert (await client.get("/creatives?limit=-1", headers=H)).status_code == 422
-    assert (await client.get("/creatives?limit=201", headers=H)).status_code == 422
-    assert (await client.get("/creatives?offset=-1", headers=H)).status_code == 422
-    assert (await client.get("/creatives?limit=200", headers=H)).status_code == 200
+    r = await client.get("/creatives?delivery=all&limit=-1", headers=H)
+    assert r.status_code == 422
+    r = await client.get("/creatives?delivery=all&limit=201", headers=H)
+    assert r.status_code == 422
+    r = await client.get("/creatives?delivery=all&offset=-1", headers=H)
+    assert r.status_code == 422
+    r = await client.get("/creatives?delivery=all&limit=200", headers=H)
+    assert r.status_code == 200
 
 
 async def test_creatives_pagination(client, db, settings):
@@ -124,13 +128,13 @@ async def test_creatives_pagination(client, db, settings):
             "raw",
             format_source="manual_review",
         )
-    full = (await client.get("/creatives?limit=200", headers=H)).json()
+    full = (await client.get("/creatives?delivery=all&limit=200", headers=H)).json()
     assert full["total"] == 3 and len(full["items"]) == 3
 
-    page1 = (await client.get("/creatives?limit=2&offset=0", headers=H)).json()
+    page1 = (await client.get("/creatives?delivery=all&limit=2&offset=0", headers=H)).json()
     assert page1["total"] == 3 and len(page1["items"]) == 2
 
-    page2 = (await client.get("/creatives?limit=2&offset=2", headers=H)).json()
+    page2 = (await client.get("/creatives?delivery=all&limit=2&offset=2", headers=H)).json()
     assert page2["total"] == 3 and len(page2["items"]) == 1
 
     page1_ids = {i["id"] for i in page1["items"]}
@@ -170,7 +174,7 @@ async def test_creatives_filter_by_tag(client, db, settings):
         1,
     )
 
-    r = await client.get("/creatives?dimension=hook_type&value=question", headers=H)
+    r = await client.get("/creatives?delivery=all&dimension=hook_type&value=question", headers=H)
     body = r.json()
     assert r.status_code == 200 and body["total"] == 1
     assert body["items"][0]["id"] == str(cid)
@@ -178,8 +182,12 @@ async def test_creatives_filter_by_tag(client, db, settings):
 
 async def test_creatives_tag_filter_requires_both_params(client, db, settings):
     await _seed(db, settings, client)
-    assert (await client.get("/creatives?dimension=hook_type", headers=H)).status_code == 422
-    assert (await client.get("/creatives?value=question", headers=H)).status_code == 422
+    assert (
+        await client.get("/creatives?delivery=all&dimension=hook_type", headers=H)
+    ).status_code == 422
+    assert (
+        await client.get("/creatives?delivery=all&value=question", headers=H)
+    ).status_code == 422
 
 
 async def test_creatives_spend_30d_excludes_older_metrics(client, db, settings):
@@ -238,10 +246,10 @@ async def test_creatives_spend_30d_excludes_older_metrics(client, db, settings):
         ],
     )
 
-    body = (await client.get("/creatives?limit=200", headers=H)).json()
+    body = (await client.get("/creatives?delivery=all&limit=200", headers=H)).json()
     recent = next(i for i in body["items"] if i["id"] == str(recent_cid))
     assert recent["spend_30d"] == 50.0
-    assert recent["ctr_30d"] == 0.02
+    assert recent["totals"]["link_ctr"] == 0.02
 
 
 async def test_creatives_spend_30d_defaults_to_zero_with_no_metrics(client, db, settings):
@@ -257,10 +265,10 @@ async def test_creatives_spend_30d_defaults_to_zero_with_no_metrics(client, db, 
         format_source="manual_review",
     )
 
-    body = (await client.get("/creatives?limit=200", headers=H)).json()
+    body = (await client.get("/creatives?delivery=all&limit=200", headers=H)).json()
     zero = next(i for i in body["items"] if i["id"] == str(zero_cid))
     assert zero["spend_30d"] == 0.0
-    assert zero["ctr_30d"] is None
+    assert zero["totals"]["link_ctr"] is None
 
 
 async def test_creative_metrics_counts_are_integers(client, db, settings):
@@ -315,7 +323,7 @@ async def _seed_spender(db, org_id, acct, slug, spend, impressions, clicks):
 
 
 async def _sorted_ids(client, query, limit=200):
-    body = (await client.get(f"/creatives?limit={limit}&{query}", headers=H)).json()
+    body = (await client.get(f"/creatives?delivery=all&limit={limit}&{query}", headers=H)).json()
     return [i["id"] for i in body["items"]]
 
 
@@ -361,10 +369,17 @@ async def test_creatives_sort_by_ctr_keeps_undelivered_last_both_ways(client, db
 
 async def test_creatives_sort_is_validated(client, db, settings):
     await _seed(db, settings, client)
-    assert (await client.get("/creatives?sort=spend; DROP TABLE", headers=H)).status_code == 422
-    assert (await client.get("/creatives?sort=clicks", headers=H)).status_code == 422
-    assert (await client.get("/creatives?order=sideways", headers=H)).status_code == 422
-    assert (await client.get("/creatives?sort=ctr&order=asc", headers=H)).status_code == 200
+    assert (
+        await client.get("/creatives?delivery=all&sort=spend; DROP TABLE", headers=H)
+    ).status_code == 422
+    r = await client.get("/creatives?delivery=all&sort=clicks", headers=H)
+    assert r.status_code == 422
+    assert (
+        await client.get("/creatives?delivery=all&order=sideways", headers=H)
+    ).status_code == 422
+    assert (
+        await client.get("/creatives?delivery=all&sort=ctr&order=asc", headers=H)
+    ).status_code == 200
 
 
 async def test_creatives_paging_is_stable_across_tied_rows(client, db, settings):

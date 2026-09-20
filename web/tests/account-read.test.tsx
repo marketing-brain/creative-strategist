@@ -1,6 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { AccountReadSection } from '@/components/account-read';
+import { buildAccountReadView } from '@/lib/account-read-view';
 import type { AccountRead, AccountReadTest } from '@/lib/types';
 
 const test = (over: Partial<AccountReadTest> = {}): AccountReadTest => ({
@@ -23,21 +24,32 @@ const done: AccountRead = {
   error: null,
 };
 
+const section = (d: AccountRead) => <AccountReadSection status={d.status} nUnits={d.n_units} view={buildAccountReadView(d)} />;
+
 describe('AccountReadSection', () => {
   it('renders the insufficient state with the unit count', () => {
-    render(<AccountReadSection data={{ ...done, status: 'insufficient', n_units: 4, read: null }} />);
+    render(section({ ...done, status: 'insufficient', n_units: 4, read: null }));
     expect(screen.getByText(/needs 10 tagged video files/i)).toBeInTheDocument();
     expect(screen.getByText(/has 4/i)).toBeInTheDocument();
   });
 
-  it('renders findings with mechanism and expands evidence on the evidence toggle', () => {
-    render(<AccountReadSection data={done} />);
+  it('points to Ask when the written read failed its checks', () => {
+    render(section({ ...done, status: 'rejected', read: null, error: 'claim P9 not grounded' }));
+    expect(screen.getByRole('link', { name: /put a question/i })).toHaveAttribute('href', '/ask');
+    expect(screen.queryByText(/not grounded/)).not.toBeInTheDocument();
+  });
+
+  it('shows each cited attribute across the whole funnel, with the file linked', () => {
+    const d = { ...done, tests: [test(), test({ metric: 'cpa', change: 0.2, cell_value: 48, comp_value: 40, grade: 'directional' })] };
+    render(section(d));
     expect(screen.getByText('Warning hooks earn the click')).toBeInTheDocument();
     expect(screen.getByText(/frames the category as risky/)).toBeInTheDocument();
-    expect(screen.getByText(/Every warning ad is also a pharmacist/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /^Evidence/ }));
-    expect(screen.getByText(/hook devices = warning or risk/)).toBeInTheDocument();
-    // the paragraph already carries the numbers; the evidence line adds a second occurrence
-    expect(screen.getAllByText(/4\.5% with vs 3\.0% without/).length).toBeGreaterThan(1);
+    expect(screen.getByText('hook devices: warning or risk')).toBeInTheDocument();
+    expect(screen.getByText('+50%')).toBeInTheDocument();
+    // the uncited CPA sibling rides along, so a click win that costs more per purchase is visible
+    expect(screen.getByText('+20%')).toHaveClass('text-destructive');
+    expect(screen.getAllByText('not tested')).toHaveLength(3);
+    expect(screen.getByRole('link', { name: /Worst OTC sleep aids/ })).toHaveAttribute('href', '/creatives/c1');
+    expect(screen.getByText(/about 0 would|comparisons run/)).toBeInTheDocument();
   });
 });

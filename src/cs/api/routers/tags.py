@@ -24,9 +24,13 @@ async def creative_tags(
 ) -> list[dict]:
     if not await ingest_repo.get_creative(db, auth.org_id, creative_id):
         raise HTTPException(404)
+    # Tags describe the file. A copy that was never tagged itself shows the tags of another
+    # creative running the same file; its own tags win when it has them.
+    ids = await ingest_repo.footage_member_ids(db, auth.org_id, creative_id)
+    ordered = [creative_id, *[i for i in ids if i != creative_id]]
     return [
         {**dict(r), "confidence": round(float(r["confidence"]), 4)}
-        for r in await repo.latest_tags(db, auth.org_id, creative_id)
+        for r in await repo.footage_latest_tags(db, auth.org_id, ordered)
         if r["dimension"] != "transcript"
     ]
 

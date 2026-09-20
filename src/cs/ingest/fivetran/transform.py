@@ -24,6 +24,7 @@ from cs.ingest.fivetran.schema import (
     VIDEO_FULL_WATCH_TABLE,
     VIDEO_RETENTION_AD,
 )
+from cs.ingest.posters import meta_thumbnails
 from cs.jobs.registry import JobContext
 
 log = logging.getLogger("cs.ingest")
@@ -480,4 +481,9 @@ async def discover_and_sync_entities(
         pid: aid for pid, aid in accounts_by_platform_id.items() if aid in active_ids
     }
     counts = await _sync_ads_and_creatives(ctx.db, org_id, schema, active_by_platform_id)
+    # Display only, so nothing about the sync depends on it.
+    try:
+        counts["meta_thumbnails"] = await meta_thumbnails(ctx.db, ctx.blobs, org_id)
+    except Exception as exc:
+        log.warning("Meta thumbnails failed for org %s: %s", org_id, exc)
     return {"accounts_discovered": len(accounts_by_platform_id), **counts}
