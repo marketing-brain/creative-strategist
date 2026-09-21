@@ -1,8 +1,7 @@
 import { CopyBrief, SeekButton } from '@/components/creative-detail-client';
-import { layerName } from '@/components/diagnosis-panel';
 import { label, secs, words } from '@/components/tag-list';
 import type { Formatters } from '@/lib/format';
-import type { CreativePattern, Diagnosis, DiagnosisPlacement, DiagnosisTier, Tag } from '@/lib/types';
+import type { CreativePattern, Diagnosis, DiagnosisTier, Tag } from '@/lib/types';
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
 const valuesOf = (tags: Tag[], dimension: string) => tags.filter((t) => t.dimension === dimension && t.value && t.value !== 'none');
@@ -78,10 +77,9 @@ function ItemGroup({ title, items }: { title: string; items: Item[] }) {
   );
 }
 
-// Fatigue and Context have no account patterns (the account read does not test their
-// metrics), so their rows come from the layer's own figures, at the diagnosis's own bar.
+// Fatigue has no account patterns (the account read does not test its metrics), so its rows
+// come from the layer's own figures, at the diagnosis's own bar.
 const BAR = 0.15; // diagnosis.LIFT_THRESHOLD
-const PLACEMENT_SHARE_FLOOR = 0.2; // diagnosis.PLACEMENT_SHARE_FLOOR
 
 function ownItems(tier: DiagnosisTier): Item[] {
   if (tier.key === 'fatigue')
@@ -96,15 +94,6 @@ function ownItems(tier: DiagnosisTier): Item[] {
         what: 'last 7 days against the 14 before',
         hover: m.note,
       }));
-  if (tier.key === 'context')
-    // Fit, as the layer computes it: how the ad does in a placement against its own average,
-    // after taking out how similar videos do there. Only placements carrying real delivery.
-    return (tier.placements ?? []).flatMap((pl) => {
-      const fit = pl.hook_fit ?? pl.ctr_fit;
-      const metric = pl.hook_fit != null ? 'hook rate' : 'link CTR';
-      if (fit == null || (pl.share ?? 0) < PLACEMENT_SHARE_FLOOR || Math.abs(fit) < BAR) return [];
-      return [{ key: `${pl.platform}/${pl.position}`, change: fit, good: fit > 0, metric, what: `on ${pl.label}, compared with where else it ran`, hover: `${Math.round((pl.share ?? 0) * 100)}% of delivery` }];
-    });
   return [];
 }
 
@@ -118,8 +107,7 @@ const TIER_TAGS: Record<DiagnosisTier['key'], string[]> = {
   retention: [],
   conversion: ['offer_elements', 'proof_devices', 'cta_modes'],
   fatigue: [],
-  // How the ad is made, which decides whether it looks native where Meta ran it.
-  context: ['aspect_ratio', 'production', 'messenger', 'captions', 'native_format_cues'],
+  context: [],
 };
 
 function Stamp({ t, seekable }: { t: number | null; seekable: boolean }) {
@@ -211,90 +199,7 @@ const ROW_LABELS: Record<string, string> = {
   offer_elements: 'Offer',
   proof_devices: 'Proof',
   cta_modes: 'CTA',
-  aspect_ratio: 'Shape',
-  captions: 'Text',
-  native_format_cues: 'Looks like',
-  production: 'Filmed',
-  messenger: 'On camera',
 };
-
-// Plain words for the format facts, so the Context layer reads without ad jargon.
-const PLAIN: Record<string, Record<string, string>> = {
-  aspect_ratio: { '9:16': 'vertical, fills a phone screen (9:16)', '4:5': 'tall, made for feeds (4:5)', '1:1': 'square (1:1)', '16:9': 'wide, like TV (16:9)' },
-  captions: { none: 'no text', subtitles: 'subtitles of what is said', text_cards: 'text cards', both: 'subtitles and text cards' },
-  production: {
-    phone_ugc: 'on a phone',
-    polished_studio: 'in a studio, polished',
-    motion_graphics: 'as motion graphics',
-    mixed_ugc_broll: 'on a phone, mixed with stock footage',
-    screen_capture: 'as a screen recording',
-  },
-  setting: { home: 'at home', outdoor: 'outdoors', studio_or_neutral: 'against a studio or plain backdrop', screen: 'on screen' },
-  messenger: {
-    creator_on_camera: 'a creator talking to camera',
-    creator_off_camera: 'a creator, heard but not seen',
-    expert_on_camera: 'an expert talking to camera',
-    founder_on_camera: 'the founder talking to camera',
-    actor_scripted: 'an actor, scripted',
-    multiple_people: 'several people',
-    graphic_only: 'no people, graphics only',
-  },
-  native_format_cues: {
-    platform_caption_style: "the app's own caption style",
-    green_screen: 'a green-screen video',
-    reply_to_comment: 'a reply to a comment',
-    duet_or_stitch: 'a duet or stitch',
-    social_post_screenshot: 'a screenshot of a social post',
-    message_screenshot: 'a screenshot of a message',
-  },
-};
-const plain = (d: string, v: string) => PLAIN[d]?.[v] ?? words(v);
-// "Filmed" is one phrase from two tags: how it was shot and where ("on a phone, at home").
-function contextText(d: string, v: string, tags: Tag[]) {
-  if (d !== 'production') return plain(d, v);
-  const where = valuesOf(tags, 'setting')[0];
-  return where && PLAIN.setting[where.value] ? `${plain(d, v)}, ${PLAIN.setting[where.value]}` : plain(d, v);
-}
-
-// Where Meta spent this ad's delivery, as one bar split by placement. Placements the ad does
-// clearly better or worse on (the layer's own fit rule: 20%+ of delivery, 15%+ against its
-// other placements) are tinted; the rest are grey. Slivers under 4% are pooled as "other".
-function WhereItRan({ placements }: { placements: DiagnosisPlacement[] }) {
-  const rows = placements.filter((p) => p.share != null && p.share > 0).sort((a, b) => (b.share ?? 0) - (a.share ?? 0));
-  if (!rows.length) return null;
-  const big = rows.filter((p) => (p.share ?? 0) >= 0.04);
-  const other = rows.filter((p) => (p.share ?? 0) < 0.04).reduce((t, p) => t + (p.share ?? 0), 0);
-  const tint = (p: DiagnosisPlacement) => {
-    const fit = p.hook_fit ?? p.ctr_fit;
-    if (fit == null || (p.share ?? 0) < 0.2 || Math.abs(fit) < 0.15) return 'bg-muted-foreground/25';
-    return fit > 0 ? 'bg-success/40' : 'bg-destructive/40';
-  };
-  const name = (p: DiagnosisPlacement) => p.label.replace(' · ', ' ');
-  const segs = [...big.map((p) => ({ key: `${p.platform}/${p.position}`, label: name(p), share: p.share as number, cls: tint(p) })), ...(other > 0 ? [{ key: 'other', label: 'other', share: other, cls: 'bg-muted-foreground/10' }] : [])];
-  return (
-    <dl className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 text-sm">
-      <dt className="text-muted-foreground">Ran on</dt>
-      <dd className="min-w-0">
-        <div className="flex h-7 w-full overflow-hidden rounded-md">
-          {segs.map((sg) => (
-            <div key={sg.key} className={`flex min-w-0 items-center justify-center border-r border-background px-1 last:border-r-0 ${sg.cls}`} style={{ width: `${sg.share * 100}%` }} title={`${sg.label}: ${Math.round(sg.share * 100)}% of this ad's delivery`}>
-              {sg.share >= 0.2 && <span className="truncate text-xs">{`${sg.label} ${Math.round(sg.share * 100)}%`}</span>}
-            </div>
-          ))}
-        </div>
-        {/* Segments too narrow to name inside the bar are named here, in the same order. */}
-        {segs.some((sg) => sg.share < 0.2) && (
-          <p className="mt-1 text-muted-foreground">
-            {`Also ${segs
-              .filter((sg) => sg.share < 0.2)
-              .map((sg) => `${sg.label} ${Math.round(sg.share * 100)}%`)
-              .join(', ')}`}
-          </p>
-        )}
-      </dd>
-    </dl>
-  );
-}
 
 function TierEvidence({
   tier,
@@ -321,8 +226,8 @@ function TierEvidence({
           .sort((a, b) => (a.t_start_s ?? 0) - (b.t_start_s ?? 0))
       : [];
   const own = ownItems(tier);
-  const hurting = tier.key === 'fatigue' || tier.key === 'context' ? own.filter((i) => !i.good) : traits.hurting.map((p) => patternItem(p, fmt));
-  const helping = tier.key === 'fatigue' || tier.key === 'context' ? own.filter((i) => i.good) : traits.helping.map((p) => patternItem(p, fmt));
+  const hurting = tier.key === 'fatigue' ? own.filter((i) => !i.good) : traits.hurting.map((p) => patternItem(p, fmt));
+  const helping = tier.key === 'fatigue' ? own.filter((i) => i.good) : traits.helping.map((p) => patternItem(p, fmt));
   // Attention and Retention are label-column rows all the way down, so nothing needs dividing;
   // the other layers still separate their metric blocks from the evidence under them.
   // Every layer is label-column rows now, so nothing needs a divider.
@@ -331,7 +236,6 @@ function TierEvidence({
     // Attention prints no numbers of its own, so nothing sits above to divide it from.
     <div className={rowsOnly ? 'space-y-4' : 'space-y-4 border-t border-dashed border-border pt-4'}>
       {attention && <OpeningLines tags={tags} seekable={seekable} />}
-      {tier.key === 'context' && tier.placements && <WhereItRan placements={tier.placements} />}
       {(rows.length > 0 || drop) && (
         <div className="space-y-2">
           {drop && (
@@ -354,7 +258,7 @@ function TierEvidence({
                   <dd className="flex min-w-0 flex-wrap gap-x-3">
                     {v.map((t, i) => (
                       <span key={`${t.value}-${i}`}>
-                        {tier.key === 'context' ? contextText(d, t.value, tags) : words(t.value)} {tier.key !== 'context' && <Stamp t={t.t_start_s} seekable={seekable} />}
+                        {words(t.value)} <Stamp t={t.t_start_s} seekable={seekable} />
                       </span>
                     ))}
                   </dd>
@@ -395,8 +299,15 @@ export function tierEvidence(diagnosis: Diagnosis, tags: Tag[], patterns: Creati
 }
 
 // Said once, under the panel, for every account pattern on the page.
-export const PATTERN_FOOTNOTE =
-  'Account patterns compare videos in this account that share a trait with those that do not. They are measured across videos, not inside this ad, so each one is a lead to test and not the cause of this ad’s numbers.';
+// The one line under the panel for every account pattern on the page: what they compare, over
+// which days (the account read's own window, not the 30 days above), and that they are leads.
+const short = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+export function patternFootnote(patterns: CreativePattern[]): string | null {
+  const p = patterns[0];
+  if (!p) return null;
+  const when = p.window_start && p.window_end ? ` (${short(p.window_start)} – ${short(p.window_end)})` : '';
+  return `Hurting and Helping compare this account's videos with and without each trait${when}. They're leads to test, not causes.`;
+}
 
 // ---- what to test next ---------------------------------------------------------------------
 
@@ -540,14 +451,15 @@ export function NextTests({
   patterns: CreativePattern[];
   fmt: Formatters;
 }) {
-  const weak = diagnosis.tiers.filter((t) => t.status === 'weak');
+  // The context layer (placement fit) is not shown on the page, so it never frames a test.
+  const weak = diagnosis.tiers.filter((t) => t.status === 'weak' && t.key !== 'context');
   const leads = leadsFor(diagnosis, patterns, tags, fmt);
   if (!weak.length || !leads.length) return null;
   const problem = weak
     .map((t) => {
       const m = t.metrics.find((x) => x.value != null && x.baseline != null);
       const show = (v: number | null) => (v == null ? '–' : m?.key === 'cpa' ? fmt.money(v) : m?.key === 'frequency' ? v.toFixed(1) : fmt.pct(v, 1));
-      return m ? `${layerName(t)} is weak: ${m.label.toLowerCase()} ${show(m.value)} vs ${show(m.baseline)} for the account.` : `${layerName(t)} is weak.`;
+      return m ? `${t.name} is weak: ${m.label.toLowerCase()} ${show(m.value)} vs ${show(m.baseline)} for the account.` : `${t.name} is weak.`;
     })
     .join(' ');
   const opening = tags.find((t) => t.dimension === 'hook_verbatim' || t.dimension === 'hook_summary')?.value;

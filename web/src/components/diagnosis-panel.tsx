@@ -236,10 +236,6 @@ function FunnelRow({ steps }: { steps: DiagnosisStep[] }) {
   );
 }
 
-// The API calls the fifth layer "Context"; on the page it covers how Meta is spending on the
-// ad and whether the creative suits where it runs, so it reads as "Delivery".
-export const layerName = (tier: DiagnosisTier) => (tier.key === 'context' ? 'Delivery' : tier.name);
-
 // A chart for one layer, drawn from outside the diagnosis, with its row label.
 export type LayerChart = { label: string; node: React.ReactNode };
 
@@ -287,7 +283,7 @@ function TierRow({ tier, broken, converting, evidence, chart }: { tier: Diagnosi
             amber rather than red, so the row does not contradict the verdict above it. */}
         <div className={cn('flex size-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold tabular-nums', amber ? 'bg-chart-2 text-primary-foreground' : railClass[tier.status])}>{tier.tier}</div>
         <span className={cn('w-24 shrink-0 text-base font-semibold', tier.status === 'not_measured' && 'text-muted-foreground')} title={tier.question}>
-          {layerName(tier)}
+          {tier.name}
         </span>
         <Pill tier={tier} className={amber ? 'bg-chart-2/15 text-chart-2' : undefined} />
         {head && head.value != null && (
@@ -305,15 +301,6 @@ function TierRow({ tier, broken, converting, evidence, chart }: { tier: Diagnosi
     </details>
   );
 }
-
-const formulas: [string, string][] = [
-  ['Hook rate', '3s views ÷ impressions'],
-  ['Hold rate', 'ThruPlay ÷ 3s views'],
-  ['Link CTR', 'link clicks ÷ impressions'],
-  ['Frequency', 'impressions ÷ reach'],
-  ['Engagement', 'reactions + comments + saves ÷ impressions'],
-  ['Steps', 'each as a share of the previous one'],
-];
 
 // `evidence` is optional per-layer content from outside the diagnosis: what the tags say was
 // in the ad at that layer, and account patterns the ad belongs to. The numbers stay the
@@ -361,18 +348,13 @@ export function DiagnosisPanel({
           </div>
         </div>
         {afterVerdict}
-        {d.tiers.map((t) => (
+        {/* Placement fit (the API's context layer) is left off the page: under Advantage+ Meta
+            picks the placements, and the verdict already leaves it out. */}
+        {d.tiers.filter((t) => t.key !== 'context').map((t) => (
           <TierRow key={t.key} tier={t} broken={t.tier === d.broken_tier} converting={!!v.converting} evidence={evidence?.[t.key]} chart={charts?.[t.key]} />
         ))}
-        <div className="flex flex-wrap gap-x-6 gap-y-1.5 bg-sidebar px-6 py-3.5 text-sm text-muted-foreground">
-          {formulas.map(([name, def]) => (
-            <span key={name}>
-              <span className="font-medium text-foreground">{name}</span>
-              {` = ${def}`}
-            </span>
-          ))}
-          {footnote && <p className="w-full pt-1">{footnote}</p>}
-        </div>
+        {/* Metric definitions live on the header's labels (hover), where the numbers are. */}
+        {footnote && <p className="bg-sidebar px-6 py-3 text-sm text-muted-foreground">{footnote}</p>}
       </div>
     </section>
   );

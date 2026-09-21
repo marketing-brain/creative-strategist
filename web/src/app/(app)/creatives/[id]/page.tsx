@@ -1,12 +1,11 @@
 import { cache } from 'react';
 import type { Metadata } from 'next';
 import { ClampedCopy, CreativeMedia } from '@/components/creative-detail-client';
-import { NextTests, PATTERN_FOOTNOTE, tierEvidence } from '@/components/ad-profile';
+import { NextTests, patternFootnote, tierEvidence } from '@/components/ad-profile';
 import { FatigueChart } from '@/components/fatigue-chart';
 import { CreativeHeader, SectionNav, creativeTitle } from '@/components/creative-header';
 import { DiagnosisPanel } from '@/components/diagnosis-panel';
 import { CopyVariants, ScopePanel } from '@/components/footage-panel';
-import { SpendChart } from '@/components/spend-chart';
 import { PlayCurveChart } from '@/components/play-curve-chart';
 import { TagList } from '@/components/tag-list';
 import { api } from '@/lib/api';
@@ -108,16 +107,15 @@ export default async function CreativeDetail({ params, searchParams }: Props) {
           <SectionNav hasCopyVariants={footage.copy_variants.length > 1} />
           {/* A media buyer reads this page to decide what to do with the ad. So the verdict
               and the tests it suggests come first, beside the video; the layers under them
-              carry the detail, down to how Meta is spending on it (Delivery). */}
+              carry the detail. */}
           <div id="diagnosis" className="scroll-mt-16">
             <DiagnosisPanel
               diagnosis={diagnosis}
               evidence={tierEvidence(diagnosis, tags, patterns, isVideo, fmt)}
               afterVerdict={<NextTests title={creativeTitle(creative)} diagnosis={diagnosis} tags={tags} patterns={patterns} fmt={fmt} />}
-              footnote={patterns.length > 0 ? PATTERN_FOOTNOTE : undefined}
+              footnote={patternFootnote(patterns) ?? undefined}
               charts={{
                 retention: playCurve && retention ? { label: 'Watching', node: <PlayCurveChart curve={playCurve} beats={beats} /> } : undefined,
-                context: { label: 'Spend', node: <SpendChart days={metrics} windowStart={diagnosis.window_start} windowEnd={diagnosis.window_end} currency={account?.currency} /> },
                 fatigue: fatigue ? { label: 'Response', node: <FatigueChart days={metrics} tier={fatigue} windowEnd={diagnosis.window_end} format={creative.format} currency={account?.currency} /> } : undefined,
               }}
             />

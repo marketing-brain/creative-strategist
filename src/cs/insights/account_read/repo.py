@@ -257,14 +257,16 @@ async def patterns_for_file(
 
     The filter runs inside Postgres on purpose. `result` is many megabytes per run; shipping
     it to the API on every creative page is what pinned the database on 2026-09-18."""
-    run_id = await db.fetchval(
-        "SELECT id FROM account_read_run WHERE org_id=$1 AND ad_account_id=$2 "
-        "AND format='video' AND status='done' ORDER BY created_at DESC LIMIT 1",
+    run = await db.fetchrow(
+        "SELECT id, window_start, window_end FROM account_read_run WHERE org_id=$1 "
+        "AND ad_account_id=$2 AND format='video' AND status='done' "
+        "ORDER BY created_at DESC LIMIT 1",
         org_id,
         ad_account_id,
     )
-    if run_id is None:
+    if run is None:
         return []
+    run_id = run["id"]
     # A run is written once and never edited, so its answer for a file cannot change. The
     # scan below costs about 400 ms of database time; repeat views of a page cost none.
     key = (run_id, sha256, limit)
@@ -319,5 +321,8 @@ async def patterns_for_file(
     for r in kept:
         d = r["dimension"]
         r["prescribable"] = policy.prescribable(d) if r["has"] else policy.explorable(d)
+        # The run's window, so the page can say which days the patterns were measured over.
+        r["window_start"] = run["window_start"].isoformat()
+        r["window_end"] = run["window_end"].isoformat()
     _FILE_PATTERNS[key] = kept
     return _FILE_PATTERNS[key]
