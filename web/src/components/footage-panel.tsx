@@ -91,9 +91,10 @@ type StatProps = { label: string; value: string; base?: string; baseLabel?: stri
 function Stat({ label, value, base, baseLabel = 'account', delta, higherIsBetter, neutral, hint }: StatProps) {
   const tone = gapTone(delta, !!higherIsBetter, neutral);
   return (
-    <div className="min-w-0 flex-1 basis-24 bg-card px-3 py-2 sm:basis-32 sm:px-4 sm:py-2.5" title={hint}>
-      <dt className="truncate text-xs text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 text-lg font-semibold tabular-nums sm:text-xl">{value}</dd>
+    <div className="min-w-0 flex-1 basis-0 bg-card px-3 py-2.5" title={hint}>
+      {/* Room for a two-line label on every card, so the numbers sit on one line across the row. */}
+      <dt className="min-h-[2lh] text-xs leading-snug text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 text-lg font-semibold tabular-nums">{value}</dd>
       {base && (
         <dd className="mt-0.5 text-xs text-muted-foreground tabular-nums">
           {delta != null && <span className={`font-semibold ${tone}`}>{gapText(delta)}</span>} vs {base}
@@ -110,14 +111,13 @@ function Stat({ label, value, base, baseLabel = 'account', delta, higherIsBetter
 function StatGroup({ title, children }: { title: string; children: React.ReactNode }) {
   const n = Array.isArray(children) ? children.filter(Boolean).length : 1;
   return (
-    // A group claims room in proportion to its cards, a little less per card on a phone so
-    // the two short groups share a row there.
+    // A group claims room in proportion to its cards, so every card gets the same width.
     <div
-      className="flex min-w-0 grow-[var(--n)] basis-[calc(var(--n)*6.5rem)] flex-col bg-card sm:basis-[calc(var(--n)*8rem)]"
+      className="flex min-w-0 grow-[var(--n)] basis-0 flex-col bg-card"
       style={{ '--n': n } as React.CSSProperties}
     >
-      <h3 className="border-b border-border px-3 pt-2 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase sm:px-4">{title}</h3>
-      <dl className="flex flex-1 flex-wrap gap-px bg-border">{children}</dl>
+      <h3 className="border-b border-border px-3 pt-2 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{title}</h3>
+      <dl className="flex flex-1 gap-px bg-border">{children}</dl>
     </div>
   );
 }
@@ -192,7 +192,8 @@ export function ScopePanel({
           </nav>
         )}
       </div>
-      <div className="flex flex-wrap gap-px border-y border-border bg-border">
+      {/* One row, always: the funnel reads left to right, every card an equal share. */}
+      <div className="flex gap-px border-y border-border bg-border">
         <StatGroup title="Delivery">
           <Stat label="Spend" value={fmt.money(t.spend)} />
           <Stat label="Impressions" value={fmt.count(t.impressions)} />
