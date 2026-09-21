@@ -2,6 +2,7 @@ import { cache } from 'react';
 import type { Metadata } from 'next';
 import { ClampedCopy, CreativeMedia } from '@/components/creative-detail-client';
 import { AdProfile, NextTests, PATTERN_FOOTNOTE, tierEvidence } from '@/components/ad-profile';
+import { FatigueChart } from '@/components/fatigue-chart';
 import { CreativeHeader, SectionNav, creativeTitle } from '@/components/creative-header';
 import { DiagnosisPanel } from '@/components/diagnosis-panel';
 import { CopyVariants, ScopePanel } from '@/components/footage-panel';
@@ -77,6 +78,7 @@ export default async function CreativeDetail({ params, searchParams }: Props) {
   const isVideo = creative.format === 'video';
   const aspect = tags.find((t) => t.dimension === 'aspect_ratio')?.value;
   const retention = diagnosis.tiers.find((t) => t.key === 'retention');
+  const fatigue = diagnosis.tiers.find((t) => t.key === 'fatigue');
   const beats = tags.filter((t) => t.dimension === 'beats' && t.t_start_s != null).map((t) => ({ name: t.value.replaceAll('_', ' '), t: t.t_start_s as number }));
   return (
     <div className="space-y-6">
@@ -108,7 +110,10 @@ export default async function CreativeDetail({ params, searchParams }: Props) {
               evidence={tierEvidence(diagnosis, tags, patterns, isVideo, fmt)}
               afterVerdict={<NextTests title={creativeTitle(creative)} diagnosis={diagnosis} tags={tags} patterns={patterns} fmt={fmt} />}
               footnote={patterns.length > 0 ? PATTERN_FOOTNOTE : undefined}
-              retentionChart={playCurve && retention ? <PlayCurveChart curve={playCurve} beats={beats} /> : undefined}
+              charts={{
+                retention: playCurve && retention ? { label: 'Watching', node: <PlayCurveChart curve={playCurve} beats={beats} /> } : undefined,
+                fatigue: fatigue ? { label: 'Response', node: <FatigueChart days={metrics} tier={fatigue} windowEnd={diagnosis.window_end} format={creative.format} currency={account?.currency} /> } : undefined,
+              }}
             />
           </div>
           <section id="performance" className="scroll-mt-16">

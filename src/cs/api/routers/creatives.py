@@ -383,8 +383,10 @@ async def creative_patterns(
         raise HTTPException(404)
     if c["format"] != "video" or not c["primary_asset_sha256"]:
         return []
+    # Ranking is across every metric, so a cut of 12 let one layer's traits (link CTR) crowd
+    # out another's. 40 keeps every graded row this file has on org 3 (17), still kilobytes.
     return await account_read_repo.patterns_for_file(
-        db, auth.org_id, c["ad_account_id"], c["primary_asset_sha256"]
+        db, auth.org_id, c["ad_account_id"], c["primary_asset_sha256"], limit=40
     )
 
 

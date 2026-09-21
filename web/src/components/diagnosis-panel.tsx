@@ -1,6 +1,6 @@
 import { AlertCircle, CheckCircle2, ChevronRight, Clock, Lightbulb, Lock } from 'lucide-react';
 import { cn } from 'cn';
-import type { Diagnosis, DiagnosisAudienceSlice, DiagnosisCurve, DiagnosisMetric, DiagnosisPlacement, DiagnosisStatus, DiagnosisStep, DiagnosisTier } from '@/lib/types';
+import type { Diagnosis, DiagnosisCurve, DiagnosisMetric, DiagnosisStatus, DiagnosisStep, DiagnosisTier } from '@/lib/types';
 
 // Type system (see docs/superpowers/specs/2026-09-12-creative-diagnosis-panel-design.md and the
 // 2026-09-12 readability revision): four sizes only -- 24px metric values, 16px names and step
@@ -78,20 +78,6 @@ function Pill({ tier, className }: { tier: DiagnosisTier; className?: string }) 
   );
 }
 
-function MetricBlock({ tier, m }: { tier: DiagnosisTier; m: DiagnosisMetric }) {
-  const compare = tier.key === 'fatigue' ? 'was' : 'vs';
-  return (
-    <div className="flex flex-col gap-1.5" title={m.note}>
-      <span className="text-sm text-muted-foreground">{m.label}</span>
-      <div className="flex items-baseline gap-2.5">
-        <span className="text-2xl leading-none font-semibold tabular-nums">{fmtValue(m, m.value)}</span>
-        {m.baseline != null && <span className="text-sm text-muted-foreground tabular-nums">{`${compare} ${fmtValue(m, m.baseline)}`}</span>}
-        {m.lift != null && <span className={cn('text-sm font-semibold tabular-nums', liftClass(tier, m))}>{signed(shownChange(m))}</span>}
-      </div>
-    </div>
-  );
-}
-
 const tickName = (p: number) => (p === 0 ? 'Start' : p === 100 ? 'End' : `${p}%`);
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
@@ -161,6 +147,75 @@ const FUNNEL = [
   ['purchase', 'purchase'],
 ] as const;
 
+// The funnel drawn left to right: one bar per stage, its height the share of clickers still
+// there, joined by bands that narrow as people leave. Heights are linear, so a cliff looks
+// like one. Dashed lines on each bar mark the account's share at that stage (its other videos,
+// pooled). Each band carries its step rate with the account's in brackets, coloured only when
+// it clears the diagnosis's 15% bar; hover gives the counts.
+const FW = 640;
+const FH = 150;
+const BAR = 64;
+const TOP = 22; // room for the step rates above the bands
+const BOTTOM = 22; // room for the stage names
+
+function FunnelChart({ steps, name }: { steps: DiagnosisStep[]; name: (key: string) => string }) {
+  // Cumulative share of clicks at each stage, for this ad and for similar videos; a stage whose
+  // step cannot be read ends the chart there.
+  const stages: { label: string; share: number; peer: number | null; step?: DiagnosisStep }[] = [{ label: 'click', share: 1, peer: 1 }];
+  for (const st of steps) {
+    const prev = stages[stages.length - 1];
+    if (!st.readable || st.rate == null) break;
+    stages.push({ label: name(st.key), share: prev.share * st.rate, peer: prev.peer != null && st.baseline_rate != null ? prev.peer * st.baseline_rate : null, step: st });
+  }
+  if (stages.length < 2) return null;
+  const n = stages.length;
+  const gap = (FW - n * BAR) / (n - 1);
+  const x = (i: number) => i * (BAR + gap);
+  const span = FH - TOP - BOTTOM;
+  const mid = TOP + span / 2;
+  const hOf = (share: number) => Math.max(2, share * span);
+  return (
+    <svg viewBox={`0 0 ${FW} ${FH}`} className="block h-auto w-full" role="img" aria-label="Funnel from click to purchase">
+      {stages.slice(1).map((s, k) => {
+        const i = k + 1;
+        const a = stages[i - 1];
+        const [ha, hb] = [hOf(a.share), hOf(s.share)];
+        const [x0, x1] = [x(i - 1) + BAR, x(i)];
+        const st = s.step as DiagnosisStep;
+        return (
+          <g key={s.label}>
+            <polygon points={`${x0},${mid - ha / 2} ${x1},${mid - hb / 2} ${x1},${mid + hb / 2} ${x0},${mid + ha / 2}`} fill="var(--chart-1)" fillOpacity={0.12}>
+              <title>{`${st.numerator.toLocaleString('en-US')} of ${st.denominator.toLocaleString('en-US')} ${a.label === 'click' ? 'clicks' : `at ${a.label}`} reached ${s.label}`}</title>
+            </polygon>
+            <text x={(x0 + x1) / 2} y={TOP - 8} textAnchor="middle" className="text-[13px] tabular-nums">
+              {/* Coloured only when the step clears the diagnosis's 15% bar against the account. */}
+              <tspan className={cn('font-semibold', st.lift != null && st.lift >= 0.15 ? 'fill-success' : st.lift != null && st.lift <= -0.15 ? 'fill-destructive' : 'fill-foreground')}>{pct(st.rate as number)}</tspan>
+              {st.baseline_rate != null && <tspan className="fill-muted-foreground">{` (${pct(st.baseline_rate)})`}</tspan>}
+            </text>
+          </g>
+        );
+      })}
+      {stages.map((s, i) => {
+        const h = hOf(s.share);
+        return (
+          <g key={s.label}>
+            <rect x={x(i)} y={mid - h / 2} width={BAR} height={h} rx={2} fill="var(--chart-1)" />
+            {/* The account's share at this stage: dashed lines at its top and bottom edges. */}
+            {s.peer != null &&
+              i > 0 &&
+              [mid - hOf(s.peer) / 2, mid + hOf(s.peer) / 2].map((yy, j) => (
+                <line key={j} x1={x(i) - 6} x2={x(i) + BAR + 6} y1={yy} y2={yy} stroke="var(--foreground)" strokeOpacity={0.55} strokeWidth={1.5} strokeDasharray="4 3" />
+              ))}
+            <text x={x(i) + BAR / 2} y={FH - 6} textAnchor="middle" className="fill-muted-foreground text-[13px]">
+              {s.label}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 function FunnelRow({ steps }: { steps: DiagnosisStep[] }) {
   const name = (key: string) => FUNNEL.find(([k]) => k === key)?.[1] ?? key.replaceAll('_', ' ');
   const present = new Set(steps.map((st) => st.key));
@@ -171,138 +226,43 @@ function FunnelRow({ steps }: { steps: DiagnosisStep[] }) {
     <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 text-sm">
       <span className="text-muted-foreground">Funnel</span>
       <div className="min-w-0 space-y-0.5">
-        <p className="tabular-nums">
-          click
-          {steps.map((st) => (
-            <span key={st.key}>
-              {' → '}
-              {name(st.key)}{' '}
-              {st.readable && st.rate != null ? (
-                <>
-                  <span className="font-semibold">{pct(st.rate)}</span>
-                  {st.baseline_rate != null && <span className="text-muted-foreground"> ({pct(st.baseline_rate)})</span>}
-                </>
-              ) : (
-                <span className="text-muted-foreground">too few to read</span>
-              )}
-            </span>
-          ))}
+        <FunnelChart steps={steps} name={name} />
+        <p className="text-muted-foreground">
+          {"( ) and dashed lines: the account's other videos"}
+          {untracked.length > 0 && ` · ${untracked.join(' and ')} ${untracked.length > 1 ? "aren't" : "isn't"} tracked for this account`}
         </p>
-        {untracked.length > 0 && <p className="text-muted-foreground">{`${untracked.join(' and ')} ${untracked.length > 1 ? "aren't" : "isn't"} tracked for this account`}</p>}
       </div>
     </div>
   );
 }
 
-function fitText(x: number): string {
-  return x >= 0.15 ? 'text-success' : x <= -0.15 ? 'text-destructive' : 'text-muted-foreground';
-}
+// A chart for one layer, drawn from outside the diagnosis, with its row label.
+export type LayerChart = { label: string; node: React.ReactNode };
 
-// Three is what fits the evidence column in one row at this card width, so the row always
-// reads like the conversion step chain instead of leaving a stretched orphan on a second line.
-const PLACEMENT_CARDS = 3;
-
-// Fit, not lift: how far the rate sits from this creative's own placement average once the
-// comparison set's pattern for that placement is removed. Meta chose the mix, so a level
-// comparison would partly measure the optimiser's allocation. Fit is zero-sum across a
-// creative's placements -- it says where the creative travels, never how well it performed.
-//
-// Same two-line card as the conversion step chain: what it is, then the number and what to
-// read it against. The verdict sentence above already names the decisive placement, so these
-// only have to substantiate it -- the full set stays in the API payload and the insight brief.
-function PlacementCards({ placements, format }: { placements: DiagnosisPlacement[]; format: Diagnosis['format'] }) {
-  const video = format === 'video';
-  const fitOf = (p: DiagnosisPlacement) => (video ? p.hook_fit : p.ctr_fit);
-  const rated = placements.filter((p) => fitOf(p) != null);
-  const shown = rated.slice(0, PLACEMENT_CARDS);
-  const notes = [
-    rated.length - shown.length > 0 ? `${rated.length - shown.length} more` : null,
-    placements.length - rated.length > 0 ? `${placements.length - rated.length} too thin to rate` : null,
-  ].filter(Boolean);
-  if (shown.length === 0) return null;
-  return (
-    <div className="flex w-full flex-col gap-2">
-      <div className="flex w-full flex-wrap items-stretch gap-2">
-        {shown.map((p) => {
-          const fit = fitOf(p) as number;
-          const rate = video ? p.hook_rate : p.link_ctr;
-          return (
-            <div
-              key={`${p.platform}/${p.position}`}
-              className="flex min-w-[8.5rem] flex-1 flex-col gap-1 rounded-lg border border-border px-3 py-2.5"
-              title={rate != null ? `${video ? 'Hook rate' : 'Link CTR'} ${video ? pct(rate) : pct1(rate)}` : undefined}
-            >
-              <span className="min-w-0 truncate text-sm text-muted-foreground">{p.label}</span>
-              <div className="flex items-baseline gap-2">
-                <span className="text-base font-semibold tabular-nums">{p.share != null ? pct(p.share) : '—'}</span>
-                <span className={cn('text-sm font-semibold tabular-nums', fitText(fit))}>{signed(fit)}</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      {notes.length > 0 && <span className="text-sm text-muted-foreground">{`+ ${notes.join(' · ')}`}</span>}
-    </div>
-  );
-}
-
-// Both numbers are shares, so the gap is in percentage points -- a percentage of a percentage
-// would not mean anything. It stays uncoloured: who Meta found is evidence about the creative,
-// not a verdict on it, and colour in this panel is reserved for status.
-const points = (x: number) => `${x >= 0 ? '+' : '−'}${Math.round(Math.abs(x) * 100)}\u00a0pts`;
-
-// The slice that diverges most from the peer group -- the part a reader could not guess.
-function AudienceLine({ audience }: { audience: DiagnosisAudienceSlice[] }) {
-  const named = audience.filter((s) => s.age !== 'other');
-  if (named.length === 0) return null;
-  const top = named.reduce((a, b) => (Math.abs(b.share - b.baseline_share) > Math.abs(a.share - a.baseline_share) ? b : a));
-  return (
-    <p className="text-sm text-muted-foreground">
-      {'Who Meta found: '}
-      <span className="font-semibold text-foreground">{top.label}</span>
-      {` took ${pct(top.share)} of delivery, against ${pct(top.baseline_share)} for peers (${points(top.share - top.baseline_share)}).`}
-    </p>
-  );
-}
-
-function TierBody({ tier, broken, format, evidence, chart }: { tier: DiagnosisTier; broken: boolean; format: Diagnosis['format']; evidence?: React.ReactNode; chart?: React.ReactNode }) {
+function TierBody({ tier, broken, evidence, chart }: { tier: DiagnosisTier; broken: boolean; evidence?: React.ReactNode; chart?: LayerChart }) {
   const weak = tier.status === 'weak';
   // The verdict above already carries the broken layer's decision word for word.
   // A healthy retention layer's sentence only restates its pill.
-  // A healthy retention or conversion layer's sentence only restates its pill.
-  const text = broken ? null : weak ? tier.decision : tier.key === 'retention' || tier.key === 'conversion' ? null : tier.reason;
+  // A healthy layer's sentence only restates its pill; a weak one carries the advice.
+  const text = broken ? null : weak ? tier.decision : null;
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {text && <p className={cn('max-w-prose text-sm leading-relaxed', weak ? 'font-semibold' : 'text-muted-foreground')}>{text}</p>}
       {/* Attention's hook rate and link CTR, and retention's hold rate, are already in the header. */}
-      {tier.key !== 'attention' && tier.key !== 'retention' && tier.key !== 'conversion' && tier.metrics.length > 0 && (
-        <div className="flex flex-wrap gap-x-10 gap-y-4">
-          {tier.metrics.map((m) => (
-            <MetricBlock key={m.key} tier={tier} m={m} />
-          ))}
-        </div>
-      )}
-      {/* The per-second curve when the page has one; the quartile chart otherwise. */}
-      {/* The per-second curve sits in the same label column as every other row in the layers;
-          the quartile chart is the fallback when there is no curve. */}
+      {/* No layer prints its figures as blocks: the header has the headline numbers, and what
+          moved is in each layer's Hurting and Helping rows. A layer's chart sits in the same label
+          column as its other rows; retention falls back to the quartile chart without one. */}
       {chart ? (
         <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 text-sm">
-          <span className="text-muted-foreground">Watching</span>
-          <div className="min-w-0">{chart}</div>
+          <span className="text-muted-foreground">{chart.label}</span>
+          <div className="min-w-0">{chart.node}</div>
         </div>
       ) : (
         tier.curve && <RetentionCurve curve={tier.curve} status={tier.status} />
       )}
       {tier.steps && tier.steps.length > 0 && <FunnelRow steps={tier.steps} />}
-      {tier.placements && tier.placements.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <span className="text-sm text-muted-foreground">
-            {`Where Meta ran it · share of delivery and fit vs ${tier.comparison ?? 'the baseline'}`}
-          </span>
-          <PlacementCards placements={tier.placements} format={format} />
-        </div>
-      )}
-      {tier.audience && tier.audience.length > 0 && <AudienceLine audience={tier.audience} />}
+      {/* No audience line: under Advantage+ who Meta reached is the optimiser's choice, not a
+          signal about the creative, and demographics are never a recommendation here. */}
       {evidence}
     </div>
   );
@@ -312,7 +272,7 @@ function TierBody({ tier, broken, format, evidence, chart }: { tier: DiagnosisTi
 // read yet, is one line: its name, its status and its headline number. After "fix attention,
 // keep the rest", a screen of proof per healthy layer is a screen between the reader and
 // the next thing to do; it stays one click away.
-function TierRow({ tier, broken, converting, format, evidence, chart }: { tier: DiagnosisTier; broken: boolean; converting: boolean; format: Diagnosis['format']; evidence?: React.ReactNode; chart?: React.ReactNode }) {
+function TierRow({ tier, broken, converting, evidence, chart }: { tier: DiagnosisTier; broken: boolean; converting: boolean; evidence?: React.ReactNode; chart?: LayerChart }) {
   const open = tier.status === 'weak';
   const amber = broken && converting;
   const head = tier.metrics[0];
@@ -336,7 +296,7 @@ function TierRow({ tier, broken, converting, format, evidence, chart }: { tier: 
         <ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground transition-transform group-open/tier:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
       </summary>
       <div className="px-6 pt-1 pb-5 @2xl:pl-[4.25rem]">
-        <TierBody tier={tier} broken={broken} format={format} evidence={evidence} chart={chart} />
+        <TierBody tier={tier} broken={broken} evidence={evidence} chart={chart} />
       </div>
     </details>
   );
@@ -360,13 +320,13 @@ export function DiagnosisPanel({
   evidence,
   afterVerdict,
   footnote,
-  retentionChart,
+  charts,
 }: {
   diagnosis: Diagnosis;
   evidence?: Partial<Record<DiagnosisTier['key'], React.ReactNode>>;
   afterVerdict?: React.ReactNode;
   footnote?: React.ReactNode;
-  retentionChart?: React.ReactNode;
+  charts?: Partial<Record<DiagnosisTier['key'], LayerChart>>;
 }) {
   const v = d.verdict;
   // A weak layer on an ad that already converts cheaper than the account is a lead to iterate
@@ -398,7 +358,7 @@ export function DiagnosisPanel({
         </div>
         {afterVerdict}
         {d.tiers.map((t) => (
-          <TierRow key={t.key} tier={t} broken={t.tier === d.broken_tier} converting={!!v.converting} format={d.format} evidence={evidence?.[t.key]} chart={t.key === 'retention' ? retentionChart : undefined} />
+          <TierRow key={t.key} tier={t} broken={t.tier === d.broken_tier} converting={!!v.converting} evidence={evidence?.[t.key]} chart={charts?.[t.key]} />
         ))}
         <div className="flex flex-wrap gap-x-6 gap-y-1.5 bg-sidebar px-6 py-3.5 text-sm text-muted-foreground">
           {formulas.map(([name, def]) => (

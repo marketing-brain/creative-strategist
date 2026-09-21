@@ -1,7 +1,7 @@
 import { CopyBrief, SeekButton } from '@/components/creative-detail-client';
 import { ConceptSummary, label, secs, words } from '@/components/tag-list';
 import type { Formatters } from '@/lib/format';
-import type { CreativePattern, Diagnosis, DiagnosisTier, Tag } from '@/lib/types';
+import type { CreativePattern, Diagnosis, DiagnosisPlacement, DiagnosisTier, Tag } from '@/lib/types';
 
 // What the tags say the ad is. Tags are produced once per file, cost nothing to show, and
 // every tagged creative has them, which the written insight (one model call each, capped per
@@ -82,23 +82,66 @@ const detail = (p: CreativePattern, fmt: Formatters) =>
     ...p.confounds.map((c) => `caution: ${CAUTION[c] ?? words(c)}`),
   ].join(' · ');
 
-// One pattern per line, in columns: effect, metric, trait. Colour carries good or bad; the
-// figures, grade and cautions behind it are on hover.
-function PatternGroup({ title, rows, fmt }: { title: string; rows: CreativePattern[]; fmt: Formatters }) {
-  if (!rows.length) return null;
+// One finding per line, in columns: effect, metric, what. Colour carries good or bad; the
+// figures behind it are on hover. A row with nothing says so: "nothing stands out" is a
+// finding too, and every layer answers both questions.
+type Item = { key: string; change: number; good: boolean; metric: string; what: string; hover: string };
+
+const patternItem = (p: CreativePattern, fmt: Formatters): Item => ({
+  key: `${p.has}-${p.dimension}-${p.value}-${p.metric}`,
+  change: p.change,
+  good: isGood(p),
+  metric: METRIC_LABEL[p.metric],
+  what: traitPhrase(p),
+  hover: detail(p, fmt),
+});
+
+function ItemGroup({ title, items }: { title: string; items: Item[] }) {
   return (
     <div className="grid grid-cols-[4.5rem_3.5rem_11rem_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 text-sm">
-      {rows.map((p, i) => (
+      <span className="text-muted-foreground">{title}</span>
+      {items.length === 0 && <span className="col-span-3 text-muted-foreground">nothing stands out</span>}
+      {items.map((it, i) => (
         // `contents` has no box to hover, so each cell carries the figures.
-        <div key={`${p.has}-${p.dimension}-${p.value}-${p.metric}`} className="contents">
-          <span className="text-muted-foreground">{i === 0 ? title : ''}</span>
-          <span title={detail(p, fmt)} className={`font-semibold tabular-nums ${isGood(p) ? 'text-success' : 'text-destructive'}`}>{signedPct(p.change)}</span>
-          <span title={detail(p, fmt)} className="text-muted-foreground">{METRIC_LABEL[p.metric]}</span>
-          <span title={detail(p, fmt)} className="min-w-0">{traitPhrase(p)}</span>
+        <div key={it.key} className="contents">
+          {i > 0 && <span />}
+          <span title={it.hover} className={`font-semibold tabular-nums ${it.good ? 'text-success' : 'text-destructive'}`}>{signedPct(it.change)}</span>
+          <span title={it.hover} className="text-muted-foreground">{it.metric}</span>
+          <span title={it.hover} className="min-w-0">{it.what}</span>
         </div>
       ))}
     </div>
   );
+}
+
+// Fatigue and Context have no account patterns (the account read does not test their
+// metrics), so their rows come from the layer's own figures, at the diagnosis's own bar.
+const BAR = 0.15; // diagnosis.LIFT_THRESHOLD
+const PLACEMENT_SHARE_FLOOR = 0.2; // diagnosis.PLACEMENT_SHARE_FLOOR
+
+function ownItems(tier: DiagnosisTier): Item[] {
+  if (tier.key === 'fatigue')
+    // Daily frequency is left out: reach is counted per day, so it sits near 1.0 for every ad.
+    return tier.metrics
+      .filter((m) => m.key !== 'frequency' && m.lift != null && Math.abs(m.lift) >= BAR)
+      .map((m) => ({
+        key: m.key,
+        change: m.lift as number,
+        good: (m.lift as number) > 0,
+        metric: m.label.replace(/ trend$/, '').toLowerCase(),
+        what: 'last 7 days against the 14 before',
+        hover: m.note,
+      }));
+  if (tier.key === 'context')
+    // Fit, as the layer computes it: how the ad does in a placement against its own average,
+    // after taking out how similar videos do there. Only placements carrying real delivery.
+    return (tier.placements ?? []).flatMap((pl) => {
+      const fit = pl.hook_fit ?? pl.ctr_fit;
+      const metric = pl.hook_fit != null ? 'hook rate' : 'link CTR';
+      if (fit == null || (pl.share ?? 0) < PLACEMENT_SHARE_FLOOR || Math.abs(fit) < BAR) return [];
+      return [{ key: `${pl.platform}/${pl.position}`, change: fit, good: fit > 0, metric, what: `on ${pl.label}, compared with where else it ran`, hover: `${Math.round((pl.share ?? 0) * 100)}% of delivery` }];
+    });
+  return [];
 }
 
 // ---- evidence under each diagnosis layer ---------------------------------------------------
@@ -203,10 +246,65 @@ const ROW_LABELS: Record<string, string> = {
   offer_elements: 'Offer',
   proof_devices: 'Proof',
   cta_modes: 'CTA',
-  aspect_ratio: 'Aspect',
-  captions: 'Captions',
-  native_format_cues: 'Native look',
+  aspect_ratio: 'Shape',
+  captions: 'Text',
+  native_format_cues: 'Looks like',
 };
+
+// Plain words for the format facts, so the Context layer reads without ad jargon.
+const PLAIN: Record<string, Record<string, string>> = {
+  aspect_ratio: { '9:16': 'vertical, fills a phone screen (9:16)', '4:5': 'tall, made for feeds (4:5)', '1:1': 'square (1:1)', '16:9': 'wide, like TV (16:9)' },
+  captions: { none: 'no text', subtitles: 'subtitles of what is said', text_cards: 'text cards', both: 'subtitles and text cards' },
+  native_format_cues: {
+    platform_caption_style: "the app's own caption style",
+    green_screen: 'a green-screen video',
+    reply_to_comment: 'a reply to a comment',
+    duet_or_stitch: 'a duet or stitch',
+    social_post_screenshot: 'a screenshot of a social post',
+    message_screenshot: 'a screenshot of a message',
+  },
+};
+const plain = (d: string, v: string) => PLAIN[d]?.[v] ?? words(v);
+
+// Where Meta spent this ad's delivery, as one bar split by placement. Placements the ad does
+// clearly better or worse on (the layer's own fit rule: 20%+ of delivery, 15%+ against its
+// other placements) are tinted; the rest are grey. Slivers under 4% are pooled as "other".
+function WhereItRan({ placements }: { placements: DiagnosisPlacement[] }) {
+  const rows = placements.filter((p) => p.share != null && p.share > 0).sort((a, b) => (b.share ?? 0) - (a.share ?? 0));
+  if (!rows.length) return null;
+  const big = rows.filter((p) => (p.share ?? 0) >= 0.04);
+  const other = rows.filter((p) => (p.share ?? 0) < 0.04).reduce((t, p) => t + (p.share ?? 0), 0);
+  const tint = (p: DiagnosisPlacement) => {
+    const fit = p.hook_fit ?? p.ctr_fit;
+    if (fit == null || (p.share ?? 0) < 0.2 || Math.abs(fit) < 0.15) return 'bg-muted-foreground/25';
+    return fit > 0 ? 'bg-success/40' : 'bg-destructive/40';
+  };
+  const name = (p: DiagnosisPlacement) => p.label.replace(' · ', ' ');
+  const segs = [...big.map((p) => ({ key: `${p.platform}/${p.position}`, label: name(p), share: p.share as number, cls: tint(p) })), ...(other > 0 ? [{ key: 'other', label: 'other', share: other, cls: 'bg-muted-foreground/10' }] : [])];
+  return (
+    <dl className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 text-sm">
+      <dt className="text-muted-foreground">Ran on</dt>
+      <dd className="min-w-0">
+        <div className="flex h-7 w-full overflow-hidden rounded-md">
+          {segs.map((sg) => (
+            <div key={sg.key} className={`flex min-w-0 items-center justify-center border-r border-background px-1 last:border-r-0 ${sg.cls}`} style={{ width: `${sg.share * 100}%` }} title={`${sg.label}: ${Math.round(sg.share * 100)}% of this ad's delivery`}>
+              {sg.share >= 0.2 && <span className="truncate text-xs">{`${sg.label} ${Math.round(sg.share * 100)}%`}</span>}
+            </div>
+          ))}
+        </div>
+        {/* Segments too narrow to name inside the bar are named here, in the same order. */}
+        {segs.some((sg) => sg.share < 0.2) && (
+          <p className="mt-1 text-muted-foreground">
+            {`Also ${segs
+              .filter((sg) => sg.share < 0.2)
+              .map((sg) => `${sg.label} ${Math.round(sg.share * 100)}%`)
+              .join(', ')}`}
+          </p>
+        )}
+      </dd>
+    </dl>
+  );
+}
 
 function TierEvidence({
   tier,
@@ -223,7 +321,6 @@ function TierEvidence({
 }) {
   const attention = tier.key === 'attention';
   const rows = (attention ? [] : TIER_TAGS[tier.key]).map((d) => [d, valuesOf(tags, d)] as const).filter(([, v]) => v.length);
-  const mine = [...traits.hurting, ...traits.helping];
   const drop = tier.key === 'retention' ? dropBeats(tier, tags) : null;
   // Retention lists the ad's beats the way Attention lists its hook: name, then a timestamp
   // that plays the video from there. The opening beat is Attention's Hook row, so it is left out.
@@ -233,14 +330,18 @@ function TierEvidence({
           .filter((b) => b.t_start_s !== null && b.value !== 'hook')
           .sort((a, b) => (a.t_start_s ?? 0) - (b.t_start_s ?? 0))
       : [];
-  if (!attention && !rows.length && !mine.length && !drop && !beats.length) return null;
+  const own = ownItems(tier);
+  const hurting = tier.key === 'fatigue' || tier.key === 'context' ? own.filter((i) => !i.good) : traits.hurting.map((p) => patternItem(p, fmt));
+  const helping = tier.key === 'fatigue' || tier.key === 'context' ? own.filter((i) => i.good) : traits.helping.map((p) => patternItem(p, fmt));
   // Attention and Retention are label-column rows all the way down, so nothing needs dividing;
   // the other layers still separate their metric blocks from the evidence under them.
-  const rowsOnly = attention || tier.key === 'retention' || tier.key === 'conversion';
+  // Every layer is label-column rows now, so nothing needs a divider.
+  const rowsOnly = true;
   return (
     // Attention prints no numbers of its own, so nothing sits above to divide it from.
     <div className={rowsOnly ? 'space-y-4' : 'space-y-4 border-t border-dashed border-border pt-4'}>
       {attention && <OpeningLines tags={tags} seekable={seekable} />}
+      {tier.key === 'context' && tier.placements && <WhereItRan placements={tier.placements} />}
       {(rows.length > 0 || drop) && (
         <div className="space-y-2">
           {drop && (
@@ -263,7 +364,7 @@ function TierEvidence({
                   <dd className="flex min-w-0 flex-wrap gap-x-3">
                     {v.map((t, i) => (
                       <span key={`${t.value}-${i}`}>
-                        {words(t.value)} <Stamp t={t.t_start_s} seekable={seekable} />
+                        {tier.key === 'context' ? plain(d, t.value) : words(t.value)} {tier.key !== 'context' && <Stamp t={t.t_start_s} seekable={seekable} />}
                       </span>
                     ))}
                   </dd>
@@ -286,8 +387,8 @@ function TierEvidence({
         </dl>
       )}
       <div className="space-y-2">
-        <PatternGroup title="Hurting" rows={traits.hurting} fmt={fmt} />
-        <PatternGroup title="Helping" rows={traits.helping} fmt={fmt} />
+        <ItemGroup title="Hurting" items={hurting} />
+        <ItemGroup title="Helping" items={helping} />
       </div>
     </div>
   );
@@ -356,6 +457,12 @@ function traitPhrase(p: CreativePattern): string {
       return an(v);
     case 'setting':
       return p.value === 'none' ? 'no live footage' : `${an(v)} setting`;
+    case 'brand_presence':
+      return p.value === 'none' ? 'no logo or brand name' : `${an(v)} logo or brand name`;
+    case 'proof_devices':
+      return `${an(v)} as proof`;
+    case 'offer_elements':
+      return `${an(v)} in the offer`;
     case 'concept_tags':
       return `the “${v}” concept`;
     case 'features_mentioned':
