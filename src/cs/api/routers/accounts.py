@@ -38,24 +38,3 @@ async def activate(
             dedup_key=str(acct["meta_connection_id"]),
         )
     return {"job_id": str(jid) if jid else None}
-
-
-@router.post("/{account_id}/sync")
-async def sync(
-    account_id: UUID,
-    auth: AuthContext = Depends(require_admin),
-    db: Database = Depends(get_db),
-) -> dict:
-    acct = await repo.get_ad_account(db, auth.org_id, account_id)
-    if not acct:
-        raise HTTPException(404)
-    if not acct["meta_connection_id"]:
-        raise HTTPException(409, "account has no Fivetran connection")
-    jid = await queue.enqueue(
-        db,
-        auth.org_id,
-        "meta.sync_from_fivetran",
-        {"meta_connection_id": str(acct["meta_connection_id"])},
-        dedup_key=str(acct["meta_connection_id"]),
-    )
-    return {"job_id": str(jid) if jid else None}

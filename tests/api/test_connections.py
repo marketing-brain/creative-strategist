@@ -165,3 +165,13 @@ async def test_status_surfaces_error_message(client, db):
     body = r.json()
     assert body["status"] == "error"
     assert body["error"] == "Disconnected -- reconnect to resume syncing."
+
+
+async def test_sync_status_without_connection(client):
+    r = await client.get("/connections/meta/sync", headers=H)
+    assert r.status_code == 200 and r.json() == {"connection": None}
+
+
+async def test_sync_now_refuses_without_ready_connection(client):
+    r = await client.post("/connections/meta/sync", headers=H)
+    assert r.status_code == 409

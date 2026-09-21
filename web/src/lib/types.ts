@@ -1,6 +1,16 @@
 export type Paginated<T> = { items: T[]; total: number; total_all?: number; total_active?: number };
 export type Account = { id: string; platform: string; platform_account_id: string; name: string; currency: string; status: 'active' | 'paused' | 'disconnected'; sync_cursor: Record<string, unknown>; connection_status: 'pending' | 'syncing' | 'ready' | 'error' | null; connection_error: string | null };
 export type MetaConnection = { connected: boolean; status: 'pending' | 'syncing' | 'ready' | 'error' | null; error: string | null; last_synced_at: string | null };
+// Both hops between Meta and the app: Fivetran's copy of Meta (source) and the app's own tables.
+export type SyncJob = { id: string; kind: 'sync' | 'first_sync'; status: 'pending' | 'running' | 'done' | 'dead'; retrying: boolean; error: string | null; queued_at: string; started_at: string | null; finished_at: string | null };
+export type SyncStatus = {
+  connection: { status: 'pending' | 'syncing' | 'ready' | 'error'; error: string | null; last_synced_at: string | null } | null;
+  source?: { ads: number; metrics_through: string | null; has_reports: boolean; delivered_at: string | null } | null;
+  app?: { ads: number; metrics_through: string | null };
+  last_sync?: SyncJob | null;
+  auto_sync?: { enabled: boolean; next_run_at: string | null };
+  backlog?: { files: number; tagging: number; insights: number };
+};
 export type Creative = { id: string; ad_account_id: string; platform_creative_id: string; format: 'image' | 'video' | 'carousel' | 'unresolved'; headline: string | null; primary_text: string | null; cta_type: string | null; link_url: string | null; primary_asset_url: string | null; primary_asset_mime?: string | null; first_seen_at: string; distance?: number; spend_30d: number; ctr_30d?: number | null; creative_count?: number; ad_count?: number; copy_variants?: number; ad_name?: string | null; poster_url?: string | null; totals?: GridRates; baseline?: GridRates };
 // A grid card's 30-day numbers, and the same numbers pooled over the rest of its account and format.
 export type GridRates = { spend: number; impressions: number; link_clicks: number; purchases: number; hook_rate: number | null; link_ctr: number | null; cpa: number | null; roas: number | null };

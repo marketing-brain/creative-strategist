@@ -9,6 +9,7 @@ from cs.core import repo
 from cs.core.config import Settings
 from cs.core.db import Database
 from cs.core.queue import enqueue
+from cs.ingest.sync_status import sync_status
 
 router = APIRouter(prefix="/connections/meta")
 
@@ -35,6 +36,32 @@ async def status(auth: AuthContext = Depends(current_auth), db: Database = Depen
         "error": conn["last_error"],
         "last_synced_at": (conn["last_synced_at"].isoformat() if conn["last_synced_at"] else None),
     }
+
+
+@router.get("/sync")
+async def sync_state(
+    auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)
+) -> dict:
+    return await sync_status(db, auth.org_id)
+
+
+@router.post("/sync")
+async def sync_now(
+    auth: AuthContext = Depends(require_admin), db: Database = Depends(get_db)
+) -> dict:
+    """One sync covers every activated account on the connection, so it hangs off the
+    connection, not an account. A sync already queued or running is returned, not doubled."""
+    conn = await repo.get_meta_connection(db, auth.org_id)
+    if conn is None or conn["sync_status"] in ("pending", "error"):
+        raise HTTPException(409, "the Meta connection is not ready to sync")
+    await enqueue(
+        db,
+        auth.org_id,
+        "meta.sync_from_fivetran",
+        {"meta_connection_id": str(conn["id"])},
+        dedup_key=str(conn["id"]),
+    )
+    return await sync_status(db, auth.org_id)
 
 
 @router.post("/start")
