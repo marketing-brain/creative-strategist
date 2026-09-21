@@ -320,9 +320,9 @@ export function AccountReadSection({ status, nUnits, view, stale = false, curren
             {view.findings.length} findings
           </a>
           {view.next_tests.length > 0 && (
-            <a href="#next-tests" className="underline decoration-border underline-offset-4 hover:decoration-foreground">
+            <Link href="/next" className="underline decoration-border underline-offset-4 hover:decoration-foreground">
               {view.next_tests.length} tests to run next
-            </a>
+            </Link>
           )}
         </nav>
         {stale && (
@@ -340,20 +340,6 @@ export function AccountReadSection({ status, nUnits, view, stale = false, curren
         ))}
       </div>
 
-      {view.next_tests.length > 0 && (
-        <section id="next-tests" className="scroll-mt-6 rounded-xl bg-muted/60 px-5 py-6 md:px-8 md:py-8">
-          <h2 className="text-lg font-semibold tracking-tight">Tests to run next</h2>
-          <p className="mt-1 text-[13px] text-muted-foreground">Each one would turn a lead above into a result, or kill it.</p>
-          <ol className="mt-5 grid gap-x-10 gap-y-5 md:grid-cols-2">
-            {view.next_tests.map((t, i) => (
-              <li key={i} className="grid grid-cols-[2rem_1fr] text-[15px] leading-7">
-                <span className="font-mono text-sm tabular-nums leading-7 text-muted-foreground">{String(i + 1).padStart(2, '0')}</span>
-                <span className="text-pretty">{t}</span>
-              </li>
-            ))}
-          </ol>
-        </section>
-      )}
 
       <div className="grid gap-x-12 gap-y-8 border-t border-border pt-8 md:grid-cols-2">
         <Note title="Moves together, so can't be told apart">

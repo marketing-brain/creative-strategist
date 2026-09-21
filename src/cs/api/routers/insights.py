@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from cs.api.auth import AuthContext, current_auth
@@ -8,37 +8,11 @@ from cs.api.deps import get_blobs, get_db
 from cs.core.blobs import BlobStore
 from cs.core.config import get_settings
 from cs.core.db import Database
-from cs.insights import repo
 from cs.insights.account_read import ask as account_ask
 from cs.insights.account_read import repo as account_read_repo
+from cs.insights.next_plan import repo as next_plan_repo
 
 router = APIRouter()
-
-
-def _ser(r) -> dict:
-    d = dict(r)
-    for k, v in d.items():
-        if isinstance(v, UUID):
-            d[k] = str(v)
-        elif hasattr(v, "isoformat"):
-            d[k] = v.isoformat()
-        elif hasattr(v, "as_integer_ratio") and not isinstance(v, (int, float)):
-            d[k] = float(v)
-    return d
-
-
-@router.get("/fatigue")
-async def fatigue(
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    auth: AuthContext = Depends(current_auth),
-    db: Database = Depends(get_db),
-) -> dict:
-    items = [
-        _ser(r) for r in await repo.list_insights(db, auth.org_id, "fatigue", None, limit, offset)
-    ]
-    total = await repo.count_insights(db, auth.org_id, "fatigue", None)
-    return {"items": items, "total": total}
 
 
 async def _owned_account(db: Database, org_id: UUID, ad_account_id: UUID) -> None:
@@ -83,6 +57,51 @@ async def account_read(
         "error": row["error"],
         "newer_failed_error": row.get("newer_failed_error"),
     }
+
+
+@router.get("/insights/next")
+async def next_plan(
+    ad_account_id: UUID,
+    auth: AuthContext = Depends(current_auth),
+    db: Database = Depends(get_db),
+    blobs: BlobStore = Depends(get_blobs),
+) -> dict:
+    """The stored plan, whole. Unlike the account read there is no page slice: the payload is
+    bounded by MAX_PER_KIND, MAX_COMBOS and the explore list, so it is a few kilobytes, and the
+    job that wrote it did all the querying (see docs/next-surface.md §6)."""
+    await _owned_account(db, auth.org_id, ad_account_id)
+    row = await next_plan_repo.latest_run(db, auth.org_id, ad_account_id)
+    if row is None:
+        return {"status": "none"}
+    plan = dict(row["plan"] or {})
+    await _attach_posters(db, blobs, auth.org_id, plan)
+    return {
+        "status": row["status"],
+        "created_at": row["created_at"].isoformat(),
+        "error": row["error"],
+        **plan,
+    }
+
+
+async def _attach_posters(db: Database, blobs: BlobStore, org_id: UUID, plan: dict) -> None:
+    """One poster lookup for every creative the plan names, allocation rows and brief
+    references alike -- a row per query would be a dozen round trips for one page."""
+    holders = [
+        *(plan.get("allocate") or []),
+        *(r for b in (plan.get("make") or []) for r in (b.get("refs") or [])),
+    ]
+    # Set on every holder, including when nothing resolves: a row that omits the key entirely
+    # makes the page tell "no poster" apart from "field absent", which is the same thing here.
+    for h in holders:
+        h["poster_url"] = None
+    ids = {h["rep_creative_id"] for h in holders if h.get("rep_creative_id")}
+    if not ids:
+        return
+    posters = await account_read_repo.poster_paths(db, org_id, [UUID(i) for i in ids])
+    for h in holders:
+        path = posters.get(h.get("rep_creative_id") or "")
+        if path:
+            h["poster_url"] = await blobs.url_for(path)
 
 
 class AskBody(BaseModel):

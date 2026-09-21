@@ -23,7 +23,7 @@ GRADE_RANK = {"strong": 0, "suggestive": 1, "directional": 2, "thin": 3}
 MIN_GROUP = 10
 
 
-def _kinds() -> dict[str, str]:
+def dimension_kinds() -> dict[str, str]:
     """dimension -> 'single' for taxonomy single-value dimensions, the derived single facets
     and the numeric tercile facets (complement = units that have the dimension at all);
     anything else is 'multi' (complement = every other unit)."""
@@ -37,7 +37,7 @@ def _all_facets(units: list[Unit]) -> list[tuple[str, str]]:
     return sorted({f for u in units for f in u.facets})
 
 
-def _scope(units: list[Unit], dim: str, kinds: dict[str, str]) -> list[Unit]:
+def scope_units(units: list[Unit], dim: str, kinds: dict[str, str]) -> list[Unit]:
     if kinds.get(dim) == "single":
         return [u for u in units if any(d == dim for d, _ in u.facets)]
     return list(units)
@@ -49,7 +49,7 @@ def main_effects(
     out: list[Test] = []
     for dim, val in _all_facets(units):
         cell = [u for u in units if u.has(dim, val)]
-        comp = [u for u in _scope(units, dim, kinds) if not u.has(dim, val)]
+        comp = [u for u in scope_units(units, dim, kinds) if not u.has(dim, val)]
         out += compare(
             cell, comp, dimension=dim, value=val, bin_edges=bin_edges.get(dim), draws=draws
         )
@@ -70,7 +70,7 @@ def interactions(
                 if dim == gdim:
                     continue
                 cell = [u for u in group if u.has(dim, val)]
-                comp = [u for u in _scope(group, dim, kinds) if not u.has(dim, val)]
+                comp = [u for u in scope_units(group, dim, kinds) if not u.has(dim, val)]
                 out += compare(cell, comp, dimension=dim, value=val, group=label, draws=draws)
     return out
 
@@ -233,7 +233,7 @@ def run(
     draws: int,
     reliability: Reliability | None = None,
 ) -> RunResult:
-    kinds = _kinds()
+    kinds = dimension_kinds()
     tests = main_effects(units, bin_edges, kinds, draws)
     tests += interactions(units, grouping_dims, kinds, draws)
     apply_grades(tests)
