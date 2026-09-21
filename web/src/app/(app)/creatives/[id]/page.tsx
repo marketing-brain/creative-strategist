@@ -1,12 +1,12 @@
 import { cache } from 'react';
 import type { Metadata } from 'next';
 import { ClampedCopy, CreativeMedia } from '@/components/creative-detail-client';
-import { AdProfile, NextTests, PATTERN_FOOTNOTE, tierEvidence } from '@/components/ad-profile';
+import { NextTests, PATTERN_FOOTNOTE, tierEvidence } from '@/components/ad-profile';
 import { FatigueChart } from '@/components/fatigue-chart';
 import { CreativeHeader, SectionNav, creativeTitle } from '@/components/creative-header';
 import { DiagnosisPanel } from '@/components/diagnosis-panel';
 import { CopyVariants, ScopePanel } from '@/components/footage-panel';
-import { MetricChart } from '@/components/metric-chart';
+import { SpendChart } from '@/components/spend-chart';
 import { PlayCurveChart } from '@/components/play-curve-chart';
 import { TagList } from '@/components/tag-list';
 import { api } from '@/lib/api';
@@ -58,14 +58,19 @@ export default async function CreativeDetail({ params, searchParams }: Props) {
   // this one Meta creative, which is what reconciles against a single row in Ads Manager.
   const sp = await searchParams;
   const scope: Scope = sp.scope === 'creative' ? 'creative' : 'footage';
-  const until = new Date();
-  const since = new Date(until.getTime() - 89 * 86400000);
-  const [creative, tags, metrics, dims, diagnosis, footage, accounts, patterns, summary, playCurve] = await Promise.all([
+  // The daily series ends where the data ends, like every window on the page: the diagnosis's
+  // window end (the account's newest day with delivery), not today. Anchored on the wall clock,
+  // a paused sync would shrink "90 days" by every day it stays paused.
+  const diagnosisAndDays = api.creativeDiagnosis(id, scope).then(async (d) => {
+    const until = new Date(`${d.window_end}T00:00:00Z`);
+    const since = new Date(until.getTime() - 89 * 86400000);
+    return [d, await api.creativeMetrics(id, iso(since), iso(until), scope)] as const;
+  });
+  const [creative, tags, [diagnosis, metrics], dims, footage, accounts, patterns, summary, playCurve] = await Promise.all([
     getCreative(id),
     api.creativeTags(id),
-    api.creativeMetrics(id, iso(since), iso(until), scope),
+    diagnosisAndDays,
     api.dimensions(),
-    api.creativeDiagnosis(id, scope),
     api.creativeFootage(id),
     api.accounts(),
     api.creativePatterns(id),
@@ -102,8 +107,8 @@ export default async function CreativeDetail({ params, searchParams }: Props) {
         <div className="min-w-0 space-y-8 lg:col-span-2">
           <SectionNav hasCopyVariants={footage.copy_variants.length > 1} />
           {/* A media buyer reads this page to decide what to do with the ad. So the verdict
-              and the tests it suggests come first, beside the video; then whether it is
-              trending; then what the ad is, for the reader who did not make it. */}
+              and the tests it suggests come first, beside the video; the layers under them
+              carry the detail, down to how Meta is spending on it (Delivery). */}
           <div id="diagnosis" className="scroll-mt-16">
             <DiagnosisPanel
               diagnosis={diagnosis}
@@ -112,17 +117,10 @@ export default async function CreativeDetail({ params, searchParams }: Props) {
               footnote={patterns.length > 0 ? PATTERN_FOOTNOTE : undefined}
               charts={{
                 retention: playCurve && retention ? { label: 'Watching', node: <PlayCurveChart curve={playCurve} beats={beats} /> } : undefined,
+                context: { label: 'Spend', node: <SpendChart days={metrics} windowStart={diagnosis.window_start} windowEnd={diagnosis.window_end} currency={account?.currency} /> },
                 fatigue: fatigue ? { label: 'Response', node: <FatigueChart days={metrics} tier={fatigue} windowEnd={diagnosis.window_end} format={creative.format} currency={account?.currency} /> } : undefined,
               }}
             />
-          </div>
-          <section id="performance" className="scroll-mt-16">
-            <h2 className="mb-3 text-sm font-semibold">Trend (90 days)</h2>
-            <MetricChart rows={metrics} currency={account?.currency} windowStart={diagnosis.window_start} windowEnd={diagnosis.window_end} />
-            <p className="mt-1 text-xs text-muted-foreground">Bars are daily spend. The shaded band is the 30 days the diagnosis reads.</p>
-          </section>
-          <div id="overview" className="scroll-mt-16">
-            <AdProfile tags={tags} format={creative.format} />
           </div>
           <AdCopy creative={creative} className="lg:hidden" />
           <CopyVariants footage={footage} fmt={fmt} />

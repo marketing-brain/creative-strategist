@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { ConceptSummary, TagList } from '@/components/tag-list';
+import { TagList } from '@/components/tag-list';
 import type { Dimension, Tag } from '@/lib/types';
 
 const dim = (name: string, group: string, kind: Dimension['kind']): Dimension => ({
@@ -68,11 +68,5 @@ describe('TagList', () => {
     unmount();
     render(<TagList dimensions={dims} tags={tags} seekable />);
     expect(screen.getByRole('button', { name: 'Play the video from 4s', hidden: true })).toBeInTheDocument();
-  });
-
-  it('lifts the concept and opening line into the summary', () => {
-    render(<ConceptSummary tags={[tag({ dimension: 'hook_verbatim', kind: 'text', value: 'Worst OTC Sleep Aids!!' })]} />);
-    expect(screen.getByText('Opening line')).toBeInTheDocument();
-    expect(screen.getByText('Worst OTC Sleep Aids!!')).toBeInTheDocument();
   });
 });

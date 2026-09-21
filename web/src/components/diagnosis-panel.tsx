@@ -236,6 +236,10 @@ function FunnelRow({ steps }: { steps: DiagnosisStep[] }) {
   );
 }
 
+// The API calls the fifth layer "Context"; on the page it covers how Meta is spending on the
+// ad and whether the creative suits where it runs, so it reads as "Delivery".
+export const layerName = (tier: DiagnosisTier) => (tier.key === 'context' ? 'Delivery' : tier.name);
+
 // A chart for one layer, drawn from outside the diagnosis, with its row label.
 export type LayerChart = { label: string; node: React.ReactNode };
 
@@ -283,7 +287,7 @@ function TierRow({ tier, broken, converting, evidence, chart }: { tier: Diagnosi
             amber rather than red, so the row does not contradict the verdict above it. */}
         <div className={cn('flex size-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold tabular-nums', amber ? 'bg-chart-2 text-primary-foreground' : railClass[tier.status])}>{tier.tier}</div>
         <span className={cn('w-24 shrink-0 text-base font-semibold', tier.status === 'not_measured' && 'text-muted-foreground')} title={tier.question}>
-          {tier.name}
+          {layerName(tier)}
         </span>
         <Pill tier={tier} className={amber ? 'bg-chart-2/15 text-chart-2' : undefined} />
         {head && head.value != null && (

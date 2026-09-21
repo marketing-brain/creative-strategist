@@ -33,8 +33,6 @@ export function CreativeHeader({ creative, footage }: { creative: Creative; foot
 export function SectionNav({ hasCopyVariants }: { hasCopyVariants: boolean }) {
   const sections = [
     ['diagnosis', 'Diagnosis'],
-    ['performance', 'Trend'],
-    ['overview', 'The ad'],
     ...(hasCopyVariants ? [['copy', 'Copy']] : []),
     ['tags', 'Tags'],
   ];

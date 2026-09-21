@@ -1,47 +1,11 @@
 import { CopyBrief, SeekButton } from '@/components/creative-detail-client';
-import { ConceptSummary, label, secs, words } from '@/components/tag-list';
+import { layerName } from '@/components/diagnosis-panel';
+import { label, secs, words } from '@/components/tag-list';
 import type { Formatters } from '@/lib/format';
 import type { CreativePattern, Diagnosis, DiagnosisPlacement, DiagnosisTier, Tag } from '@/lib/types';
 
-// What the tags say the ad is. Tags are produced once per file, cost nothing to show, and
-// every tagged creative has them, which the written insight (one model call each, capped per
-// workspace, frozen at its window) does not.
-const FACTS: Record<string, string[]> = {
-  video: ['messenger', 'production', 'setting', 'angles', 'registers', 'proof_devices', 'offer_elements'],
-  image: ['hook_type', 'message_angle', 'offer_type', 'proof_type', 'visual_style', 'tone'],
-  carousel: ['hook_type', 'message_angle', 'offer_type', 'proof_type', 'visual_style', 'tone'],
-};
-
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
 const valuesOf = (tags: Tag[], dimension: string) => tags.filter((t) => t.dimension === dimension && t.value && t.value !== 'none');
-
-export function AdProfile({ tags, format }: { tags: Tag[]; format: string }) {
-  const facts = (FACTS[format] ?? []).map((d) => [d, valuesOf(tags, d)] as const).filter(([, v]) => v.length);
-  return (
-    <section className="space-y-3">
-      <h2 className="text-sm font-semibold">What this ad is</h2>
-      <div className="space-y-4 rounded-xl border border-border bg-card px-6 py-4">
-        {tags.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Not tagged yet. Once it is, this shows what the ad says, who delivers it and how it opens.</p>
-        ) : (
-          <>
-            <ConceptSummary tags={tags} />
-            {facts.length > 0 && (
-              <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-                {facts.map(([d, v]) => (
-                  <div key={d} className="flex min-w-0 gap-2">
-                    <dt className="w-32 shrink-0 text-muted-foreground">{label(d)}</dt>
-                    <dd className="min-w-0 break-words">{v.map((t) => words(t.value)).join(', ')}</dd>
-                  </div>
-                ))}
-              </dl>
-            )}
-          </>
-        )}
-      </div>
-    </section>
-  );
-}
 
 // ---- account patterns ----------------------------------------------------------------------
 
@@ -154,7 +118,8 @@ const TIER_TAGS: Record<DiagnosisTier['key'], string[]> = {
   retention: [],
   conversion: ['offer_elements', 'proof_devices', 'cta_modes'],
   fatigue: [],
-  context: ['aspect_ratio', 'captions', 'native_format_cues'],
+  // How the ad is made, which decides whether it looks native where Meta ran it.
+  context: ['aspect_ratio', 'production', 'messenger', 'captions', 'native_format_cues'],
 };
 
 function Stamp({ t, seekable }: { t: number | null; seekable: boolean }) {
@@ -249,12 +214,31 @@ const ROW_LABELS: Record<string, string> = {
   aspect_ratio: 'Shape',
   captions: 'Text',
   native_format_cues: 'Looks like',
+  production: 'Filmed',
+  messenger: 'On camera',
 };
 
 // Plain words for the format facts, so the Context layer reads without ad jargon.
 const PLAIN: Record<string, Record<string, string>> = {
   aspect_ratio: { '9:16': 'vertical, fills a phone screen (9:16)', '4:5': 'tall, made for feeds (4:5)', '1:1': 'square (1:1)', '16:9': 'wide, like TV (16:9)' },
   captions: { none: 'no text', subtitles: 'subtitles of what is said', text_cards: 'text cards', both: 'subtitles and text cards' },
+  production: {
+    phone_ugc: 'on a phone',
+    polished_studio: 'in a studio, polished',
+    motion_graphics: 'as motion graphics',
+    mixed_ugc_broll: 'on a phone, mixed with stock footage',
+    screen_capture: 'as a screen recording',
+  },
+  setting: { home: 'at home', outdoor: 'outdoors', studio_or_neutral: 'against a studio or plain backdrop', screen: 'on screen' },
+  messenger: {
+    creator_on_camera: 'a creator talking to camera',
+    creator_off_camera: 'a creator, heard but not seen',
+    expert_on_camera: 'an expert talking to camera',
+    founder_on_camera: 'the founder talking to camera',
+    actor_scripted: 'an actor, scripted',
+    multiple_people: 'several people',
+    graphic_only: 'no people, graphics only',
+  },
   native_format_cues: {
     platform_caption_style: "the app's own caption style",
     green_screen: 'a green-screen video',
@@ -265,6 +249,12 @@ const PLAIN: Record<string, Record<string, string>> = {
   },
 };
 const plain = (d: string, v: string) => PLAIN[d]?.[v] ?? words(v);
+// "Filmed" is one phrase from two tags: how it was shot and where ("on a phone, at home").
+function contextText(d: string, v: string, tags: Tag[]) {
+  if (d !== 'production') return plain(d, v);
+  const where = valuesOf(tags, 'setting')[0];
+  return where && PLAIN.setting[where.value] ? `${plain(d, v)}, ${PLAIN.setting[where.value]}` : plain(d, v);
+}
 
 // Where Meta spent this ad's delivery, as one bar split by placement. Placements the ad does
 // clearly better or worse on (the layer's own fit rule: 20%+ of delivery, 15%+ against its
@@ -364,7 +354,7 @@ function TierEvidence({
                   <dd className="flex min-w-0 flex-wrap gap-x-3">
                     {v.map((t, i) => (
                       <span key={`${t.value}-${i}`}>
-                        {tier.key === 'context' ? plain(d, t.value) : words(t.value)} {tier.key !== 'context' && <Stamp t={t.t_start_s} seekable={seekable} />}
+                        {tier.key === 'context' ? contextText(d, t.value, tags) : words(t.value)} {tier.key !== 'context' && <Stamp t={t.t_start_s} seekable={seekable} />}
                       </span>
                     ))}
                   </dd>
@@ -557,7 +547,7 @@ export function NextTests({
     .map((t) => {
       const m = t.metrics.find((x) => x.value != null && x.baseline != null);
       const show = (v: number | null) => (v == null ? '–' : m?.key === 'cpa' ? fmt.money(v) : m?.key === 'frequency' ? v.toFixed(1) : fmt.pct(v, 1));
-      return m ? `${t.name} is weak: ${m.label.toLowerCase()} ${show(m.value)} vs ${show(m.baseline)} for the account.` : `${t.name} is weak.`;
+      return m ? `${layerName(t)} is weak: ${m.label.toLowerCase()} ${show(m.value)} vs ${show(m.baseline)} for the account.` : `${layerName(t)} is weak.`;
     })
     .join(' ');
   const opening = tags.find((t) => t.dimension === 'hook_verbatim' || t.dimension === 'hook_summary')?.value;

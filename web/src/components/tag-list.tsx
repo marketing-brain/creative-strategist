@@ -41,31 +41,13 @@ export const label = (dimension: string) => DIMENSION_LABELS[dimension] ?? words
 const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 const byOrdinal = (tags: Tag[]) => [...tags].sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0));
 
-// Shown beside the insight rather than buried in the tag groups: what the ad is, in a
-// sentence, and the words it opens with.
-// Video tags carry a concept summary and the verbatim opening; image tags carry their own
-// two summaries. Whichever pair the creative has leads.
+// Summaries and the verbatim opening are sentences, not tags: they are left out of the tag
+// groups (the opening is shown in the Attention layer as On screen / Says).
 const LEAD_DIMENSIONS = ['concept_summary', 'message_summary', 'hook_verbatim', 'hook_summary'] as const;
-const LEAD_LABELS: Record<string, string> = { concept_summary: 'Concept', message_summary: 'Concept', hook_verbatim: 'Opening line', hook_summary: 'Hook' };
 
 function Stamp({ t, seekable }: { t: number | null; seekable: boolean }) {
   if (t === null) return null;
   return seekable ? <SeekButton seconds={t} label={secs(t)} /> : <span className="tabular-nums text-muted-foreground">{secs(t)}</span>;
-}
-
-export function ConceptSummary({ tags }: { tags: Tag[] }) {
-  const lead = LEAD_DIMENSIONS.map((d) => tags.find((t) => t.dimension === d)).filter((t): t is Tag => !!t?.value);
-  if (!lead.length) return null;
-  return (
-    <dl className="space-y-3">
-      {lead.map((t) => (
-        <div key={t.dimension}>
-          <dt className="text-xs font-medium text-muted-foreground">{LEAD_LABELS[t.dimension]}</dt>
-          <dd className="mt-0.5 max-w-prose text-base leading-relaxed text-pretty">{t.value}</dd>
-        </div>
-      ))}
-    </dl>
-  );
 }
 
 // The model's evidence for a tag. A title attribute would hide it from keyboard and touch
