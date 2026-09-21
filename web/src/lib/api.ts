@@ -44,9 +44,8 @@ export const api = {
   dimensions: () => apiFetch<import('./types').Dimension[]>('/tags/dimensions'),
   dimensionValues: (name: string) => apiFetch<import('./types').DimensionValue[]>(`/tags/dimensions/${encodeURIComponent(name)}/values`),
   creativeTranscript: (id: string) => apiFetch<{ transcript: string | null }>(`/creatives/${id}/transcript`),
-  fatigue: (offset = 0) =>
-    apiFetch<import('./types').Paginated<import('./types').Insight>>(`/fatigue?offset=${offset}`),
   accountRead: (accountId: string) => apiFetch<import('./types').AccountRead>(`/insights/account-read?ad_account_id=${accountId}`),
+  nextPlan: (accountId: string) => apiFetch<import('./types').NextPlan>(`/insights/next?ad_account_id=${accountId}`),
   accountReadAsk: (accountId: string, question: string) =>
     apiFetch<import('./types').AccountReadAnswer>('/insights/account-read/ask', { method: 'POST', body: JSON.stringify({ ad_account_id: accountId, question }) }),
 };

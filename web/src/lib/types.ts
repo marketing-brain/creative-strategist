@@ -23,7 +23,6 @@ export type TagKind = 'numeric' | 'single' | 'multi' | 'ordered' | 'open' | 'tex
 export type Tag = { dimension: string; kind: TagKind; value: string; raw_value: string | null; confidence: number; evidence: string; t_start_s: number | null; ordinal: number | null };
 export type Dimension = { name: string; group: string; kind: TagKind; applies_to: string[]; values: string[] | null; description: string };
 export type DimensionValue = { value: string; count: number };
-export type Insight = { id: string; kind: 'pattern' | 'fatigue'; dimension: string; value: string; metric: 'ctr' | 'cpa' | 'roas'; creative_id: string | null; creative_headline?: string | null; window_start: string; window_end: string; sample_creatives: number; sample_spend: number; baseline: number; observed: number; lift: number; explanation: string; suggested_test: string; created_at: string };
 export type DiagnosisStatus = 'strong' | 'on_par' | 'weak' | 'not_applicable' | 'not_enough_data' | 'too_young' | 'not_measured';
 export type DiagnosisMetric = { key: string; label: string; value: number | null; baseline: number | null; lift: number | null; note: string };
 export type DiagnosisCurvePoint = { p: number; share: number | null; baseline_share: number | null };
@@ -76,6 +75,32 @@ export type AccountRead = {
   status: 'none' | 'done' | 'insufficient' | 'rejected' | 'failed'; n_units?: number; created_at?: string; window_start?: string | null; window_end?: string | null;
   summary?: Record<string, unknown>; tests?: AccountReadTest[]; sibling_tests?: AccountReadTest[]; overlaps?: unknown[]; stratified?: unknown[]; retention_by_reveal?: Record<string, unknown>;
   units?: AccountReadUnit[]; read?: AccountReadText | null; error?: string | null; newer_failed_error?: string | null;
+};
+export type NextDecline = { metric: 'cpa' | 'ctr'; baseline: number; observed: number; ratio: number; capped: boolean };
+export type NextStake = { amount: number; share: number; window: 'window' | '30d'; basis: string };
+export type NextAllocationRow = {
+  key: string; kind: 'fix' | 'replace' | 'scale'; creative_id: string; headline: string;
+  rep_creative_id: string | null; stake: NextStake; verdict: string; detail: string;
+  broken_layer: string | null; decline: NextDecline | null; poster_url?: string | null;
+};
+export type NextEvidence = { pattern_id: string; label: string; metric: string; metric_name: string; change: number; grade: string; n_cell: number; n_complement: number; cell_value: number; comp_value: number };
+export type NextRef = { sha256: string; headline: string; rep_creative_id: string | null; spend: number; shows: string; poster_url?: string | null };
+export type NextShape = { duration_s: number | null; duration_range: [number, number] | null; first_product_s: number | null; captions: string | null; n_carriers: number };
+export type NextWatch = { metric: string; metric_name: string; account_value: number; account_label: string; direction: 'above' | 'below' };
+export type NextBrief = {
+  key: string; title: string; attributes: [string, string][]; stake: NextStake; binding: string;
+  carriers: number; evidence: NextEvidence[]; downstream: string; hooks: string[]; refs: NextRef[];
+  shape: NextShape; hold: string; watch: NextWatch; caveat: string;
+};
+export type NextExploreRow = { key: string; dimension: string; group: string; value: string; n_units: number; status: string };
+export type NextPlan = {
+  status: 'none' | 'done' | 'insufficient' | 'failed';
+  created_at?: string; error?: string | null;
+  account_spend?: number; window_start?: string | null; window_end?: string | null; n_units?: number; data_through?: string | null;
+  allocate?: NextAllocationRow[]; allocate_empty_reason?: string | null;
+  make?: NextBrief[]; make_empty_reason?: string | null;
+  explore?: NextExploreRow[]; explore_empty_reason?: string | null;
+  next_tests?: string[];
 };
 export type AccountReadFact = { id: string; text: string };
 export type AccountReadAnswer = {

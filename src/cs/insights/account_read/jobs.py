@@ -15,6 +15,7 @@ from cs.insights.account_read.reliability import measure as measure_reliability
 from cs.insights.account_read.types import to_json
 from cs.insights.account_read.units import build_units
 from cs.insights.account_read.writer import GeminiGatewayAccountReadWriter, write_read
+from cs.insights.next_plan.jobs import JOB as NEXT_PLAN_JOB
 from cs.jobs.registry import JobContext, handler
 from cs.jobs.scheduler import register_schedule
 
@@ -82,6 +83,16 @@ async def compute_account_read(ctx: JobContext) -> None:
         input_tokens=ti,
         output_tokens=to,
     )
+    if status == "done":
+        # The plan is built from this run, so it is stale the moment a new read lands.
+        await queue.enqueue(
+            ctx.db,
+            org_id,
+            NEXT_PLAN_JOB,
+            {"ad_account_id": str(ad_account_id)},
+            dedup_key=f"next_plan:{ad_account_id}",
+            max_attempts=2,
+        )
     log.info(
         "account read stored",
         extra={

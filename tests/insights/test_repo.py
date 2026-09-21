@@ -27,6 +27,6 @@ async def test_insert_skips_duplicates_and_lists(db, org_id):
     a = await repo.insert_insight(db, org_id, _draft(), "because", "test X")
     b = await repo.insert_insight(db, org_id, _draft(), "because", "test X")
     assert a is not None and b is None
-    rows = await repo.list_insights(db, org_id, "pattern")
+    rows = await db.fetch("SELECT * FROM insight WHERE org_id=$1 AND kind='pattern'", org_id)
     assert len(rows) == 1 and rows[0]["explanation"] == "because"
-    assert await repo.list_insights(db, org_id, "fatigue") == []
+    assert await db.fetch("SELECT 1 FROM insight WHERE org_id=$1 AND kind='fatigue'", org_id) == []

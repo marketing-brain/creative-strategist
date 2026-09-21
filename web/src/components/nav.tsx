@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { OrganizationSwitcher, UserButton } from '@clerk/nextjs';
 import {
-  BatteryWarning,
+  Compass,
   LayoutGrid,
   MessageCircleQuestion,
   PanelLeftClose,
@@ -25,10 +25,13 @@ const groups: { label: string; items: NavItem[] }[] = [
   {
     label: 'Workspace',
     items: [
+      // Evidence, then interpretation, then recommendation: the order the data is built in
+      // and the order a reader should meet it in. Ask sits last because it answers against
+      // the account read above it, and is only reachable once one exists.
       { href: '/creatives', label: 'Creatives', icon: LayoutGrid },
       { href: '/insights', label: 'Insights', icon: TrendingUp },
+      { href: '/next', label: 'Next', icon: Compass },
       { href: '/ask', label: 'Ask', icon: MessageCircleQuestion },
-      { href: '/fatigue', label: 'Fatigue', icon: BatteryWarning },
     ],
   },
 ];

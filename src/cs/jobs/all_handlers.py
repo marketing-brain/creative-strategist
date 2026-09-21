@@ -4,4 +4,5 @@ import cs.ingest.durations  # noqa: F401
 import cs.ingest.jobs  # noqa: F401
 import cs.insights.account_read.jobs  # noqa: F401
 import cs.insights.jobs  # noqa: F401
+import cs.insights.next_plan.jobs  # noqa: F401
 import cs.tagging.jobs  # noqa: F401
