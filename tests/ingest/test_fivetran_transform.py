@@ -852,7 +852,20 @@ async def test_feed_spec_video_loader_is_empty_when_the_table_has_not_synced(db)
     assert await fivetran_transform._feed_spec_video_ids(db, SCHEMA) == {}
 
 
-async def test_dead_facebook_video_resolve_is_not_re_enqueued(db, blobs, settings, org_id):
+async def _looked_up(db, org_id, job_type: str, source: str) -> None:
+    """The lookup ran and gave up: its job is done (and may be purged) but the ledger says so."""
+    job = await db.fetchrow("SELECT id, dedup_key FROM job WHERE job_type=$1", job_type)
+    await db.execute("UPDATE job SET status='done', finished_at=now() WHERE id=$1", job["id"])
+    await db.execute(
+        "INSERT INTO video_resolution (creative_id, org_id, source, status, error)"
+        " VALUES ($1::uuid, $2, $3, 'failed', 'gone')",
+        job["dedup_key"],
+        org_id,
+        source,
+    )
+
+
+async def test_looked_up_facebook_video_is_not_re_enqueued(db, blobs, settings, org_id):
     await create_fixture_schema(db, SCHEMA)
     await insert_campaign_ad_creative(
         db,
@@ -869,20 +882,21 @@ async def test_dead_facebook_video_resolve_is_not_re_enqueued(db, blobs, setting
     )
     await insert_asset_feed_spec_video(db, SCHEMA, creative_id="cr1", video_id="v1")
     await _sync_active(db, blobs, settings, org_id)
-    await db.execute("UPDATE job SET status='dead' WHERE job_type='meta.resolve_facebook_video'")
+    await _looked_up(db, org_id, "meta.resolve_facebook_video", "facebook")
     conn = await repo.get_meta_connection(db, org_id)
     ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
 
     await fivetran_transform.discover_and_sync_entities(ctx, org_id, conn)
 
     statuses = await db.fetch("SELECT status FROM job WHERE job_type='meta.resolve_facebook_video'")
-    assert [r["status"] for r in statuses] == ["dead"]
+    assert [r["status"] for r in statuses] == ["done"]
 
 
-async def test_dead_resolve_job_is_not_re_enqueued_on_next_sync(db, blobs, settings, org_id):
-    """Once meta.resolve_instagram_video has exhausted its retries for a creative (post
-    permanently gone/private), the next nightly sync must not re-enqueue it -- otherwise
-    a permanently-unresolvable video costs Apify credits forever."""
+async def test_looked_up_instagram_video_is_not_re_enqueued_after_its_job_is_purged(
+    db, blobs, settings, org_id
+):
+    """The ledger, not the job row, is what stops a paid lookup from running twice: the job
+    can be purged and the next sync must still leave the creative alone."""
     await create_fixture_schema(db, SCHEMA)
     await insert_campaign_ad_creative(
         db,
@@ -907,14 +921,12 @@ async def test_dead_resolve_job_is_not_re_enqueued_on_next_sync(db, blobs, setti
     acct = (await repo.list_ad_accounts(db, org_id))[0]
     await repo.set_ad_account_status(db, org_id, acct["id"], "active")
     await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
-    await db.execute("UPDATE job SET status='dead' WHERE job_type='meta.resolve_instagram_video'")
+    await _looked_up(db, org_id, "meta.resolve_instagram_video", "instagram")
+    await db.execute("DELETE FROM job WHERE job_type='meta.resolve_instagram_video'")  # purged
 
     await fivetran_transform.discover_and_sync_entities(ctx, org_id, connection)
 
-    n = await db.fetchval(
-        "SELECT count(*) FROM job WHERE job_type='meta.resolve_instagram_video'"
-        " AND status != 'dead'"
-    )
+    n = await db.fetchval("SELECT count(*) FROM job WHERE job_type='meta.resolve_instagram_video'")
     assert n == 0
 
 

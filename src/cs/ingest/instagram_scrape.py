@@ -14,20 +14,12 @@ _APIFY_RUN_URL = "https://api.apify.com/v2/acts/apify~instagram-scraper/run-sync
 
 
 class InstagramScrapeError(Exception):
-    """retryable=True for anything that looks transient (network error, rate limit,
-    malformed response) -- the caller should raise and let the job queue retry with
-    backoff. retryable=False for a definitive answer (post deleted/private/not a video,
-    or the feature isn't configured) -- retrying that on the next sync would just spend
-    money to get the same answer again, so the caller should give up instead."""
-
-    def __init__(self, message: str, *, retryable: bool) -> None:
-        super().__init__(message)
-        self.retryable = retryable
+    """Any failure to get a video URL. The caller never retries: every Apify run is paid."""
 
 
 async def resolve_video_url(http: httpx.AsyncClient, settings: Settings, permalink_url: str) -> str:
     if not settings.apify_api_key:
-        raise InstagramScrapeError("APIFY_API_KEY is not configured", retryable=False)
+        raise InstagramScrapeError("APIFY_API_KEY is not configured")
     try:
         resp = await http.post(
             _APIFY_RUN_URL,
@@ -38,12 +30,10 @@ async def resolve_video_url(http: httpx.AsyncClient, settings: Settings, permali
         resp.raise_for_status()
         data = resp.json()
     except httpx.HTTPError as exc:
-        raise InstagramScrapeError(f"Apify request failed: {exc}", retryable=True) from exc
+        raise InstagramScrapeError(f"Apify request failed: {exc}") from exc
     if not isinstance(data, list) or not data:
-        raise InstagramScrapeError("Apify returned no items for this URL", retryable=False)
+        raise InstagramScrapeError("Apify returned no items for this URL")
     video_url = data[0].get("videoUrl")
     if not video_url:
-        raise InstagramScrapeError(
-            "Apify item has no videoUrl -- not a video post", retryable=False
-        )
+        raise InstagramScrapeError("Apify item has no videoUrl -- not a video post")
     return video_url

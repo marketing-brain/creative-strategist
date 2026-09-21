@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -126,58 +127,62 @@ async def download_creative(ctx: JobContext) -> None:
     log.info("creative downloaded", extra={"creative_id": str(creative_id)})
 
 
+async def _resolve_then_download(
+    ctx: JobContext, source: str, lookup: Callable[[httpx.AsyncClient, dict], Awaitable[str]]
+) -> None:
+    """The paid half of getting a video that is not in the ad account's library. Each
+    creative gets one Apify lookup ever, claimed in the video_resolution ledger before the
+    call, so a retried or duplicated job never pays twice. Any failure is final and recorded.
+    A found URL goes to meta.download_creative, the free half, which keeps its own retries."""
+    p = ctx.job.payload
+    org_id, creative_id = ctx.job.org_id, UUID(p["creative_id"])
+    if not await repo.start_video_resolution(ctx.db, org_id, creative_id, source):
+        log.info("video already looked up", extra={"creative_id": str(creative_id)})
+        return
+    try:
+        async with httpx.AsyncClient(timeout=120) as http:
+            video_url = await lookup(http, p)
+    except Exception as exc:  # noqa: BLE001 -- every failure is final: Apify is paid per run
+        await repo.finish_video_resolution(ctx.db, creative_id, video_url=None, error=str(exc))
+        log.warning(
+            "video lookup failed; not retried",
+            extra={"creative_id": str(creative_id), "source": source, "error": str(exc)},
+        )
+        return
+    await repo.finish_video_resolution(ctx.db, creative_id, video_url=video_url)
+    await queue.enqueue(
+        ctx.db,
+        org_id,
+        "meta.download_creative",
+        {
+            "creative_id": str(creative_id),
+            "asset_url": video_url,
+            **{k: p[k] for k in ("kind", "format", "format_source") if k in p},
+        },
+        dedup_key=str(creative_id),
+    )
+    log.info("resolved video via Apify", extra={"creative_id": str(creative_id), "source": source})
+
+
 @handler("meta.resolve_instagram_video")
 async def resolve_instagram_video(ctx: JobContext) -> None:
-    p = ctx.job.payload
-    creative_id = UUID(p["creative_id"])
-    async with httpx.AsyncClient(timeout=120) as http:
-        try:
-            video_url = await instagram_scrape.resolve_video_url(
-                http, ctx.settings, p["permalink_url"]
-            )
-        except instagram_scrape.InstagramScrapeError as exc:
-            if exc.retryable:
-                raise
-            log.warning(
-                "instagram video could not be resolved -- giving up",
-                extra={"creative_id": str(creative_id), "error": str(exc)},
-            )
-            return
-        await assets.download_creative(
-            ctx, http, creative_id, video_url, p["kind"], verdict=_verdict(p)
-        )
-    log.info("resolved instagram-sourced video via Apify", extra={"creative_id": str(creative_id)})
+    async def lookup(http: httpx.AsyncClient, p: dict) -> str:
+        return await instagram_scrape.resolve_video_url(http, ctx.settings, p["permalink_url"])
+
+    await _resolve_then_download(ctx, "instagram", lookup)
 
 
 @handler("meta.resolve_facebook_video")
 async def resolve_facebook_video(ctx: JobContext) -> None:
-    p = ctx.job.payload
-    creative_id = UUID(p["creative_id"])
-    async with httpx.AsyncClient(timeout=120) as http:
-        try:
-            urls = await facebook_video.resolve_video_urls(http, ctx.settings, p["video_ids"])
-        except facebook_video.FacebookVideoError as exc:
-            if exc.retryable:
-                raise
-            log.warning(
-                "facebook video could not be resolved -- giving up",
-                extra={"creative_id": str(creative_id), "error": str(exc)},
-            )
-            return
+    async def lookup(http: httpx.AsyncClient, p: dict) -> str:
+        urls = await facebook_video.resolve_video_urls(http, ctx.settings, p["video_ids"])
+        # The ids are in preference order; the first that plays wins.
         video_id = next((v for v in p["video_ids"] if v in urls), None)
         if video_id is None:
-            log.info(
-                "no public facebook video for creative -- giving up",
-                extra={"creative_id": str(creative_id), "video_ids": p["video_ids"]},
-            )
-            return
-        await assets.download_creative(
-            ctx, http, creative_id, urls[video_id], p["kind"], verdict=_verdict(p)
-        )
-    log.info(
-        "resolved facebook video via Apify",
-        extra={"creative_id": str(creative_id), "video_id": video_id},
-    )
+            raise facebook_video.FacebookVideoError(f"no public video among {p['video_ids']}")
+        return urls[video_id]
+
+    await _resolve_then_download(ctx, "facebook", lookup)
 
 
 @handler("meta.download_carousel")

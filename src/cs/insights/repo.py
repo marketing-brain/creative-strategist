@@ -82,14 +82,16 @@ async def insert_creative_insight(
     input_tokens: int,
     output_tokens: int,
     creative_profile: dict | None = None,
+    error: str | None = None,
 ) -> bool:
-    """Write-once: a second insert for the same creative is a no-op. True if this call wrote."""
+    """Write-once: a second insert for the same creative is a no-op. True if this call wrote.
+    This row is the record that the creative's paid write-up happened, whatever its status."""
     row = await db.fetchrow(
         """
         INSERT INTO creative_insight (creative_id, org_id, status, paragraph, creative_profile,
                                       moments, problems, brief, window_start, window_end, model,
-                                      prompt_sha256, input_tokens, output_tokens)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+                                      prompt_sha256, input_tokens, output_tokens, error)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
         ON CONFLICT (creative_id) DO NOTHING RETURNING creative_id
         """,
         creative_id,
@@ -106,6 +108,7 @@ async def insert_creative_insight(
         prompt_sha256,
         input_tokens,
         output_tokens,
+        (error or "")[:500] or None,
     )
     return row is not None
 

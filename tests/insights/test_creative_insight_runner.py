@@ -163,13 +163,15 @@ async def test_twice_ungrounded_draft_is_stored_rejected(db, blobs, settings, or
     assert await write_creative_insight(ctx, target, writer) == "exists"
 
 
-async def test_refusal_raises_and_writes_nothing(db, blobs, settings, org_id):
+async def test_refusal_is_recorded_as_failed_and_never_paid_for_again(db, blobs, settings, org_id):
+    """The model call is paid: a failure is written down, not raised for the queue to retry."""
     target = await _readable_image(db, blobs, org_id)
-    with pytest.raises(RuntimeError):
-        await write_creative_insight(
-            _ctx(db, blobs, settings, org_id), target, FakeInsightWriter(refuse=True)
-        )
-    assert await repo.get_creative_insight(db, org_id, target) is None
+    writer = FakeInsightWriter(refuse=True)
+    ctx = _ctx(db, blobs, settings, org_id)
+    assert await write_creative_insight(ctx, target, writer) == "failed"
+    row = await repo.get_creative_insight(db, org_id, target)
+    assert row["status"] == "failed" and "refused" in row["error"]
+    assert await write_creative_insight(ctx, target, writer) == "exists"
 
 
 async def test_video_insight_does_not_depend_on_video_tagging(db, blobs, settings, org_id):
@@ -263,16 +265,19 @@ async def test_nightly_sweep_enqueues_readable_candidates_without_an_insight(
     )
     assert [r["payload"]["creative_id"] for r in rows] == [str(big)]
 
-    # A job that exhausted its retries is not re-enqueued.
-    await db.execute(
-        "UPDATE job SET status='dead' WHERE job_type=$1", insight_jobs.CREATIVE_INSIGHT_JOB
-    )
+    # A write-up whose paid call failed is on the ledger and is never queued again.
+    await db.execute("DELETE FROM job WHERE job_type=$1", insight_jobs.CREATIVE_INSIGHT_JOB)
+    await repo.insert_creative_insight(
+        db, org_id, big, status="failed", paragraph="", moments=[], problems=[], brief="b",
+        window_start=TODAY, window_end=TODAY, model="fake", prompt_sha256="s",
+        input_tokens=0, output_tokens=0, error="boom",
+    )  # fmt: skip
     await insight_jobs.nightly_creative_insights(db, settings)
     assert (
         await db.fetchval(
             "SELECT count(*) FROM job WHERE job_type=$1", insight_jobs.CREATIVE_INSIGHT_JOB
         )
-        == 1
+        == 0
     )
 
 

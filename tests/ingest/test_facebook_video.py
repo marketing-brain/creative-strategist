@@ -78,26 +78,24 @@ async def test_a_failed_run_that_answered_every_url_means_no_video_plays(setting
 
 
 @respx.mock
-async def test_a_failed_run_missing_an_answer_is_retryable(settings):
+async def test_a_failed_run_missing_an_answer_raises(settings):
     settings.apify_api_key = "test-token"
     respx.post(START_URL).mock(return_value=run("FAILED"))
     respx.get(ITEMS_URL).mock(return_value=httpx.Response(200, json=[failed("111")]))
     async with httpx.AsyncClient() as http:
-        with pytest.raises(facebook_video.FacebookVideoError) as exc_info:
+        with pytest.raises(facebook_video.FacebookVideoError):
             await facebook_video.resolve_video_urls(http, settings, ["111", "222"])
-    assert exc_info.value.retryable is True
 
 
 @pytest.mark.parametrize("status", ["TIMED-OUT", "ABORTED"])
 @respx.mock
-async def test_a_timed_out_or_aborted_run_is_retryable_even_with_items(settings, status):
+async def test_a_timed_out_or_aborted_run_raises_even_with_items(settings, status):
     settings.apify_api_key = "test-token"
     respx.post(START_URL).mock(return_value=run(status))
     respx.get(ITEMS_URL).mock(return_value=httpx.Response(200, json=[failed("111")]))
     async with httpx.AsyncClient() as http:
-        with pytest.raises(facebook_video.FacebookVideoError) as exc_info:
+        with pytest.raises(facebook_video.FacebookVideoError):
             await facebook_video.resolve_video_urls(http, settings, ["111"])
-    assert exc_info.value.retryable is True
 
 
 @respx.mock
@@ -115,14 +113,13 @@ async def test_waits_for_a_running_run_to_finish(settings):
 
 
 @respx.mock
-async def test_a_run_still_going_at_the_deadline_is_aborted_and_retryable(settings):
+async def test_a_run_still_going_at_the_deadline_is_aborted_and_raises(settings):
     settings.apify_api_key = "test-token"
     respx.post(START_URL).mock(return_value=run("RUNNING"))
     abort = respx.post(f"{RUN_URL}/abort").mock(return_value=run("ABORTING"))
     async with httpx.AsyncClient() as http:
-        with pytest.raises(facebook_video.FacebookVideoError) as exc_info:
+        with pytest.raises(facebook_video.FacebookVideoError):
             await facebook_video.resolve_video_urls(http, settings, ["111"], max_wait_seconds=0)
-    assert exc_info.value.retryable is True
     assert abort.called
 
 
@@ -147,19 +144,17 @@ async def test_resolve_video_urls_ignores_resolved_items_without_a_media_url(set
         assert await facebook_video.resolve_video_urls(http, settings, ["111"]) == {}
 
 
-async def test_resolve_video_urls_without_api_key_is_not_retryable(settings):
+async def test_resolve_video_urls_without_api_key_raises(settings):
     settings.apify_api_key = ""
     async with httpx.AsyncClient() as http:
-        with pytest.raises(facebook_video.FacebookVideoError) as exc_info:
+        with pytest.raises(facebook_video.FacebookVideoError):
             await facebook_video.resolve_video_urls(http, settings, ["111"])
-    assert exc_info.value.retryable is False
 
 
 @respx.mock
-async def test_resolve_video_urls_http_failure_is_retryable(settings):
+async def test_resolve_video_urls_http_failure_raises(settings):
     settings.apify_api_key = "test-token"
     respx.post(START_URL).mock(return_value=httpx.Response(503, text="rate limited"))
     async with httpx.AsyncClient() as http:
-        with pytest.raises(facebook_video.FacebookVideoError) as exc_info:
+        with pytest.raises(facebook_video.FacebookVideoError):
             await facebook_video.resolve_video_urls(http, settings, ["111"])
-    assert exc_info.value.retryable is True

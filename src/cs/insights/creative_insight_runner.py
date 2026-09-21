@@ -33,6 +33,7 @@ Outcome = Literal[
     "unreadable",
     "done",
     "rejected",
+    "failed",
 ]
 
 
@@ -82,21 +83,44 @@ async def write_creative_insight(
         )
 
     brief = render_brief(creative, diagnosed, duration_ms)
+    dx = diagnosed.diagnosis
     feedback: list[str] | None = None
     input_tokens = output_tokens = 0
-    for _ in range(2):
-        text = user_text(brief, feedback)
-        result = await writer.write(images, video, text)
-        input_tokens += result.input_tokens
-        output_tokens += result.output_tokens
-        if result.refused:
-            raise RuntimeError("model refused to write the creative insight")
-        feedback = grounding_problems(result.paragraph, brief, fmt, duration_ms)
-        if not feedback:
-            break
-        log.warning("creative insight %s failed grounding: %s", creative_id, feedback)
+    # Everything above is free and may be retried by the queue; from here on each call is paid,
+    # so a failure is written down as this creative's write-up instead of raised for a retry.
+    try:
+        for _ in range(2):
+            text = user_text(brief, feedback)
+            result = await writer.write(images, video, text)
+            input_tokens += result.input_tokens
+            output_tokens += result.output_tokens
+            if result.refused:
+                raise RuntimeError("model refused to write the creative insight")
+            feedback = grounding_problems(result.paragraph, brief, fmt, duration_ms)
+            if not feedback:
+                break
+            log.warning("creative insight %s failed grounding: %s", creative_id, feedback)
+    except Exception as exc:  # noqa: BLE001 -- recorded, never retried: the call is paid
+        log.warning("creative insight %s failed; not retried: %s", creative_id, exc)
+        await repo.insert_creative_insight(
+            ctx.db,
+            org_id,
+            creative_id,
+            status="failed",
+            paragraph="",
+            moments=[],
+            problems=[],
+            brief=brief,
+            window_start=dx.window_start,
+            window_end=dx.window_end,
+            model=writer.model,
+            prompt_sha256=prompt_sha(SYSTEM, user_text(brief), {}),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            error=str(exc),
+        )
+        return "failed"
     status: Literal["done", "rejected"] = "rejected" if feedback else "done"
-    dx = diagnosed.diagnosis
     await repo.insert_creative_insight(
         ctx.db,
         org_id,

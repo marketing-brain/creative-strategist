@@ -48,6 +48,11 @@ from cs.core.repo.creatives import (
 from cs.core.repo.footage import footage_ads, footage_member_ids, footage_members
 from cs.core.repo.metrics import upsert_audience, upsert_metrics
 from cs.core.repo.partitions import ensure_metric_partition
+from cs.core.repo.video_resolution import (
+    finish_video_resolution,
+    has_video_resolution,
+    start_video_resolution,
+)
 
 __all__ = [
     "MIN_SIBLINGS",
@@ -93,4 +98,7 @@ __all__ = [
     "upsert_meta_connection",
     "upsert_audience",
     "upsert_metrics",
+    "finish_video_resolution",
+    "has_video_resolution",
+    "start_video_resolution",
 ]

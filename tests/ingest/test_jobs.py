@@ -28,7 +28,7 @@ async def test_await_first_sync_reraises_until_fivetran_finishes(db, blobs, sett
     assert await run_once(db, blobs, settings, "w1") is True
     row = await repo.get_meta_connection_by_id(db, conn_id)
     assert row["sync_status"] == "pending"
-    assert await db.fetchval("SELECT status FROM job") == "pending"  # retried, not dead yet
+    assert await db.fetchval("SELECT status FROM job") == "dead"
 
 
 @respx.mock
@@ -231,9 +231,10 @@ async def test_resolve_instagram_video_downloads_and_tags_on_success(db, blobs, 
             "format_source": "meta_object_type",
         },
         dedup_key=str(cid),
-        max_attempts=3,
     )
-    assert await run_once(db, blobs, settings, "w1") is True
+    assert await run_once(db, blobs, settings, "w1") is True  # the paid lookup
+    assert await _ledger(db, cid) == ("found", "https://cdn.instagram/vid.mp4")
+    assert await run_once(db, blobs, settings, "w1") is True  # the free download it queued
     assert await repo.creative_has_primary_asset(db, org_id, cid)
     assert (
         await db.fetchval("SELECT status FROM job WHERE job_type='meta.resolve_instagram_video'")
@@ -248,12 +249,8 @@ async def test_resolve_instagram_video_downloads_and_tags_on_success(db, blobs, 
 
 
 @respx.mock
-async def test_resolve_instagram_video_gives_up_without_retry_when_post_is_gone(
-    db, blobs, settings, org_id
-):
-    """Apify returning no items (deleted/private post) is a definitive answer -- the job
-    must mark done, not retry, so a nightly sync doesn't keep paying Apify to re-learn
-    the same thing forever."""
+async def test_resolve_instagram_video_records_a_gone_post_as_failed(db, blobs, settings, org_id):
+    """The ledger row, not the job, is what stops every later sync paying Apify again."""
     settings.apify_api_key = "test-token"
     respx.post(APIFY_URL).mock(return_value=httpx.Response(200, json=[]))
     cid = await _creative(db, org_id)
@@ -267,15 +264,15 @@ async def test_resolve_instagram_video_gives_up_without_retry_when_post_is_gone(
             "kind": "original_video",
         },
         dedup_key=str(cid),
-        max_attempts=3,
     )
     assert await run_once(db, blobs, settings, "w1") is True
     assert await db.fetchval("SELECT status FROM job") == "done"
+    assert (await _ledger(db, cid))[0] == "failed"
     assert await repo.creative_has_primary_asset(db, org_id, cid) is False
 
 
 @respx.mock
-async def test_resolve_instagram_video_retries_on_transient_apify_failure(
+async def test_resolve_instagram_video_never_retries_a_transient_apify_failure(
     db, blobs, settings, org_id
 ):
     settings.apify_api_key = "test-token"
@@ -291,10 +288,17 @@ async def test_resolve_instagram_video_retries_on_transient_apify_failure(
             "kind": "original_video",
         },
         dedup_key=str(cid),
-        max_attempts=3,
     )
     assert await run_once(db, blobs, settings, "w1") is True
-    assert await db.fetchval("SELECT status FROM job") == "pending"  # retried, not dead yet
+    assert await db.fetchval("SELECT status FROM job") == "done"  # not retried
+    assert (await _ledger(db, cid))[0] == "failed"
+
+
+async def _ledger(db, cid) -> tuple[str, str | None]:
+    row = await db.fetchrow(
+        "SELECT status, video_url FROM video_resolution WHERE creative_id=$1", cid
+    )
+    return (row["status"], row["video_url"])
 
 
 FB_VIDEO_START_URL = (
@@ -334,7 +338,6 @@ async def _enqueue_facebook_resolve(db, org_id, cid, video_ids):
             "format_source": "asset_feed_spec_video",
         },
         dedup_key=str(cid),
-        max_attempts=3,
     )
 
 
@@ -357,7 +360,9 @@ async def test_resolve_facebook_video_downloads_the_first_playable_id_in_order(
     cid = await _creative(db, org_id)
     await _enqueue_facebook_resolve(db, org_id, cid, ["v_feed", "v_story", "v_reels"])
 
-    assert await run_once(db, blobs, settings, "w1") is True
+    assert await run_once(db, blobs, settings, "w1") is True  # the paid lookup
+    assert await _ledger(db, cid) == ("found", "https://video.fbcdn/story.mp4")
+    assert await run_once(db, blobs, settings, "w1") is True  # the free download
 
     assert await repo.creative_has_primary_asset(db, org_id, cid)
     status = await db.fetchval(
@@ -369,8 +374,8 @@ async def test_resolve_facebook_video_downloads_the_first_playable_id_in_order(
 
 
 @respx.mock
-async def test_resolve_facebook_video_gives_up_when_no_id_plays(db, blobs, settings, org_id):
-    # Unpublished ad-only videos are never publicly served; retrying learns nothing.
+async def test_resolve_facebook_video_records_failed_when_no_id_plays(db, blobs, settings, org_id):
+    # Unpublished ad-only videos are never publicly served; the ledger keeps later syncs off it.
     settings.apify_api_key = "test-token"
     # The actor ends the run FAILED when nothing resolved, yet still answers every URL.
     _mock_fb_run("FAILED", [_fb_item("v1")])
@@ -380,11 +385,12 @@ async def test_resolve_facebook_video_gives_up_when_no_id_plays(db, blobs, setti
     assert await run_once(db, blobs, settings, "w1") is True
 
     assert await db.fetchval("SELECT status FROM job") == "done"
+    assert (await _ledger(db, cid))[0] == "failed"
     assert await repo.creative_has_primary_asset(db, org_id, cid) is False
 
 
 @respx.mock
-async def test_resolve_facebook_video_retries_on_transient_apify_failure(
+async def test_resolve_facebook_video_never_retries_a_transient_apify_failure(
     db, blobs, settings, org_id
 ):
     settings.apify_api_key = "test-token"
@@ -394,7 +400,22 @@ async def test_resolve_facebook_video_retries_on_transient_apify_failure(
 
     assert await run_once(db, blobs, settings, "w1") is True
 
-    assert await db.fetchval("SELECT status FROM job") == "pending"
+    assert await db.fetchval("SELECT status FROM job") == "done"  # not retried
+    assert (await _ledger(db, cid))[0] == "failed"
+
+
+@respx.mock
+async def test_a_creative_already_looked_up_is_never_paid_for_again(db, blobs, settings, org_id):
+    settings.apify_api_key = "test-token"
+    start = respx.post(FB_VIDEO_START_URL).mock(return_value=httpx.Response(503))
+    cid = await _creative(db, org_id)
+    await repo.start_video_resolution(db, org_id, cid, "facebook")  # an earlier, crashed attempt
+    await _enqueue_facebook_resolve(db, org_id, cid, ["v1"])
+
+    assert await run_once(db, blobs, settings, "w1") is True
+
+    assert not start.called
+    assert await _ledger(db, cid) == ("started", None)
 
 
 async def test_nightly_sync_skips_non_ready_connections(db, settings, org_id):

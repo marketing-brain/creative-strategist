@@ -125,8 +125,9 @@ async def creative_insight(ctx: JobContext) -> None:
 @register_schedule(NIGHTLY_SCHEDULE, every_seconds=86400)
 async def nightly_creative_insights(db: Database, settings: Settings) -> None:
     """Pick up creatives that were too new to read when they were tagged, and videos, which
-    are not tagged while video tagging is off. Each still gets one insight at most;
-    creatives whose job already exhausted its retries are left alone."""
+    are not tagged while video tagging is off. The candidate query skips any footage with a
+    creative_insight row, and a failed paid call writes one, so nothing is paid for twice.
+    A job that ran out of retries never reached the paid call and may be queued again."""
     until = datetime.now(UTC).date()
     rows = await repo.creative_insight_candidates(
         db,
@@ -146,15 +147,12 @@ async def nightly_creative_insights(db: Database, settings: Settings) -> None:
             room[slot] = settings.creative_insight_limit_per_format - written
         if room[slot] <= 0:
             continue
-        key = creative_insight_dedup_key(r["id"])
-        if await queue.is_dead(db, r["org_id"], CREATIVE_INSIGHT_JOB, key):
-            continue
         room[slot] -= 1
         await queue.enqueue(
             db,
             r["org_id"],
             CREATIVE_INSIGHT_JOB,
             {"creative_id": str(r["id"])},
-            dedup_key=key,
+            dedup_key=creative_insight_dedup_key(r["id"]),
             max_attempts=CREATIVE_INSIGHT_MAX_ATTEMPTS,
         )

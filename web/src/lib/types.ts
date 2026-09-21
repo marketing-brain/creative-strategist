@@ -65,7 +65,7 @@ export type Diagnosis = {
   verdict: { kind: 'broken' | 'healthy' | 'too_early'; headline: string; detail: string; converting?: boolean };
   tiers: DiagnosisTier[];
 };
-export type CreativeInsightReason = 'rejected' | 'no_asset' | 'unresolved' | 'format_limit' | 'lengths_pending' | 'unreadable' | 'paused' | 'waiting';
+export type CreativeInsightReason = 'rejected' | 'failed' | 'no_asset' | 'unresolved' | 'format_limit' | 'lengths_pending' | 'unreadable' | 'paused' | 'waiting';
 export type CreativeInsight = { paragraph: string | null; window_start?: string; window_end?: string; created_at?: string; reason?: CreativeInsightReason; format?: string; limit?: number };
 export type AccountReadTest = { dimension: string; value: string; group: string | null; metric: string; kind: 'per_unit' | 'pooled'; n_cell: number; n_complement: number; cell_value: number; comp_value: number; change: number; p: number; grade: string; confounds: string[]; cell_shas: string[]; bin_edges: [number, number] | null; cell_purchases: number | null; pid?: string };
 export type AccountReadFinding = { title: string; layer: string; paragraph: string; mechanism: string; exemplars: string[]; exception: string; why_non_obvious: string; pattern_ids: string[]; confidence: string };

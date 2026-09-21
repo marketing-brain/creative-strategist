@@ -5,8 +5,8 @@ Reels); videos uploaded only for ads are not publicly served and come back as fa
 The actor writes one item per URL, but exits non-zero when none of them resolved, so the
 run's status alone can't tell "no video plays" from a broken run. The run is started
 asynchronously and its dataset is read whatever the status: a run that answered every URL
-is a definitive result; anything short of that is retryable. Failed URLs aren't charged,
-but every run pays a start fee, so retrying a definitive answer would waste it."""
+is a result; anything short of that is an error. Every run pays a start fee, so nothing
+here is ever retried."""
 
 from __future__ import annotations
 
@@ -26,12 +26,7 @@ _RUNNING = {"READY", "RUNNING", "TIMING-OUT", "ABORTING"}
 
 
 class FacebookVideoError(Exception):
-    """retryable=True for transient failures (network, rate limit, malformed response);
-    False for a definitive answer, so the caller gives up instead of paying to re-ask."""
-
-    def __init__(self, message: str, *, retryable: bool) -> None:
-        super().__init__(message)
-        self.retryable = retryable
+    """Any failure to resolve the ids. The caller never retries: every Apify run is paid."""
 
 
 def watch_url(video_id: str) -> str:
@@ -62,7 +57,7 @@ async def resolve_video_urls(
     """One actor run for all ids; returns {video_id: file URL} for those that play.
     sourceMediaUrl is the actor's single best progressive MP4 (video with audio)."""
     if not settings.apify_api_key:
-        raise FacebookVideoError("APIFY_API_KEY is not configured", retryable=False)
+        raise FacebookVideoError("APIFY_API_KEY is not configured")
     if not video_ids:
         return {}
     headers = {"Authorization": f"Bearer {settings.apify_api_key}"}
@@ -99,8 +94,7 @@ async def resolve_video_urls(
             except httpx.HTTPError:
                 pass
             raise FacebookVideoError(
-                f"Apify run {run['id']} still {run['status']} after {max_wait_seconds}s",
-                retryable=True,
+                f"Apify run {run['id']} still {run['status']} after {max_wait_seconds}s"
             )
         resp = await http.get(
             f"{_API}/datasets/{run['defaultDatasetId']}/items",
@@ -113,9 +107,9 @@ async def resolve_video_urls(
     except FacebookVideoError:
         raise
     except (httpx.HTTPError, ValueError, KeyError) as exc:
-        raise FacebookVideoError(f"Apify request failed: {exc}", retryable=True) from exc
+        raise FacebookVideoError(f"Apify request failed: {exc}") from exc
     if not isinstance(data, list):
-        raise FacebookVideoError("Apify returned a non-list response", retryable=True)
+        raise FacebookVideoError("Apify returned a non-list response")
 
     wanted = set(video_ids)
     answered: set[str] = set()
@@ -139,7 +133,6 @@ async def resolve_video_urls(
     if not finished:
         raise FacebookVideoError(
             f"Apify run {run['id']} ended {run.get('status')} with "
-            f"{len(answered)}/{len(wanted)} URLs answered: {run.get('statusMessage')}",
-            retryable=True,
+            f"{len(answered)}/{len(wanted)} URLs answered: {run.get('statusMessage')}"
         )
     return urls

@@ -430,8 +430,9 @@ async def creative_insight(
     settings: Settings = Depends(get_settings_dep),
 ) -> dict:
     """The written insight for the creative's footage, or {"paragraph": null, "reason": ...}
-    naming why there is none. Rejected drafts (numbers or timestamps not in the brief) are
-    never served. The reason comes from the same gates the insight job obeys."""
+    naming why there is none. Rejected drafts (numbers or timestamps not in the brief) and
+    failed model calls are never served. The reason comes from the same gates the insight
+    job obeys."""
     c = await repo.get_creative(db, auth.org_id, creative_id)
     if not c:
         raise HTTPException(404)
@@ -439,7 +440,7 @@ async def creative_insight(
     ids = await repo.footage_member_ids(db, auth.org_id, creative_id)
     row = await insights_repo.get_footage_insight(db, auth.org_id, ids)
     if row is not None and row["status"] != "done":
-        return {"paragraph": None, "reason": "rejected"}
+        return {"paragraph": None, "reason": "failed" if row["status"] == "failed" else "rejected"}
     if row is None:
         blocker, _ = await insight_blocker(
             db, settings, auth.org_id, c, await _until(db, auth.org_id, c["ad_account_id"]), ids

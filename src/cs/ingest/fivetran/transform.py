@@ -401,17 +401,13 @@ async def _sync_ads_and_creatives(
                 and not verdict.asset_url
                 and cr["instagram_permalink_url"]
                 and not await repo.creative_has_asset(db, org_id, creative_id, kind)
-                and not await queue.is_dead(
-                    db, org_id, "meta.resolve_instagram_video", str(creative_id)
-                )
+                and not await repo.has_video_resolution(db, creative_id)
             ):
                 # video_video_id didn't resolve against ad_video_history -- this is a
                 # Partnership Ad whose video lives in the creator's own Instagram account,
                 # not the ad account's video library. Apify can still fetch it from the
-                # permalink. max_attempts=3 (not the default 5): a failure here is either
-                # transient (retry is cheap) or the post is gone/private (retrying learns
-                # nothing and just spends Apify credits) -- is_dead above stops it from
-                # being re-enqueued on every future sync once those attempts are spent.
+                # permalink. The video_resolution ledger allows one paid lookup per creative,
+                # so a creative that was ever looked up is never queued again.
                 await queue.enqueue(
                     db,
                     org_id,
@@ -424,7 +420,6 @@ async def _sync_ads_and_creatives(
                         "format_source": verdict.source,
                     },
                     dedup_key=str(creative_id),
-                    max_attempts=3,
                 )
             elif (
                 verdict.format == "video"
@@ -432,9 +427,7 @@ async def _sync_ads_and_creatives(
                 and not cr["instagram_permalink_url"]
                 and (video_ids := _video_ids_to_resolve(cr, feed_spec_videos))
                 and not await repo.creative_has_asset(db, org_id, creative_id, kind)
-                and not await queue.is_dead(
-                    db, org_id, "meta.resolve_facebook_video", str(creative_id)
-                )
+                and not await repo.has_video_resolution(db, creative_id)
             ):
                 # No synced source and no Instagram post: Facebook's public player serves
                 # the video if it was published on the Page. One Apify run tries every id.
@@ -450,7 +443,6 @@ async def _sync_ads_and_creatives(
                         "format_source": verdict.source,
                     },
                     dedup_key=str(creative_id),
-                    max_attempts=3,
                 )
         except Exception:
             # One malformed row (bad JSON, unexpected null, etc.) must not abort the
