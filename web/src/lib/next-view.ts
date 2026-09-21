@@ -29,7 +29,7 @@ export type NextView = {
   exploreEmpty: string | null;
   nextTests: string[];
   stale: { days: number; through: string } | null;
-  basis: { units: number; spend: number; firstDay: string | null; lastDay: string | null; createdAt: string | null };
+  basis: { units: number; spend: number; firstDay: string | null; lastDay: string | null; createdAt: string | null; dataThrough: string | null };
 };
 
 // "duration_s" → "duration": the unit suffix is for code. Same rule as the Insights page.
@@ -90,6 +90,7 @@ export function buildNextView(plan: NextPlan): NextView {
       firstDay: plan.window_start ?? null,
       lastDay: plan.window_end ?? null,
       createdAt: plan.created_at ?? null,
+      dataThrough: through,
     },
   };
 }

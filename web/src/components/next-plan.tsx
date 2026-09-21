@@ -356,12 +356,8 @@ export function NextPlanSection({ view, currency }: { view: NextView; currency?:
 
   return (
     <div className="max-w-5xl space-y-6">
-      {view.stale && (
-        <p className="rounded-xl border border-chart-2/40 bg-chart-2/5 px-4 py-3 text-sm leading-6 text-foreground">
-          <span className="font-medium">Delivery data stops on {fmtDay(view.stale.through)}.</span> This plan was built{' '}
-          {view.stale.days} days later, so the thirty-day figures below cover {view.stale.days} days with no data in them, and an ad
-          that started wearing out since then is not on this page.
-        </p>
+      {basis.dataThrough && (
+        <p className="text-sm text-muted-foreground tabular-nums">Data through {fmtDay(basis.dataThrough)}</p>
       )}
       {!view.allocateEmpty && <Summary view={view} f={f} />}
       <SectionNav view={view} />
@@ -467,7 +463,6 @@ export function NextPlanSection({ view, currency }: { view: NextView; currency?:
 
       <p className="border-t border-border pt-4 text-sm text-muted-foreground tabular-nums">
         {basis.units} files · {f.money(basis.spend)} over {fmtDay(basis.firstDay)}–{fmtDay(basis.lastDay)}
-        {basis.createdAt && ` · built ${fmtDay(basis.createdAt)}`}
       </p>
     </div>
   );

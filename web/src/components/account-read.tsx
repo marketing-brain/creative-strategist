@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowRight, ChevronRight, Play } from 'lucide-react';
+import { ChevronRight, Play } from 'lucide-react';
 import { cn } from 'cn';
 import type { AccountReadUnit } from '@/lib/types';
 import type { AccountReadView, AttributeRow, FindingView, FunnelCell } from '@/lib/account-read-view';
@@ -260,15 +260,6 @@ function TaggerNote({ t }: { t: NonNullable<AccountReadView['tagger']> }) {
   );
 }
 
-function Note({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section>
-      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{title}</h3>
-      <div className="max-w-[68ch] text-[14px] leading-6 text-pretty">{children}</div>
-    </section>
-  );
-}
-
 export function AccountReadSection({ status, nUnits, view, stale = false, currency }: {
   status: string; nUnits?: number; view: AccountReadView | null; stale?: boolean; currency?: string;
 }) {
@@ -307,14 +298,6 @@ export function AccountReadSection({ status, nUnits, view, stale = false, curren
             </span>
           ))}
         </p>
-        <p className="max-w-[40ch] text-2xl font-semibold leading-tight tracking-tight text-balance md:text-[28px] md:leading-[1.2]">
-          <Cited text={view.lede} citations={view.citations} />
-        </p>
-        {view.overviewRest && (
-          <p className="max-w-[68ch] text-[15px] leading-7 text-muted-foreground text-pretty">
-            <Cited text={view.overviewRest} citations={view.citations} />
-          </p>
-        )}
         <nav aria-label="On this page" className="flex flex-wrap gap-x-5 gap-y-1 text-[13px] font-medium">
           <a href="#finding-1" className="underline decoration-border underline-offset-4 hover:decoration-foreground">
             {view.findings.length} findings
@@ -338,32 +321,6 @@ export function AccountReadSection({ status, nUnits, view, stale = false, curren
         {view.findings.map((v, i) => (
           <Finding key={i} v={v} index={i} citations={view.citations} f={f} />
         ))}
-      </div>
-
-
-      <div className="grid gap-x-12 gap-y-8 border-t border-border pt-8 md:grid-cols-2">
-        <Note title="Moves together, so can't be told apart">
-          <Cited text={view.entangled} citations={view.citations} />
-        </Note>
-        <Note title="No difference, or too few videos to say">
-          <Cited text={view.no_evidence} citations={view.citations} />
-        </Note>
-        {view.data_needed.length > 0 && (
-          <Note title="What would sharpen this">
-            <ul className="list-disc space-y-2 pl-5 marker:text-muted-foreground">
-              {view.data_needed.map((t, i) => (
-                <li key={i}>{t}</li>
-              ))}
-            </ul>
-          </Note>
-        )}
-        <section className="self-start">
-          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Something this didn&apos;t cover</h3>
-          <Link href="/ask" className="group inline-flex items-center gap-1.5 text-[15px] font-medium">
-            Put your own question to these comparisons
-            <ArrowRight className="size-4 transition-transform duration-200 group-hover:translate-x-0.5" aria-hidden="true" />
-          </Link>
-        </section>
       </div>
     </div>
   );
