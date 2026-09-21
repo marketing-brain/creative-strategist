@@ -474,7 +474,9 @@ def _diagnose(**over):
 
 
 def test_diagnose_broken_layer_is_first_weak_tier():
-    d = _diagnose()
+    w, _ = _video_window_weak_retention()
+    dearer = Sums(**{**w.__dict__, "spend": Decimal("1500")})  # CPA $50 vs the account's $44
+    d = _diagnose(window=dearer)
     keys = ["attention", "retention", "conversion", "fatigue", "context"]
     assert [t.key for t in d.tiers] == keys
     assert d.tiers[0].status == "strong" and d.tiers[1].status == "weak"
@@ -490,6 +492,14 @@ def test_diagnose_broken_layer_is_first_weak_tier():
     assert out["tiers"][1]["curve"]["baseline_label"] == "9 other videos 15–30s long"
     assert out["verdict"]["kind"] == "broken"
     json.dumps(out)  # every value must be JSON-native
+
+
+def test_a_broken_layer_on_an_ad_that_converts_cheaper_reads_as_iterate():
+    d = _diagnose()  # CPA $41 vs $44, conversion tier on par
+    assert d.broken_tier == 2 and d.verdict.kind == "broken" and d.verdict.converting
+    assert d.verdict.headline.startswith("Converting, with a weak retention layer.")
+    assert d.verdict.detail == ""
+    assert d.to_dict()["verdict"]["converting"] is True
 
 
 def test_diagnose_healthy_and_too_early():

@@ -1,4 +1,3 @@
-import { ArrowDown, ArrowUp } from 'lucide-react';
 import { CopyBrief, SeekButton } from '@/components/creative-detail-client';
 import { ConceptSummary, label, secs, words } from '@/components/tag-list';
 import type { Formatters } from '@/lib/format';
@@ -64,47 +63,39 @@ const METRIC_LABEL: Record<CreativePattern['metric'], string> = {
 const isGood = (p: CreativePattern) => (p.metric === 'cpa' ? p.change < 0 : p.change > 0);
 const signedPct = (x: number) => `${x >= 0 ? '+' : '−'}${Math.round(Math.abs(x) * 100)}%`;
 
-function patternValue(p: CreativePattern) {
-  if (!p.bin_edges) return words(p.value);
-  const [lo, hi] = p.bin_edges.map((n) => Math.round(n * 10) / 10);
-  return p.value === 'low' ? `under ${lo}` : p.value === 'high' ? `over ${hi}` : `${lo} to ${hi}`;
-}
-const trait = (p: CreativePattern) => `${label(p.dimension)}: ${patternValue(p)}`;
 const shown = (p: CreativePattern, v: number | null, fmt: Formatters) =>
   v == null ? '–' : p.metric === 'cpa' ? fmt.money(v) : p.metric === 'purchases_per_1k' ? v.toFixed(2) : fmt.pct(v, 1);
 const support = (p: CreativePattern) =>
-  `${p.n_cell} of ${p.n_cell + p.n_complement} videos · ${p.grade}${p.confounds.length ? ` · caution: ${p.confounds.map(words).join(', ')}` : ''}`;
+  `${p.n_cell} of ${p.n_cell + p.n_complement} tagged videos · ${p.grade}${p.confounds.length ? ` · caution: ${p.confounds.map(words).join(', ')}` : ''}`;
 
-// One pattern as a scannable row: direction and size first, then the trait, then the proof.
-function PatternRow({ p, fmt }: { p: CreativePattern; fmt: Formatters }) {
-  const good = isGood(p);
-  const Arrow = p.change < 0 ? ArrowDown : ArrowUp;
-  return (
-    <li className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-3 text-sm">
-      <span className={`flex items-center gap-1 font-semibold tabular-nums ${good ? 'text-success' : 'text-destructive'}`}>
-        <Arrow className="size-3.5" aria-hidden="true" />
-        {signedPct(p.change)}
-      </span>
-      <span className="min-w-0">
-        <span className="font-medium">{trait(p)}</span> <span className="text-muted-foreground">on {METRIC_LABEL[p.metric]}</span>
-        <span className="block text-xs text-muted-foreground tabular-nums">
-          {shown(p, p.cell_value, fmt)} vs {shown(p, p.comp_value, fmt)} · {support(p)}
-        </span>
-      </span>
-    </li>
-  );
-}
+// What the caution flags mean, from the rules in account_read/stats._confounds.
+const CAUTION: Record<string, string> = {
+  budget_concentration: 'one video carries most of this group',
+  seasonality: 'these videos ran at a different time of year',
+};
+const detail = (p: CreativePattern, fmt: Formatters) =>
+  [
+    `${shown(p, p.cell_value, fmt)} with it vs ${shown(p, p.comp_value, fmt)} without`,
+    `${p.n_cell} of ${p.n_cell + p.n_complement} tagged videos have it`,
+    p.grade,
+    ...p.confounds.map((c) => `caution: ${CAUTION[c] ?? words(c)}`),
+  ].join(' · ');
 
+// One pattern per line, in columns: effect, metric, trait. Colour carries good or bad; the
+// figures, grade and cautions behind it are on hover.
 function PatternGroup({ title, rows, fmt }: { title: string; rows: CreativePattern[]; fmt: Formatters }) {
   if (!rows.length) return null;
   return (
-    <div className="space-y-1.5">
-      <h3 className="text-xs font-medium text-muted-foreground">{title}</h3>
-      <ul className="space-y-2">
-        {rows.map((p) => (
-          <PatternRow key={`${p.has}-${p.dimension}-${p.value}-${p.metric}`} p={p} fmt={fmt} />
-        ))}
-      </ul>
+    <div className="grid grid-cols-[4.5rem_3.5rem_6.5rem_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 text-sm">
+      {rows.map((p, i) => (
+        // `contents` has no box to hover, so each cell carries the figures.
+        <div key={`${p.has}-${p.dimension}-${p.value}-${p.metric}`} className="contents">
+          <span className="text-muted-foreground">{i === 0 ? title : ''}</span>
+          <span title={detail(p, fmt)} className={`font-semibold tabular-nums ${isGood(p) ? 'text-success' : 'text-destructive'}`}>{signedPct(p.change)}</span>
+          <span title={detail(p, fmt)} className="text-muted-foreground">{METRIC_LABEL[p.metric]}</span>
+          <span title={detail(p, fmt)} className="min-w-0">{traitPhrase(p)}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -141,18 +132,61 @@ function dropBeats(tier: DiagnosisTier, tags: Tag[]) {
   return during.length ? { from, to, during } : null;
 }
 
+// The opening in three short lines: the on-screen text, the first words spoken, and the hook
+// (what the first frames show plus the hook devices). The tagger stores the text
+// and the speech as one string joined by " / ".
+function OpeningLines({ tags, seekable }: { tags: Tag[]; seekable: boolean }) {
+  const shows = valuesOf(tags, 'opening_shows');
+  const shot = valuesOf(tags, 'opening_shot')[0];
+  const verbatim = tags.find((t) => t.dimension === 'hook_verbatim')?.value;
+  const summary = tags.find((t) => t.dimension === 'hook_summary')?.value;
+  const [onScreen, said] = verbatim ? (verbatim.includes(' / ') ? verbatim.split(' / ', 2) : [verbatim, '']) : ['', ''];
+  // One "Hook" line: what the first frames show and the hook devices, in time order, each with
+  // its timestamp so clicking it jumps the video to that moment.
+  const opening = shows.length ? shows.map((t) => ({ name: `${words(t.value)} on screen`, t: t.t_start_s ?? 0 })) : shot ? [{ name: words(shot.value), t: shot.t_start_s ?? 0 }] : [];
+  const hook = [...opening, ...valuesOf(tags, 'hook_devices').map((t) => ({ name: words(t.value), t: t.t_start_s }))].sort((x, y) => (x.t ?? 0) - (y.t ?? 0));
+  const lines: [string, React.ReactNode][] = [];
+  if (onScreen.trim()) lines.push(['On screen', `“${onScreen.trim()}”`]);
+  if (said.trim()) lines.push(['Says', `“${said.trim()}”`]);
+  if (!verbatim && summary) lines.push(['Hook', summary]);
+  if (hook.length)
+    lines.push([
+      'Hook',
+      <span key="hook" className="flex flex-wrap gap-x-3">
+        {hook.map((h, i) => (
+          <span key={`${h.name}-${i}`}>
+            {h.name} <Stamp t={h.t} seekable={seekable} />
+          </span>
+        ))}
+      </span>,
+    ]);
+  if (!lines.length) return null;
+  return (
+    <div className="space-y-2">
+      <dl className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
+        {lines.map(([k, v], i) => (
+          <div key={i} className="contents">
+            <dt className="text-muted-foreground">{k}</dt>
+            <dd className="min-w-0 break-words">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
 function TierEvidence({ tier, tags, patterns, seekable, fmt }: { tier: DiagnosisTier; tags: Tag[]; patterns: CreativePattern[]; seekable: boolean; fmt: Formatters }) {
-  const opening = tier.key === 'attention' ? tags.find((t) => t.dimension === 'hook_verbatim' || t.dimension === 'hook_summary') : undefined;
-  const rows = TIER_TAGS[tier.key].map((d) => [d, valuesOf(tags, d)] as const).filter(([, v]) => v.length);
+  const attention = tier.key === 'attention';
+  const rows = (attention ? [] : TIER_TAGS[tier.key]).map((d) => [d, valuesOf(tags, d)] as const).filter(([, v]) => v.length);
   const mine = patterns.filter((p) => p.has && TIER_OF_METRIC[p.metric] === tier.key);
   const drop = tier.key === 'retention' ? dropBeats(tier, tags) : null;
-  if (!opening && !rows.length && !mine.length && !drop) return null;
+  if (!attention && !rows.length && !mine.length && !drop) return null;
   return (
-    <div className="space-y-4 border-t border-dashed border-border pt-4">
-      {(opening || rows.length > 0 || drop) && (
+    // Attention prints no numbers of its own, so nothing sits above to divide it from.
+    <div className={tier.key === 'attention' ? 'space-y-4' : 'space-y-4 border-t border-dashed border-border pt-4'}>
+      {attention && <OpeningLines tags={tags} seekable={seekable} />}
+      {(rows.length > 0 || drop) && (
         <div className="space-y-2">
-          <h3 className="text-xs font-medium text-muted-foreground">In the ad</h3>
-          {opening && <p className="max-w-prose text-sm leading-relaxed">Opens with: “{opening.value}”</p>}
           {drop && (
             <p className="text-sm leading-relaxed">
               The steepest drop against similar videos falls between <Stamp t={drop.from} seekable={seekable} /> and <Stamp t={drop.to} seekable={seekable} />. On screen then:{' '}
@@ -183,8 +217,10 @@ function TierEvidence({ tier, tags, patterns, seekable, fmt }: { tier: Diagnosis
           )}
         </div>
       )}
-      <PatternGroup title="Traits of this ad that go with worse results in this account" rows={mine.filter((p) => !isGood(p)).slice(0, 3)} fmt={fmt} />
-      <PatternGroup title="Traits of this ad that go with better results in this account" rows={mine.filter(isGood).slice(0, 3)} fmt={fmt} />
+      <div className="space-y-2">
+        <PatternGroup title="Hurting" rows={mine.filter((p) => !isGood(p)).slice(0, 3)} fmt={fmt} />
+        <PatternGroup title="Helping" rows={mine.filter(isGood).slice(0, 3)} fmt={fmt} />
+      </div>
     </div>
   );
 }
@@ -204,10 +240,73 @@ export const PATTERN_FOOTNOTE =
 
 type Lead = { p: CreativePattern; text: string; why: string | null };
 
+// A test as an editor would read it in a brief. Taxonomy labels ("first 3 seconds show:
+// product") are exact but read like a database. Anything not listed falls back to
+// "with / without value (dimension)".
+const an = (w: string) => (/^[aeiou]/i.test(w) ? `an ${w}` : `a ${w}`);
+const CAPTIONS: Record<string, string> = {
+  none: 'no on-screen text',
+  subtitles: 'subtitles',
+  text_cards: 'text cards',
+  both: 'subtitles and text cards',
+};
+const REVEAL: Record<string, string> = {
+  'under 5s': 'the product on screen within 5 seconds',
+  '5 to 10s': 'the product first shown at 5–10 seconds',
+  '10s to midpoint': 'the product held back until after 10 seconds',
+  'second half': 'the product held back to the second half',
+  never: 'no product shot',
+};
+function traitPhrase(p: CreativePattern): string {
+  const v = words(p.value);
+  if (p.bin_edges) {
+    const [lo, hi] = p.bin_edges.map((n) => Math.round(n * 10) / 10);
+    const [a, b] = p.bin_edges.map(Math.round);
+    if (p.dimension === 'duration_s') return p.value === 'low' ? `a cut shorter than ${a}s` : p.value === 'high' ? `a cut longer than ${b}s` : `a ${a}–${b}s cut`;
+    return `${label(p.dimension)} ${p.value === 'low' ? `under ${lo}` : p.value === 'high' ? `over ${hi}` : `${lo} to ${hi}`}`;
+  }
+  switch (p.dimension) {
+    case 'opening_shows':
+      return `${p.value === 'face' ? 'a face' : `the ${v}`} in the first 3 seconds`;
+    case 'opening_shot':
+    case 'opening_scene':
+      return `${an(v)} opening`;
+    case 'first_product_shown':
+      return REVEAL[p.value] ?? `the product first shown ${v}`;
+    case 'hook_devices':
+      return `${an(v)} hook`;
+    case 'ending':
+      return `${an(v)} ending`;
+    case 'aspect_ratio':
+      return `a ${p.value} cut`;
+    case 'captions':
+      return CAPTIONS[p.value] ?? v;
+    case 'messenger':
+      return an(v);
+    case 'setting':
+      return p.value === 'none' ? 'no live footage' : `${an(v)} setting`;
+    case 'claims':
+      return `the claim “${v}”`;
+    case 'production':
+      return `${v} production`;
+    default:
+      return `${v} (${label(p.dimension)})`;
+  }
+}
+function testLine(p: CreativePattern): string {
+  // Removing the product from the opening is half an instruction; say where it goes instead.
+  if (p.has && p.dimension === 'opening_shows' && p.value === 'product') return 'Test a version that holds the product until after 0:03';
+  if (p.has && p.dimension === 'first_product_shown' && p.value === 'under 5s') return 'Test a version that holds the product until after 0:05';
+  return `Test a version ${p.has ? 'without' : 'with'} ${traitPhrase(p)}`;
+}
+
+// Derived facets carry a fixed sentence about how the label was made, not evidence from this ad.
+const DERIVED = new Set(['opening_shows', 'first_product_shown', 'opening_scene']);
+
 // Why the tagger says this ad has the trait. Shown only for traits the ad has: there is no
 // evidence for an absence, and a label the reader can check is a label they can correct.
 function evidenceFor(p: CreativePattern, tags: Tag[]): string | null {
-  if (!p.has) return null;
+  if (!p.has || DERIVED.has(p.dimension)) return null;
   const t = tags.find((x) => x.dimension === p.dimension && x.value === p.value);
   return t?.evidence?.trim() || null;
 }
@@ -217,7 +316,8 @@ function evidenceFor(p: CreativePattern, tags: Tag[]): string | null {
 // which is the honest form of an account-wide effect applied to one ad.
 function leadsFor(diagnosis: Diagnosis, patterns: CreativePattern[], tags: Tag[], fmt: Formatters): Lead[] {
   const weak = new Set(diagnosis.tiers.filter((t) => t.status === 'weak').map((t) => t.key));
-  const relevant = patterns.filter((p) => weak.has(TIER_OF_METRIC[p.metric]));
+  // Barred traits (demographics, languages the ad lacks) stay in the evidence, never here.
+  const relevant = patterns.filter((p) => weak.has(TIER_OF_METRIC[p.metric]) && p.prescribable !== false);
   const proof = (p: CreativePattern) => `${shown(p, p.cell_value, fmt)} vs ${shown(p, p.comp_value, fmt)}, ${support(p).replaceAll(' · ', ', ')}`;
   // One lead per idea. `idea` groups attributes the API found to cover nearly the same
   // videos, across metrics as well as dimensions: "the first three seconds show the product"
@@ -235,12 +335,20 @@ function leadsFor(diagnosis: Diagnosis, patterns: CreativePattern[], tags: Tag[]
     .filter((p) => p.has && !isGood(p))
     .filter(firstPerDimension)
     .slice(0, 2)
-    .map((p) => ({ p, why: evidenceFor(p, tags), text: `This ad has ${trait(p)}. Videos that do run ${signedPct(p.change)} on ${METRIC_LABEL[p.metric]} (${proof(p)}). Test a version without it.` }));
+    .map((p) => ({
+      p,
+      why: evidenceFor(p, tags),
+      text: `${testLine(p)}. This ad has ${traitPhrase(p)}; videos with it run ${signedPct(p.change)} on ${METRIC_LABEL[p.metric]} (${proof(p)}).`,
+    }));
   const lacks = relevant
     .filter((p) => !p.has)
     .filter(firstPerDimension)
     .slice(0, 3 - Math.min(hurts.length, 1))
-    .map((p) => ({ p, why: null, text: `This ad does not have ${trait(p)}. Videos that do run ${signedPct(p.change)} on ${METRIC_LABEL[p.metric]} (${proof(p)}). Test a version with it.` }));
+    .map((p) => ({
+      p,
+      why: null,
+      text: `${testLine(p)}. This ad lacks it; videos with it run ${signedPct(p.change)} on ${METRIC_LABEL[p.metric]} (${proof(p)}).`,
+    }));
   return [...hurts, ...lacks];
 }
 
@@ -290,17 +398,11 @@ export function NextTests({
         <CopyBrief text={brief} />
       </div>
       <ol className="space-y-2.5">
-        {leads.map(({ p, why }, i) => (
+        {leads.map(({ p }, i) => (
           <li key={i} className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-x-2 text-sm">
             <span className="font-semibold text-muted-foreground tabular-nums">{i + 1}.</span>
             <span className="min-w-0">
-              <span className="font-medium">{p.has ? 'Try it without' : 'Try it with'} {trait(p)}</span>
-              <span className="block text-xs text-muted-foreground tabular-nums">
-                This ad {p.has ? 'has it' : 'does not have it'}. Videos that do run{' '}
-                <span className={`font-semibold ${isGood(p) ? 'text-success' : 'text-destructive'}`}>{signedPct(p.change)}</span> on {METRIC_LABEL[p.metric]}: {shown(p, p.cell_value, fmt)} vs{' '}
-                {shown(p, p.comp_value, fmt)} · {support(p)}
-              </span>
-              {why && <span className="mt-0.5 block text-xs text-muted-foreground/80 italic">Tagged from: “{why}”</span>}
+              <span className="font-medium">{testLine(p)}</span>
             </span>
           </li>
         ))}

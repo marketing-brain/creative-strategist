@@ -284,8 +284,9 @@ def attention_tier(fmt: str, w: Sums, b: Sums) -> Tier:
         )
     elif tier.status == "weak":
         tier.decision = (
-            "The first three seconds are not stopping the scroll. "
-            "Recut the opening or swap the thumbnail; keep the rest."
+            # Feed and Reels autoplay, so the thumbnail is rarely seen; the opening is the lever.
+            "Fewer viewers get past the first three seconds than on the account's other videos. "
+            "Recut the opening; keep the rest."
             if fmt == "video"
             else "This creative is not stopping the scroll. "
             "Try a different visual or headline; keep the offer."
@@ -814,6 +815,10 @@ class Verdict:
     kind: Literal["broken", "healthy", "too_early"]
     headline: str
     detail: str
+    # A weak layer on an ad that already buys customers at or under the account's cost is a
+    # lead to iterate on, not an emergency. Still kind "broken" (the layer is still weak and
+    # /next still lists it); what changes is the advice and the page's tone.
+    converting: bool = False
 
 
 @dataclass
@@ -844,6 +849,25 @@ def _verdict(tiers: list[Tier], window: Sums) -> tuple[int | None, Verdict]:
         passed = [
             t.name for t in tiers if t.tier < broken.tier and t.status in ("strong", "on_par")
         ]
+        conversion = next((t for t in tiers if t.key == "conversion"), None)
+        cpa = conversion.metrics[0] if conversion and conversion.metrics else None
+        # The conversion tier's own floor (readable funnel steps) gates the CPA comparison.
+        if (
+            broken.key != "conversion"
+            and conversion is not None
+            and conversion.status in ("strong", "on_par")
+            and cpa is not None
+            and cpa.value is not None
+            and cpa.baseline is not None
+            and cpa.value <= cpa.baseline
+        ):
+            return broken.tier, Verdict(
+                "broken",
+                f"Converting, with a weak {broken.name.lower()} layer. {broken.decision}",
+                # No detail: the header right above already shows the cost per purchase.
+                "",
+                converting=True,
+            )
         detail = ""
         if passed:
             detail = f"{' and '.join(passed)} {'are' if len(passed) > 1 else 'is'} working. "

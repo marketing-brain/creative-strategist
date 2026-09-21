@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, ChevronRight, Clock, Lock } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronRight, Clock, Lightbulb, Lock } from 'lucide-react';
 import { cn } from 'cn';
 import type { Diagnosis, DiagnosisAudienceSlice, DiagnosisCurve, DiagnosisMetric, DiagnosisPlacement, DiagnosisStatus, DiagnosisStep, DiagnosisTier } from '@/lib/types';
 
@@ -69,9 +69,9 @@ function liftClass(tier: DiagnosisTier, m: DiagnosisMetric): string {
 const COST_METRICS = new Set(['cpa']);
 const shownChange = (m: DiagnosisMetric) => (COST_METRICS.has(m.key) ? -(m.lift ?? 0) : (m.lift ?? 0));
 
-function Pill({ tier }: { tier: DiagnosisTier }) {
+function Pill({ tier, className }: { tier: DiagnosisTier; className?: string }) {
   return (
-    <span className={cn('inline-flex h-6 w-fit items-center gap-1.5 rounded-4xl px-2.5 text-sm font-medium', pillClass[tier.status])}>
+    <span className={cn('inline-flex h-6 w-fit items-center gap-1.5 rounded-4xl px-2.5 text-sm font-medium', className ?? pillClass[tier.status])}>
       {tier.status === 'not_measured' && <Lock className="size-3" aria-hidden="true" />}
       {statusLabel(tier)}
     </span>
@@ -242,7 +242,8 @@ function TierBody({ tier, broken, format, evidence }: { tier: DiagnosisTier; bro
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {text && <p className={cn('max-w-prose text-sm leading-relaxed', weak ? 'font-semibold' : 'text-muted-foreground')}>{text}</p>}
-      {tier.metrics.length > 0 && (
+      {/* Attention's hook rate and link CTR are already in the header, right above. */}
+      {tier.key !== 'attention' && tier.metrics.length > 0 && (
         <div className="flex flex-wrap gap-x-10 gap-y-4">
           {tier.metrics.map((m) => (
             <MetricBlock key={m.key} tier={tier} m={m} />
@@ -269,17 +270,20 @@ function TierBody({ tier, broken, format, evidence }: { tier: DiagnosisTier; bro
 // read yet, is one line: its name, its status and its headline number. After "fix attention,
 // keep the rest", a screen of proof per healthy layer is a screen between the reader and
 // the next thing to do; it stays one click away.
-function TierRow({ tier, broken, format, evidence }: { tier: DiagnosisTier; broken: boolean; format: Diagnosis['format']; evidence?: React.ReactNode }) {
+function TierRow({ tier, broken, converting, format, evidence }: { tier: DiagnosisTier; broken: boolean; converting: boolean; format: Diagnosis['format']; evidence?: React.ReactNode }) {
   const open = tier.status === 'weak';
+  const amber = broken && converting;
   const head = tier.metrics[0];
   return (
-    <details open={open} className={cn('group/tier border-b border-border', broken && 'bg-destructive/[0.03] shadow-[inset_3px_0_0_var(--destructive)]')}>
+    <details open={open} className={cn('group/tier border-b border-border', broken && (converting ? 'bg-chart-2/[0.05] shadow-[inset_3px_0_0_var(--chart-2)]' : 'bg-destructive/[0.03] shadow-[inset_3px_0_0_var(--destructive)]'))}>
       <summary className="flex cursor-pointer list-none items-center gap-3 px-6 py-3.5 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset [&::-webkit-details-marker]:hidden">
-        <div className={cn('flex size-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold tabular-nums', railClass[tier.status])}>{tier.tier}</div>
+        {/* On an ad that converts cheaper than the account, the weak layer takes the verdict's
+            amber rather than red, so the row does not contradict the verdict above it. */}
+        <div className={cn('flex size-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold tabular-nums', amber ? 'bg-chart-2 text-primary-foreground' : railClass[tier.status])}>{tier.tier}</div>
         <span className={cn('w-24 shrink-0 text-base font-semibold', tier.status === 'not_measured' && 'text-muted-foreground')} title={tier.question}>
           {tier.name}
         </span>
-        <Pill tier={tier} />
+        <Pill tier={tier} className={amber ? 'bg-chart-2/15 text-chart-2' : undefined} />
         {head && head.value != null && (
           <span className="hidden min-w-0 truncate text-sm text-muted-foreground tabular-nums group-open/tier:hidden @xl:inline">
             {head.label} <span className="font-medium text-foreground">{fmtValue(head, head.value)}</span>
@@ -321,7 +325,11 @@ export function DiagnosisPanel({
   footnote?: React.ReactNode;
 }) {
   const v = d.verdict;
-  const Icon = v.kind === 'broken' ? AlertCircle : v.kind === 'healthy' ? CheckCircle2 : Clock;
+  // A weak layer on an ad that already converts cheaper than the account is a lead to iterate
+  // on, not an alarm: amber, not red. Red stays for ads whose weak layer is costing money.
+  const tone = v.kind === 'broken' ? (v.converting ? 'iterate' : 'broken') : v.kind;
+  const Icon = { broken: AlertCircle, iterate: Lightbulb, healthy: CheckCircle2, too_early: Clock }[tone];
+  const iconClass = { broken: 'text-destructive', iterate: 'text-chart-2', healthy: 'text-success', too_early: 'text-muted-foreground' }[tone];
   return (
     <section className="@container space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
@@ -332,20 +340,21 @@ export function DiagnosisPanel({
         <div
           className={cn(
             'flex items-center gap-3.5 border-b border-border px-6 py-4',
-            v.kind === 'broken' && 'bg-destructive/[0.06]',
-            v.kind === 'healthy' && 'bg-success/[0.06]',
-            v.kind === 'too_early' && 'bg-muted'
+            tone === 'broken' && 'bg-destructive/[0.06]',
+            tone === 'iterate' && 'bg-chart-2/[0.08]',
+            tone === 'healthy' && 'bg-success/[0.06]',
+            tone === 'too_early' && 'bg-muted'
           )}
         >
-          <Icon className={cn('size-5.5 shrink-0', v.kind === 'broken' ? 'text-destructive' : v.kind === 'healthy' ? 'text-success' : 'text-muted-foreground')} aria-hidden="true" />
+          <Icon className={cn('size-5.5 shrink-0', iconClass)} aria-hidden="true" />
           <div className="flex flex-col gap-1">
             <span className="text-base leading-snug font-semibold">{v.headline}</span>
-            <span className="text-sm leading-relaxed text-muted-foreground">{v.detail}</span>
+            {v.detail && <span className="text-sm leading-relaxed text-muted-foreground">{v.detail}</span>}
           </div>
         </div>
         {afterVerdict}
         {d.tiers.map((t) => (
-          <TierRow key={t.key} tier={t} broken={t.tier === d.broken_tier} format={d.format} evidence={evidence?.[t.key]} />
+          <TierRow key={t.key} tier={t} broken={t.tier === d.broken_tier} converting={!!v.converting} format={d.format} evidence={evidence?.[t.key]} />
         ))}
         <div className="flex flex-wrap gap-x-6 gap-y-1.5 bg-sidebar px-6 py-3.5 text-sm text-muted-foreground">
           {formulas.map(([name, def]) => (

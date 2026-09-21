@@ -9,6 +9,7 @@ from cs.core.db import Database
 from cs.core.ids import new_id
 from cs.insights.account_read.page import PAGE_VERSION, build_page
 from cs.insights.account_read.reliability import FLAG as TAGGER_FLAG
+from cs.insights.next_plan import policy
 
 
 async def insert_run(
@@ -159,6 +160,34 @@ async def purge_runs(db: Database, days: int = 30) -> int:
 FILE_PATTERN_GRADES = ("strong", "suggestive")
 SAME_IDEA = 0.6  # share of files two attributes must have in common to count as one idea
 OVERFETCH = 3  # rows to rank per kind before de-duplication, as a multiple of the limit
+# Hook rate is settled in the first three seconds, so a per-file hook-rate row may only rest
+# on something a viewer can see or hear by then: the opening, and the look and voice that run
+# from the first frame. "Videos that end on a hard cut have a higher hook rate" is a real
+# account-wide difference, but told to one ad as a fix for its hook it cannot work. Whole-ad
+# averages (length, cuts per 10s) and whole-ad ideas (concepts, angles, claims) are left out
+# on purpose: none is known to be on screen by 0:03. Other metrics are settled after the whole
+# ad, so every trait stays eligible there.
+HOOK_VISIBLE_DIMS = (
+    "opening_shows",
+    "opening_shot",
+    "opening_scene",
+    "first_product_shown",
+    "product_reveal",
+    "hook_devices",
+    "aspect_ratio",
+    "captions",
+    "production",
+    "setting",
+    "messenger",
+    "messenger_age_band",
+    "messenger_gender_presentation",
+    "cast",
+    "brand_presence",
+    "native_format_cues",
+    "narration",
+    "spoken_language",
+    "subtitle_language",
+)
 _FILE_PATTERNS: dict[tuple[UUID, str, int], list[dict]] = {}
 _FILE_PATTERNS_MAX = 2000
 
@@ -224,6 +253,8 @@ async def patterns_for_file(
     directional). Main effects only: stratified rows answer a narrower question and the
     interaction family is graded separately.
 
+    Hook-rate rows are kept only on traits visible by 0:03 (`HOOK_VISIBLE_DIMS`).
+
     The filter runs inside Postgres on purpose. `result` is many megabytes per run; shipping
     it to the API on every creative page is what pinned the database on 2026-09-18."""
     run_id = await db.fetchval(
@@ -252,6 +283,7 @@ async def patterns_for_file(
             FROM run, jsonb_array_elements(run.tests) t
             WHERE run.is_unit AND t->>'group' IS NULL AND t->>'grade' = ANY($2)
               AND NOT (t->'confounds' ? $5)
+              AND (t->>'metric' <> 'hook_rate' OR t->>'dimension' = ANY($6))
         ),
         ranked AS (
             SELECT *, row_number() OVER (
@@ -276,8 +308,16 @@ async def patterns_for_file(
         sha256,
         limit * OVERFETCH,
         TAGGER_FLAG,
+        list(HOOK_VISIBLE_DIMS),
     )
     if len(_FILE_PATTERNS) >= _FILE_PATTERNS_MAX:
         _FILE_PATTERNS.clear()
-    _FILE_PATTERNS[key] = _drop_near_duplicates(rows, limit)
+    kept = _drop_near_duplicates(rows, limit)
+    # Every row stays as evidence; `prescribable` says whether a page may turn it into an
+    # instruction, under the /next plan's policy: never a demographic, and never a language
+    # the ad merely lacks.
+    for r in kept:
+        d = r["dimension"]
+        r["prescribable"] = policy.prescribable(d) if r["has"] else policy.explorable(d)
+    _FILE_PATTERNS[key] = kept
     return _FILE_PATTERNS[key]
