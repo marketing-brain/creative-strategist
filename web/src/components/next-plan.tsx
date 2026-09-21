@@ -163,7 +163,7 @@ function DecisionCard({ row, kind, rank, f }: { row: NextAllocationRow; kind: Al
           {(row.broken_layer || row.decline) && (
             <span
               className={cn('inline-flex h-6 shrink-0 items-center rounded-4xl px-2.5 text-sm font-medium tabular-nums', s.pill)}
-              title={row.decline ? `First 14 days ${row.decline.baseline.toFixed(2)} → trailing 7 days ${row.decline.observed.toFixed(2)}` : undefined}
+              title={row.decline ? `Prior 14 days ${row.decline.baseline.toFixed(2)} → trailing 7 days ${row.decline.observed.toFixed(2)}` : undefined}
             >
               {row.broken_layer ?? declineWords(row.decline!)}
             </span>

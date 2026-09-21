@@ -429,7 +429,7 @@ def test_context_never_becomes_the_broken_layer():
         window=healthy,
         baseline=account,
         baseline_creatives=20,
-        first14=None,
+        prior14=None,
         trailing7=None,
         days_live=5,
         duration_ms=None,
@@ -465,7 +465,7 @@ def _video_window_weak_retention():
 def _diagnose(**over):
     w, b = _video_window_weak_retention()
     kw = dict(
-        fmt="video", window=w, baseline=b, baseline_creatives=41, first14=None, trailing7=None,
+        fmt="video", window=w, baseline=b, baseline_creatives=41, prior14=None, trailing7=None,
         days_live=12, duration_ms=24_000, window_start=date(2026, 8, 14),
         window_end=date(2026, 9, 12), retention_baseline=b, retention_baseline_creatives=9,
     )  # fmt: skip

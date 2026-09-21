@@ -28,7 +28,7 @@ def _template(d: InsightDraft) -> tuple[str, str]:
     if d.kind == "fatigue":
         return (
             f"This creative's {d.metric.upper()} is {pct} worse over the last 7 days than in "
-            "its first 14 days.",
+            "the 14 days before them.",
             "Refresh the hook and first frame while keeping the winning offer and message.",
         )
     return (

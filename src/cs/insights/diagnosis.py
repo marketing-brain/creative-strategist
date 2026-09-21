@@ -545,26 +545,26 @@ def conversion_tier(w: Sums, b: Sums) -> Tier:
 
 
 def fatigue_tier(
-    fmt: str, first14: Sums | None, trailing7: Sums | None, days_live: int | None
+    fmt: str, prior14: Sums | None, trailing7: Sums | None, days_live: int | None
 ) -> Tier:
     tier = Tier(4, "fatigue", "Fatigue", "Is this creative wearing out?", "too_young")
     if days_live is None:
         tier.reason = "No impressions yet."
         return tier
-    if days_live < FATIGUE_MIN_DAYS or first14 is None or trailing7 is None:
+    if days_live < FATIGUE_MIN_DAYS or prior14 is None or trailing7 is None:
         tier.reason = (
-            f"Live for {days_live} days. Fatigue compares the last 7 days against the first 14, "
-            f"so this reads from day {FATIGUE_MIN_DAYS}."
+            f"Live for {days_live} days. Fatigue compares the last 7 days against the 14 before "
+            f"them, so this reads from day {FATIGUE_MIN_DAYS}."
         )
         return tier
-    f, t = first14, trailing7
+    f, t = prior14, trailing7
     enough = f.impressions >= FATIGUE_FLOOR and t.impressions >= FATIGUE_FLOOR
     freq = _metric(
         "frequency",
         "Daily frequency",
         ratio(t.impressions, t.reach),
         ratio(f.impressions, f.reach),
-        "last 7 days vs first 14",
+        "last 7 days vs the 14 before",
         enough=enough,
     )
     if fmt == "video":
@@ -870,7 +870,7 @@ def diagnose(
     window: Sums,
     baseline: Sums,
     baseline_creatives: int,
-    first14: Sums | None,
+    prior14: Sums | None,
     trailing7: Sums | None,
     days_live: int | None,
     duration_ms: int | None,
@@ -897,7 +897,7 @@ def diagnose(
             retention_baseline_creatives,
         ),
         conversion_tier(window, baseline),
-        fatigue_tier(fmt, first14, trailing7, days_live),
+        fatigue_tier(fmt, prior14, trailing7, days_live),
         context_tier(fmt, placements, placement_siblings, siblings, audience, audience_siblings),
     ]
     broken, verdict = _verdict(tiers, window)

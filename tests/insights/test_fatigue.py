@@ -9,8 +9,13 @@ async def test_fatigue_flags_ctr_decay(db, org_id, settings):
     acct = await seed_account(db, org_id, settings)
     today = date(2026, 9, 4)
     start = today - timedelta(days=40)
+    # a test-budget trickle at launch, then scale: the trickle must not be the baseline
+    trickle = [
+        (start + timedelta(days=i), Decimal("1"), 20, 0, Decimal("0"), Decimal("0"))
+        for i in range(14)
+    ]
     good = [
-        (start + timedelta(days=i), Decimal("20"), 1000, 30, Decimal("2"), Decimal("100"))
+        (today - timedelta(days=7 + i), Decimal("20"), 1000, 30, Decimal("2"), Decimal("100"))
         for i in range(14)
     ]
     bad = [
@@ -18,7 +23,7 @@ async def test_fatigue_flags_ctr_decay(db, org_id, settings):
         for i in range(7)
     ]
     fatigued = await seed_creative(
-        db, org_id, acct, "f", "image", {"hook_type": "question"}, good + bad
+        db, org_id, acct, "f", "image", {"hook_type": "question"}, trickle + good + bad
     )
     steady = [
         (start + timedelta(days=i), Decimal("20"), 1000, 30, Decimal("2"), Decimal("100"))

@@ -41,7 +41,7 @@ def _diagnosed(
         window=window,
         baseline=baseline,
         baseline_creatives=18,
-        first14=None,
+        prior14=None,
         trailing7=None,
         days_live=12,
         duration_ms=duration_ms,

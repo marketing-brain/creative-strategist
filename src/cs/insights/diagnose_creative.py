@@ -33,7 +33,7 @@ class DiagnosedCreative:
     diagnosis: Diagnosis
     window: Sums
     baseline: Sums
-    first14: Sums | None
+    prior14: Sums | None
     trailing7: Sums | None
     first_day: date | None
     days_live: int | None
@@ -98,11 +98,14 @@ async def diagnose_creative(
     )
     first_day = await repo.creative_first_metric_day(db, org_id, creative_id)
     days_live = (until - first_day).days + 1 if first_day else None
-    first14 = trailing7 = None
+    prior14 = trailing7 = None
     if first_day is not None and days_live is not None and days_live >= FATIGUE_MIN_DAYS:
-        first14 = Sums.from_record(
+        # The 14 days just before the last 7, not the ad's first 14: most ads trickle on a
+        # test budget before they scale, so a launch-anchored window is near empty and, for a
+        # long-running ad, measures budget moves since launch rather than wear-out now.
+        prior14 = Sums.from_record(
             await repo.creative_window_sums(
-                db, org_id, creative_id, first_day, first_day + timedelta(days=13)
+                db, org_id, creative_id, until - timedelta(days=20), until - timedelta(days=7)
             )
         )
         trailing7 = Sums.from_record(
@@ -147,7 +150,7 @@ async def diagnose_creative(
         window=window,
         baseline=baseline,
         baseline_creatives=int(base["creatives"] or 0),
-        first14=first14,
+        prior14=prior14,
         trailing7=trailing7,
         days_live=days_live,
         duration_ms=duration_ms,
@@ -161,4 +164,4 @@ async def diagnose_creative(
         audience=audience,
         audience_siblings=audience_siblings,
     )
-    return DiagnosedCreative(diagnosis, window, baseline, first14, trailing7, first_day, days_live)
+    return DiagnosedCreative(diagnosis, window, baseline, prior14, trailing7, first_day, days_live)

@@ -25,10 +25,11 @@ async def compute_fatigue(
     *,
     spend_floor: Decimal = Decimal("100"),
     drop_threshold: float = 0.30,
-    first_days: int = 14,
+    prior_days: int = 14,
     trailing_days: int = 7,
 ) -> list[InsightDraft]:
     trailing_start = today - timedelta(days=trailing_days - 1)
+    prior_start = trailing_start - timedelta(days=prior_days)
     rows = await db.fetch(
         """
         SELECT creative_id, day, sum(spend) AS spend, sum(impressions) AS imp,
@@ -50,11 +51,12 @@ async def compute_fatigue(
         by_creative[r["creative_id"]].append(r)
     out: list[InsightDraft] = []
     for cid, days in by_creative.items():
-        first_day = days[0]["day"]
-        first_end = first_day + timedelta(days=first_days - 1)
-        if first_end >= trailing_start:
+        # Against the fortnight just before the trailing week, not the ad's first fortnight:
+        # most ads trickle on a test budget before they scale, and a cost measured off that
+        # trickle is a tiny denominator, not a baseline.
+        if days[0]["day"] > prior_start:
             continue  # too young to compare
-        first = [d for d in days if d["day"] <= first_end]
+        first = [d for d in days if prior_start <= d["day"] < trailing_start]
         trailing = [d for d in days if d["day"] >= trailing_start]
 
         def sums(chunk):

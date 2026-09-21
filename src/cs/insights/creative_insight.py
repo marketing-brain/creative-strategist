@@ -175,8 +175,8 @@ def evidence_tier(tier: Tier, d: DiagnosedCreative) -> EvidenceTier:
         ):
             return "reliable"
         return "directional"
-    if tier.key == "fatigue" and d.first14 is not None and d.trailing7 is not None:
-        low = min(d.first14.impressions, d.trailing7.impressions)
+    if tier.key == "fatigue" and d.prior14 is not None and d.trailing7 is not None:
+        low = min(d.prior14.impressions, d.trailing7.impressions)
         return "reliable" if low >= RELIABLE_IMPRESSIONS else "directional"
     if tier.key == "context":
         top = max((p.impressions for p in tier.placements or [] if p.readable), default=0)
@@ -247,7 +247,7 @@ def _attr(value: str) -> str:
 
 
 def _layer_lines(tier: Tier, d: DiagnosedCreative, duration_ms: int | None) -> list[str]:
-    compare = "first 14 days" if tier.key == "fatigue" else "baseline"
+    compare = "prior 14 days" if tier.key == "fatigue" else "baseline"
     lines = [ln for m in tier.metrics if (ln := _metric_line(m, compare))]
     if tier.key == "attention":
         lines.append(f"volume: {d.window.impressions:,} impressions")

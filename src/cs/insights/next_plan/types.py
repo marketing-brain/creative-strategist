@@ -118,7 +118,7 @@ class MakeBrief:
 
 @dataclass
 class Decline:
-    """How an ad is wearing out: its first fourteen days against its trailing seven.
+    """How an ad is wearing out: its trailing seven days against the fourteen before them.
 
     `ratio` is observed / baseline, which for a cost is the natural reading -- "cost per
     purchase is 2.1x what it was". The stored `lift` is not used for display: `signed_lift`
