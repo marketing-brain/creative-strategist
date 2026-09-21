@@ -3,7 +3,6 @@ import type { Metadata } from 'next';
 import { ClampedCopy, CreativeMedia } from '@/components/creative-detail-client';
 import { AdProfile, NextTests, PATTERN_FOOTNOTE, tierEvidence } from '@/components/ad-profile';
 import { CreativeHeader, SectionNav, creativeTitle } from '@/components/creative-header';
-import { CreativeInsightCard, emptyInsightText } from '@/components/creative-insight';
 import { DiagnosisPanel } from '@/components/diagnosis-panel';
 import { CopyVariants, ScopePanel } from '@/components/footage-panel';
 import { MetricChart } from '@/components/metric-chart';
@@ -31,9 +30,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   }
 }
 
-// The ad's own words. Rendered once in the media column on wide screens and once after the
-// insight on narrow ones, where a tall video plus the full copy would otherwise push the
-// analysis three screens down.
+// The ad's own words. Rendered once in the media column on wide screens and once lower down
+// on narrow ones, where a tall video plus the full copy would otherwise push the diagnosis
+// three screens down.
 function AdCopy({ creative, className }: { creative: Creative; className: string }) {
   if (!creative.primary_text && !creative.cta_type && !creative.link_url) return null;
   return (
@@ -59,18 +58,16 @@ export default async function CreativeDetail({ params, searchParams }: Props) {
   const scope: Scope = sp.scope === 'creative' ? 'creative' : 'footage';
   const until = new Date();
   const since = new Date(until.getTime() - 89 * 86400000);
-  const [creative, tags, metrics, dims, diagnosis, insight, footage, accounts, patterns, summary, me] = await Promise.all([
+  const [creative, tags, metrics, dims, diagnosis, footage, accounts, patterns, summary] = await Promise.all([
     getCreative(id),
     api.creativeTags(id),
     api.creativeMetrics(id, iso(since), iso(until), scope),
     api.dimensions(),
     api.creativeDiagnosis(id, scope),
-    api.creativeInsight(id),
     api.creativeFootage(id),
     api.accounts(),
     api.creativePatterns(id),
     api.creativeSummary(id, scope),
-    api.me(),
   ]);
   const account = accounts.find((a) => a.id === creative.ad_account_id);
   const fmt = formatters(account?.currency);
@@ -118,13 +115,6 @@ export default async function CreativeDetail({ params, searchParams }: Props) {
           </div>
           <AdCopy creative={creative} className="lg:hidden" />
           <CopyVariants footage={footage} fmt={fmt} />
-          {/* Written once per file, at the window it names. Shown when it exists; when it does
-              not, only an admin can act on the reason, so only an admin sees it. */}
-          {insight.paragraph ? (
-            <CreativeInsightCard insight={insight} />
-          ) : (
-            me.role === 'admin' && <p className="text-xs text-muted-foreground">Written analysis: {emptyInsightText(insight).replace(/^No insight( yet)?\. /, '')}</p>
-          )}
           <section id="tags" className="scroll-mt-16">
             <h2 className="mb-3 text-sm font-semibold">Tags</h2>
             {creative.format === 'carousel' && <p className="mb-2 text-xs text-muted-foreground">Carousel · tags reflect all cards</p>}
