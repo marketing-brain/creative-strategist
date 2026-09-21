@@ -26,6 +26,9 @@ export type DimensionValue = { value: string; count: number };
 export type DiagnosisStatus = 'strong' | 'on_par' | 'weak' | 'not_applicable' | 'not_enough_data' | 'too_young' | 'not_measured';
 export type DiagnosisMetric = { key: string; label: string; value: number | null; baseline: number | null; lift: number | null; note: string };
 export type DiagnosisCurvePoint = { p: number; share: number | null; baseline_share: number | null };
+// Meta's per-second play curve (0–14s one point per second, then wider buckets to 60s+).
+export type PlayCurvePoint = { start_s: number; end_s: number | null; share: number | null; baseline_share: number | null };
+export type PlayCurve = { points: PlayCurvePoint[]; plays: number; baseline_plays: number; baseline_label: string | null; duration_s: number | null };
 export type DiagnosisCurve = { points: DiagnosisCurvePoint[]; drop_segment: [number, number] | null; avg_watch_s: number | null; duration_s: number | null; baseline_label: string | null };
 export type DiagnosisStep = { key: string; label: string; rate: number | null; baseline_rate: number | null; lift: number | null; numerator: number; denominator: number; readable: boolean };
 export type DiagnosisPlacement = {

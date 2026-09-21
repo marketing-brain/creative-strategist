@@ -94,7 +94,18 @@ function MetricBlock({ tier, m }: { tier: DiagnosisTier; m: DiagnosisMetric }) {
 
 const tickName = (p: number) => (p === 0 ? 'Start' : p === 100 ? 'End' : `${p}%`);
 
-function RetentionCurve({ curve }: { curve: DiagnosisCurve }) {
+const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+
+// The line takes the layer's status colour: red only when retention is the weak layer.
+const curveTone: Partial<Record<DiagnosisStatus, [string, string]>> = {
+  weak: ['stroke-destructive', 'fill-destructive'],
+  strong: ['stroke-success', 'fill-success'],
+};
+
+function RetentionCurve({ curve, status }: { curve: DiagnosisCurve; status: DiagnosisStatus }) {
+  const [stroke, fill] = curveTone[status] ?? ['stroke-foreground', 'fill-foreground'];
+  // Ticks in seconds when the length is known: "25%" of a 111s video hides that it is 0:28.
+  const tick = (p: number) => (curve.duration_s != null ? clock((p / 100) * curve.duration_s) : tickName(p));
   const W = 320;
   const H = 96;
   const top = 6;
@@ -107,18 +118,15 @@ function RetentionCurve({ curve }: { curve: DiagnosisCurve }) {
   const segIdx = seg ? [curve.points.findIndex((p) => p.p === seg[0]), curve.points.findIndex((p) => p.p === seg[1])] : null;
   return (
     <div className="flex w-full flex-col gap-2">
-      <span className="text-sm text-muted-foreground">
-        Share of plays still watching{curve.baseline_label ? ` · dashed line is the ${curve.baseline_label}` : ''}
-      </span>
       <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="block" role="img" aria-label="Watch-through curve">
         {segIdx && segIdx[0] >= 0 && segIdx[1] >= 0 && (
           <rect x={x(segIdx[0])} y={0} width={x(segIdx[1]) - x(segIdx[0])} height={bottom} className="fill-destructive/10" />
         )}
         <line x1="0" y1={bottom} x2={W} y2={bottom} className="stroke-border" strokeWidth="1" />
         <polyline fill="none" className="stroke-muted-foreground" strokeWidth="1.5" strokeDasharray="4 3" points={line('baseline_share')} />
-        <polyline fill="none" className="stroke-destructive" strokeWidth="2.5" strokeLinejoin="round" points={line('share')} />
+        <polyline fill="none" className={stroke} strokeWidth="2.5" strokeLinejoin="round" points={line('share')} />
         {curve.points.map((p, i) => (
-          <circle key={p.p} cx={x(i)} cy={y(p.share)} r="3.5" className="fill-destructive" />
+          <circle key={p.p} cx={x(i)} cy={y(p.share)} r="3.5" className={fill} />
         ))}
       </svg>
       <div className="grid tabular-nums" style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }}>
@@ -127,15 +135,16 @@ function RetentionCurve({ curve }: { curve: DiagnosisCurve }) {
           const align = i === 0 ? 'text-left' : i === n - 1 ? 'text-right' : 'text-center';
           return (
             <div key={p.p} className={cn('flex flex-col gap-0.5', align)}>
-              <span className="text-xs text-muted-foreground">{tickName(p.p)}</span>
+              <span className="text-xs text-muted-foreground">{tick(p.p)}</span>
               <span className={cn('text-sm font-semibold', inDrop && 'text-destructive')}>{p.share == null ? '—' : pct(p.share)}</span>
             </div>
           );
         })}
       </div>
+      {/* One caption: what the line is, what the dashes are, and the average watch. */}
       <span className="text-sm text-muted-foreground">
-        {curve.avg_watch_s != null && `Average watch ${curve.avg_watch_s.toFixed(1)}s${curve.duration_s != null ? ` of ${Math.round(curve.duration_s)}s` : ''}. `}
-        Dashed line is the account baseline.
+        {`Share of plays still watching${curve.baseline_label ? `; dashed: the ${curve.baseline_label}` : ''}`}
+        {curve.avg_watch_s != null && ` · average watch ${clock(curve.avg_watch_s)}${curve.duration_s != null ? ` of ${clock(curve.duration_s)}` : ''}`}
       </span>
     </div>
   );
@@ -235,22 +244,33 @@ function AudienceLine({ audience }: { audience: DiagnosisAudienceSlice[] }) {
   );
 }
 
-function TierBody({ tier, broken, format, evidence }: { tier: DiagnosisTier; broken: boolean; format: Diagnosis['format']; evidence?: React.ReactNode }) {
+function TierBody({ tier, broken, format, evidence, chart }: { tier: DiagnosisTier; broken: boolean; format: Diagnosis['format']; evidence?: React.ReactNode; chart?: React.ReactNode }) {
   const weak = tier.status === 'weak';
   // The verdict above already carries the broken layer's decision word for word.
-  const text = broken ? null : weak ? tier.decision : tier.reason;
+  // A healthy retention layer's sentence only restates its pill.
+  const text = broken ? null : weak ? tier.decision : tier.key === 'retention' ? null : tier.reason;
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {text && <p className={cn('max-w-prose text-sm leading-relaxed', weak ? 'font-semibold' : 'text-muted-foreground')}>{text}</p>}
-      {/* Attention's hook rate and link CTR are already in the header, right above. */}
-      {tier.key !== 'attention' && tier.metrics.length > 0 && (
+      {/* Attention's hook rate and link CTR, and retention's hold rate, are already in the header. */}
+      {tier.key !== 'attention' && tier.key !== 'retention' && tier.metrics.length > 0 && (
         <div className="flex flex-wrap gap-x-10 gap-y-4">
           {tier.metrics.map((m) => (
             <MetricBlock key={m.key} tier={tier} m={m} />
           ))}
         </div>
       )}
-      {tier.curve && <RetentionCurve curve={tier.curve} />}
+      {/* The per-second curve when the page has one; the quartile chart otherwise. */}
+      {/* The per-second curve sits in the same label column as every other row in the layers;
+          the quartile chart is the fallback when there is no curve. */}
+      {chart ? (
+        <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 text-sm">
+          <span className="text-muted-foreground">Watching</span>
+          <div className="min-w-0">{chart}</div>
+        </div>
+      ) : (
+        tier.curve && <RetentionCurve curve={tier.curve} status={tier.status} />
+      )}
       {tier.steps && tier.steps.length > 0 && <StepChain steps={tier.steps} />}
       {tier.placements && tier.placements.length > 0 && (
         <div className="flex flex-col gap-2">
@@ -270,7 +290,7 @@ function TierBody({ tier, broken, format, evidence }: { tier: DiagnosisTier; bro
 // read yet, is one line: its name, its status and its headline number. After "fix attention,
 // keep the rest", a screen of proof per healthy layer is a screen between the reader and
 // the next thing to do; it stays one click away.
-function TierRow({ tier, broken, converting, format, evidence }: { tier: DiagnosisTier; broken: boolean; converting: boolean; format: Diagnosis['format']; evidence?: React.ReactNode }) {
+function TierRow({ tier, broken, converting, format, evidence, chart }: { tier: DiagnosisTier; broken: boolean; converting: boolean; format: Diagnosis['format']; evidence?: React.ReactNode; chart?: React.ReactNode }) {
   const open = tier.status === 'weak';
   const amber = broken && converting;
   const head = tier.metrics[0];
@@ -294,7 +314,7 @@ function TierRow({ tier, broken, converting, format, evidence }: { tier: Diagnos
         <ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground transition-transform group-open/tier:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
       </summary>
       <div className="px-6 pt-1 pb-5 @2xl:pl-[4.25rem]">
-        <TierBody tier={tier} broken={broken} format={format} evidence={evidence} />
+        <TierBody tier={tier} broken={broken} format={format} evidence={evidence} chart={chart} />
       </div>
     </details>
   );
@@ -318,11 +338,13 @@ export function DiagnosisPanel({
   evidence,
   afterVerdict,
   footnote,
+  retentionChart,
 }: {
   diagnosis: Diagnosis;
   evidence?: Partial<Record<DiagnosisTier['key'], React.ReactNode>>;
   afterVerdict?: React.ReactNode;
   footnote?: React.ReactNode;
+  retentionChart?: React.ReactNode;
 }) {
   const v = d.verdict;
   // A weak layer on an ad that already converts cheaper than the account is a lead to iterate
@@ -354,7 +376,7 @@ export function DiagnosisPanel({
         </div>
         {afterVerdict}
         {d.tiers.map((t) => (
-          <TierRow key={t.key} tier={t} broken={t.tier === d.broken_tier} converting={!!v.converting} format={d.format} evidence={evidence?.[t.key]} />
+          <TierRow key={t.key} tier={t} broken={t.tier === d.broken_tier} converting={!!v.converting} format={d.format} evidence={evidence?.[t.key]} chart={t.key === 'retention' ? retentionChart : undefined} />
         ))}
         <div className="flex flex-wrap gap-x-6 gap-y-1.5 bg-sidebar px-6 py-3.5 text-sm text-muted-foreground">
           {formulas.map(([name, def]) => (

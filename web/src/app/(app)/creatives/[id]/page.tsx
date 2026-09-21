@@ -6,6 +6,7 @@ import { CreativeHeader, SectionNav, creativeTitle } from '@/components/creative
 import { DiagnosisPanel } from '@/components/diagnosis-panel';
 import { CopyVariants, ScopePanel } from '@/components/footage-panel';
 import { MetricChart } from '@/components/metric-chart';
+import { PlayCurveChart } from '@/components/play-curve-chart';
 import { TagList } from '@/components/tag-list';
 import { api } from '@/lib/api';
 import { blobUrl } from '@/lib/blob-url';
@@ -58,7 +59,7 @@ export default async function CreativeDetail({ params, searchParams }: Props) {
   const scope: Scope = sp.scope === 'creative' ? 'creative' : 'footage';
   const until = new Date();
   const since = new Date(until.getTime() - 89 * 86400000);
-  const [creative, tags, metrics, dims, diagnosis, footage, accounts, patterns, summary] = await Promise.all([
+  const [creative, tags, metrics, dims, diagnosis, footage, accounts, patterns, summary, playCurve] = await Promise.all([
     getCreative(id),
     api.creativeTags(id),
     api.creativeMetrics(id, iso(since), iso(until), scope),
@@ -68,11 +69,15 @@ export default async function CreativeDetail({ params, searchParams }: Props) {
     api.accounts(),
     api.creativePatterns(id),
     api.creativeSummary(id, scope),
+    // Optional evidence: a failure leaves the retention layer on its quartile chart.
+    api.creativePlayCurve(id, scope).catch(() => null),
   ]);
   const account = accounts.find((a) => a.id === creative.ad_account_id);
   const fmt = formatters(account?.currency);
   const isVideo = creative.format === 'video';
   const aspect = tags.find((t) => t.dimension === 'aspect_ratio')?.value;
+  const retention = diagnosis.tiers.find((t) => t.key === 'retention');
+  const beats = tags.filter((t) => t.dimension === 'beats' && t.t_start_s != null).map((t) => ({ name: t.value.replaceAll('_', ' '), t: t.t_start_s as number }));
   return (
     <div className="space-y-6">
       <CreativeHeader creative={creative} footage={footage} />
@@ -103,6 +108,7 @@ export default async function CreativeDetail({ params, searchParams }: Props) {
               evidence={tierEvidence(diagnosis, tags, patterns, isVideo, fmt)}
               afterVerdict={<NextTests title={creativeTitle(creative)} diagnosis={diagnosis} tags={tags} patterns={patterns} fmt={fmt} />}
               footnote={patterns.length > 0 ? PATTERN_FOOTNOTE : undefined}
+              retentionChart={playCurve && retention ? <PlayCurveChart curve={playCurve} beats={beats} /> : undefined}
             />
           </div>
           <section id="performance" className="scroll-mt-16">

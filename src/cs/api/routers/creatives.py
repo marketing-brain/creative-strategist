@@ -13,10 +13,12 @@ from cs.core.blobs import BlobStore
 from cs.core.config import Settings
 from cs.core.db import Database
 from cs.core.metrics import derived_metrics
+from cs.insights import play_curve
 from cs.insights import repo as insights_repo
 from cs.insights.account_read import repo as account_read_repo
 from cs.insights.creative_insight_gates import NIGHTLY_SCHEDULE, insight_blocker
 from cs.insights.diagnose_creative import WINDOW_DAYS, diagnose_creative
+from cs.insights.diagnosis import bucket_label, length_bucket
 from cs.jobs.scheduler import schedule_paused
 
 router = APIRouter(prefix="/creatives")
@@ -336,6 +338,36 @@ async def creative_summary(
         "baseline": _rates(base),
         "baseline_creatives": int(base["creatives"] or 0),
     }
+
+
+@router.get("/{creative_id}/play-curve")
+async def creative_play_curve(
+    creative_id: UUID,
+    scope: str = SCOPE,
+    auth: AuthContext = Depends(current_auth),
+    db: Database = Depends(get_db),
+) -> dict | None:
+    """Share of plays still watching, second by second, over the diagnosis window, beside
+    other videos of similar length. None when the file is not a video, the org has no curve
+    report, or there are too few plays to draw; the page then keeps its quartile chart."""
+    c = await repo.get_creative(db, auth.org_id, creative_id)
+    if not c:
+        raise HTTPException(404)
+    if c["format"] != "video":
+        return None
+    ids = await _scope_ids(db, auth.org_id, creative_id, scope)
+    until = await _until(db, auth.org_id, c["ad_account_id"])
+    since = until - timedelta(days=WINDOW_DAYS - 1)
+    duration_ms = c["primary_asset_duration_ms"]
+    bucket = length_bucket(duration_ms)
+    rows = await play_curve.play_curve(
+        db, auth.org_id, c["ad_account_id"], ids, since, until, bucket
+    )
+    return play_curve.shape(
+        rows,
+        duration_ms / 1000 if duration_ms else None,
+        f"other videos {bucket_label(bucket)}" if bucket else None,
+    )
 
 
 @router.get("/{creative_id}/patterns")

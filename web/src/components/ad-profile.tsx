@@ -55,7 +55,8 @@ const TIER_OF_METRIC: Record<CreativePattern['metric'], DiagnosisTier['key']> = 
 const METRIC_LABEL: Record<CreativePattern['metric'], string> = {
   hook_rate: 'hook rate',
   link_ctr: 'link CTR',
-  thruplay_rate: 'ThruPlay rate',
+  // ThruPlays ÷ plays, not the header's hold rate (ThruPlays ÷ 3-second views).
+  thruplay_rate: 'plays past 15s',
   cpa: 'cost per purchase',
   purchases_per_1k: 'purchases per 1,000 impressions',
 };
@@ -178,12 +179,32 @@ function OpeningLines({ tags, seekable }: { tags: Tag[]; seekable: boolean }) {
 function TierEvidence({ tier, tags, patterns, seekable, fmt }: { tier: DiagnosisTier; tags: Tag[]; patterns: CreativePattern[]; seekable: boolean; fmt: Formatters }) {
   const attention = tier.key === 'attention';
   const rows = (attention ? [] : TIER_TAGS[tier.key]).map((d) => [d, valuesOf(tags, d)] as const).filter(([, v]) => v.length);
-  const mine = patterns.filter((p) => p.has && TIER_OF_METRIC[p.metric] === tier.key);
+  // Retention drops what another layer already says (the same trait under Attention), length
+  // (ThruPlay counts 15 seconds watched, so longer videos pass it by arithmetic), and traits
+  // most tagged videos share, which tell this ad apart from nothing.
+  const inAttention = new Set(patterns.filter((p) => p.has && TIER_OF_METRIC[p.metric] === 'attention').map((p) => `${p.dimension}=${p.value}`));
+  const mine = patterns.filter(
+    (p) =>
+      p.has &&
+      TIER_OF_METRIC[p.metric] === tier.key &&
+      (tier.key !== 'retention' || (!inAttention.has(`${p.dimension}=${p.value}`) && p.dimension !== 'duration_s' && p.n_cell < 0.7 * (p.n_cell + p.n_complement)))
+  );
   const drop = tier.key === 'retention' ? dropBeats(tier, tags) : null;
-  if (!attention && !rows.length && !mine.length && !drop) return null;
+  // Retention lists the ad's beats the way Attention lists its hook: name, then a timestamp
+  // that plays the video from there. The opening beat is Attention's Hook row, so it is left out.
+  const beats =
+    tier.key === 'retention'
+      ? valuesOf(tags, 'beats')
+          .filter((b) => b.t_start_s !== null && b.value !== 'hook')
+          .sort((a, b) => (a.t_start_s ?? 0) - (b.t_start_s ?? 0))
+      : [];
+  if (!attention && !rows.length && !mine.length && !drop && !beats.length) return null;
+  // Attention and Retention are label-column rows all the way down, so nothing needs dividing;
+  // the other layers still separate their metric blocks from the evidence under them.
+  const rowsOnly = attention || tier.key === 'retention';
   return (
     // Attention prints no numbers of its own, so nothing sits above to divide it from.
-    <div className={tier.key === 'attention' ? 'space-y-4' : 'space-y-4 border-t border-dashed border-border pt-4'}>
+    <div className={rowsOnly ? 'space-y-4' : 'space-y-4 border-t border-dashed border-border pt-4'}>
       {attention && <OpeningLines tags={tags} seekable={seekable} />}
       {(rows.length > 0 || drop) && (
         <div className="space-y-2">
@@ -216,6 +237,18 @@ function TierEvidence({ tier, tags, patterns, seekable, fmt }: { tier: Diagnosis
             </dl>
           )}
         </div>
+      )}
+      {beats.length > 0 && (
+        <dl className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 text-sm">
+          <dt className="text-muted-foreground">Beats</dt>
+          <dd className="flex min-w-0 flex-wrap gap-x-3">
+            {beats.map((b, i) => (
+              <span key={`${b.value}-${i}`}>
+                {words(b.value)} <Stamp t={b.t_start_s} seekable={seekable} />
+              </span>
+            ))}
+          </dd>
+        </dl>
       )}
       <div className="space-y-2">
         <PatternGroup title="Hurting" rows={mine.filter((p) => !isGood(p)).slice(0, 3)} fmt={fmt} />

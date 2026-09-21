@@ -39,6 +39,8 @@ export const api = {
     apiFetch<import('./types').MetricDay[]>(`/creatives/${id}/metrics?since=${since}&until=${until}&scope=${scope}`),
   creativeDiagnosis: (id: string, scope: import('./types').Scope = 'footage') =>
     apiFetch<import('./types').Diagnosis>(`/creatives/${id}/diagnosis?scope=${scope}`),
+  creativePlayCurve: (id: string, scope: import('./types').Scope = 'footage') =>
+    apiFetch<import('./types').PlayCurve | null>(`/creatives/${id}/play-curve?scope=${scope}`),
   creativeInsight: (id: string) => apiFetch<import('./types').CreativeInsight>(`/creatives/${id}/insight`),
   creativeTags: (id: string) => apiFetch<import('./types').Tag[]>(`/creatives/${id}/tags`),
   dimensions: () => apiFetch<import('./types').Dimension[]>('/tags/dimensions'),

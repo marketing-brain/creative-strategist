@@ -44,11 +44,14 @@ export function CreativeMedia({ src, format, alt, aspect }: { src: string | null
 
 // A timestamp that moves the page's video to that moment. The diagnosis and tags cite
 // seconds; this is what makes them checkable without scrubbing by hand.
+// Jump the page's video to a second. Anything on the page can call it; CreativeMedia listens.
+export const seekTo = (seconds: number) => window.dispatchEvent(new CustomEvent(SEEK_EVENT, { detail: seconds }));
+
 export function SeekButton({ seconds, label, className }: { seconds: number; label: string; className?: string }) {
   return (
     <button
       type="button"
-      onClick={() => window.dispatchEvent(new CustomEvent(SEEK_EVENT, { detail: seconds }))}
+      onClick={() => seekTo(seconds)}
       aria-label={`Play the video from ${label}`}
       className={`cursor-pointer rounded-sm tabular-nums text-primary underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${className ?? ''}`}
     >
