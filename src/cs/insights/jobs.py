@@ -12,7 +12,7 @@ from cs.insights.creative_insight import GeminiGatewayInsightWriter, InsightWrit
 from cs.insights.creative_insight_gates import FORMATS, NIGHTLY_SCHEDULE
 from cs.insights.creative_insight_runner import write_creative_insight
 from cs.insights.diagnosis import ATTENTION_FLOOR
-from cs.insights.explain import Explainer, GeminiGatewayExplainer
+from cs.insights.explain import Explainer, GeminiGatewayExplainer, _template
 from cs.insights.fatigue import compute_fatigue
 from cs.insights.types import InsightDraft
 from cs.jobs.registry import JobContext, handler
@@ -87,7 +87,17 @@ async def compute_fatigue_job(ctx: JobContext) -> None:
     # The trailing window ends on the account's last synced day, not on the wall clock.
     last = await core_repo.account_last_metric_day(ctx.db, ctx.job.org_id, acct["id"])
     drafts = await compute_fatigue(ctx.db, ctx.job.org_id, acct["id"], last or date.today())
-    await _persist(ctx, drafts[:50], acct["name"])
+    # Fatigue is a current state, not a history: /next reads every fatigue row the account
+    # has, so each run replaces the last one's. The text is the template -- nothing displays
+    # it since the Fatigue tab went, so a model call per row would buy nothing.
+    async with ctx.db.transaction() as tx:
+        await tx.execute(
+            "DELETE FROM insight WHERE org_id=$1 AND ad_account_id=$2 AND kind='fatigue'",
+            ctx.job.org_id,
+            acct["id"],
+        )
+        for d in drafts[:50]:
+            await repo.insert_insight(tx, ctx.job.org_id, d, *_template(d))
 
 
 async def _enqueue_for_active(db: Database, job_type: str, prefix: str) -> None:
