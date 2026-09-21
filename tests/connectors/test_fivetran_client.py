@@ -64,7 +64,6 @@ async def test_create_connector_requests_video_retention_custom_report(settings)
     assert [t["table_name"] for t in config["custom_tables"]] == [
         "video_retention_ad",
         "ad_signals",
-        "placement_ad",
         "demographics_ad",
         "carousel_card_ad",
         "asset_video_ad",
@@ -286,8 +285,7 @@ def test_reports_follow_fivetran_and_meta_rules():
             "asset_body_ad",
             "asset_title_ad",
         )
-        weekly = ("placement_ad",)
-        expected = "Month" if name in monthly else "Week" if name in weekly else "Day"
+        expected = "Month" if name in monthly else "Day"
         assert t["aggregation"] == expected, name
         assert len(t["fields"]) == len(set(t["fields"])), name
         breakdowns = tuple(sorted(t.get("breakdowns") or []))
@@ -311,8 +309,8 @@ def test_reports_carry_the_signals_the_insights_need():
     by_name = {t["table_name"]: t for t in client.CUSTOM_TABLES}
     signals = set(by_name["ad_signals"]["fields"])
     assert {"outbound_clicks", "video_play_curve_actions"} <= signals
-    # Placement feeds the funnel's Context tier, compared against its trailing 30-day window.
-    assert by_name["placement_ad"]["aggregation"] == "Week"
+    # The placement report was retired on 2026-09-21; new connectors never get it.
+    assert "placement_ad" not in by_name and "placement_ad" in client.RETIRED_REPORTS
     # Rejected by Fivetran on a daily ad-level report (org 2, 2026-09-15).
     assert not signals & {
         "quality_ranking",
@@ -320,13 +318,12 @@ def test_reports_carry_the_signals_the_insights_need():
         "conversion_rate_ranking",
         "unique_outbound_clicks",
     }
-    assert "actions" in by_name["placement_ad"]["fields"]
     assert by_name["demographics_ad"]["breakdowns"] == ["age", "gender"]
     assert "action_carousel_card_id" in by_name["carousel_card_ad"]["action_breakdowns"]
 
 
 def test_plan_adds_missing_extends_ours_and_leaves_the_rest_alone():
-    placement = next(t for t in client.CUSTOM_TABLES if t["table_name"] == "placement_ad")
+    demo = next(t for t in client.CUSTOM_TABLES if t["table_name"] == "demographics_ad")
     connector = {
         "config": {
             "custom_tables": [
@@ -337,26 +334,24 @@ def test_plan_adds_missing_extends_ours_and_leaves_the_rest_alone():
                     "fields": ["ad_id", "outbound_clicks", "video_play_curve_actions"],
                 },
                 {
-                    "table_name": "placement_ad",
-                    "breakdowns": ["platform_position", "publisher_platform"],
-                    "fields": [*placement["fields"][:3], "a_field_someone_added"],
+                    "table_name": "demographics_ad",
+                    "breakdowns": ["gender", "age"],
+                    "fields": [*demo["fields"][:3], "a_field_someone_added"],
                 },
-                {"table_name": "demographics_ad", "breakdowns": ["age"], "fields": ["ad_id"]},
+                {"table_name": "carousel_card_ad", "fields": ["ad_id"]},
+                # Retired: flagged for removal, never extended.
+                {"table_name": "placement_ad", "fields": ["ad_id"]},
             ]
         }
     }
     plan = client.plan_custom_reports(connector)
-    assert plan["missing"] == [
-        "carousel_card_ad",
-        "asset_video_ad",
-        "asset_body_ad",
-        "asset_title_ad",
-    ]
+    assert plan["missing"] == ["asset_video_ad", "asset_body_ad", "asset_title_ad"]
     # Frozen and hand-made reports are never extended; ours only gain fields, never lose them.
-    assert set(plan["extend"]) == {"ad_signals", "placement_ad"}
+    assert set(plan["extend"]) == {"ad_signals", "demographics_ad"}
     assert "video_play_curve_actions" not in plan["extend"]["ad_signals"]  # already present
-    assert plan["extend"]["placement_ad"] == placement["fields"][3:]
-    assert plan["conflicts"] == ["demographics_ad"]
+    assert plan["extend"]["demographics_ad"] == demo["fields"][3:]
+    assert plan["conflicts"] == ["carousel_card_ad"]
+    assert plan["retire"] == ["placement_ad"]
     assert client.plan_custom_reports({})["missing"] == [
         t["table_name"] for t in client.CUSTOM_TABLES
     ]
@@ -427,6 +422,8 @@ async def test_apply_custom_reports_adds_extends_tests_and_enables_tables(settin
         "video_retention_ad": {"enabled": True},
         "ad_signals": {"enabled": True},
         "ad_signals_outbound_clicks": {"enabled": False},
+        "demographics_ad": {"enabled": False},
+        # A retired report's table is never switched back on.
         "placement_ad": {"enabled": False},
         "demographics_age": {"enabled": False},
     }
@@ -458,11 +455,11 @@ async def test_apply_custom_reports_adds_extends_tests_and_enables_tables(settin
     patch = json.loads(schema_route.calls.last.request.content)
     assert set(patch["schemas"]["org1__meta_ads"]["tables"]) == {
         "ad_signals_outbound_clicks",
-        "placement_ad",
+        "demographics_ad",
     }
     assert result["added_reports"] == [t["table_name"] for t in client.CUSTOM_TABLES[2:]]
     assert set(result["extended_reports"]) == {"ad_signals"}
-    assert result["enabled_tables"] == ["ad_signals_outbound_clicks", "placement_ad"]
+    assert result["enabled_tables"] == ["ad_signals_outbound_clicks", "demographics_ad"]
 
 
 @respx.mock
@@ -484,6 +481,50 @@ async def test_apply_custom_reports_restores_previous_reports_when_setup_breaks(
     }
     assert test_route.call_count == 2
     assert not reload_route.called
+
+
+@respx.mock
+async def test_retire_custom_reports_removes_only_the_retired_ones(settings):
+    _settings(settings)
+    kept = [{"table_name": "ad_signals", "fields": ["ad_id"]}, {"table_name": "hand_made"}]
+    _connector_route([*kept[:1], {"table_name": "placement_ad", "fields": ["ad_id"]}, kept[1]])
+    config_route = respx.patch(f"{F}/connectors/conn_1").mock(
+        return_value=httpx.Response(200, json={"data": {}})
+    )
+    _test_route("connected")
+    async with httpx.AsyncClient() as http:
+        assert await client.retire_custom_reports(settings, http, "conn_1") == ["placement_ad"]
+    assert json.loads(config_route.calls.last.request.content) == {
+        "config": {"custom_tables": kept}
+    }
+
+
+@respx.mock
+async def test_retire_custom_reports_restores_them_when_setup_breaks(settings):
+    _settings(settings)
+    before = [{"table_name": "ad_signals"}, {"table_name": "placement_ad"}]
+    _connector_route(before)
+    config_route = respx.patch(f"{F}/connectors/conn_1").mock(
+        return_value=httpx.Response(200, json={"data": {}})
+    )
+    _test_route("broken", "connected")
+    async with httpx.AsyncClient() as http:
+        with pytest.raises(client.FivetranError, match="previous reports restored"):
+            await client.retire_custom_reports(settings, http, "conn_1")
+    assert config_route.call_count == 2
+    assert json.loads(config_route.calls.last.request.content) == {
+        "config": {"custom_tables": before}
+    }
+
+
+@respx.mock
+async def test_retire_custom_reports_is_a_noop_when_none_are_present(settings):
+    _settings(settings)
+    _connector_route([{"table_name": "ad_signals"}])
+    config_route = respx.patch(f"{F}/connectors/conn_1")
+    async with httpx.AsyncClient() as http:
+        assert await client.retire_custom_reports(settings, http, "conn_1") == []
+    assert not config_route.called
 
 
 @respx.mock

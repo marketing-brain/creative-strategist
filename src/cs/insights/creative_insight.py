@@ -178,9 +178,6 @@ def evidence_tier(tier: Tier, d: DiagnosedCreative) -> EvidenceTier:
     if tier.key == "fatigue" and d.prior14 is not None and d.trailing7 is not None:
         low = min(d.prior14.impressions, d.trailing7.impressions)
         return "reliable" if low >= RELIABLE_IMPRESSIONS else "directional"
-    if tier.key == "context":
-        top = max((p.impressions for p in tier.placements or [] if p.readable), default=0)
-        return "reliable" if top >= RELIABLE_IMPRESSIONS else "directional"
     return "directional"
 
 
@@ -238,10 +235,6 @@ def _metric_line(m: Metric, compare: str) -> str | None:
     return line
 
 
-def _signed(lift: float) -> str:
-    return f"{'+' if lift >= 0 else '-'}{abs(lift) * 100:.0f}%"
-
-
 def _attr(value: str) -> str:
     return value.replace('"', "'").replace("\n", " ")
 
@@ -287,26 +280,9 @@ def _layer_lines(tier: Tier, d: DiagnosedCreative, duration_ms: int | None) -> l
         lines.append(f"live for {d.days_live} days")
     if tier.key == "context":
         lines.append(
-            "Meta's optimiser chose this placement mix and audience, not the advertiser. "
-            f"Compared with {tier.comparison}."
+            f"Meta's optimiser chose this audience, not the advertiser. Compared with "
+            f"{tier.comparison}."
         )
-        lines.append(
-            "per placement: share of delivery, the rate, and fit -- how far the rate sits from "
-            "this ad's own placement average once the comparison set's pattern for that "
-            "placement is removed. Fit is zero-sum, so read it as travel, not performance:"
-        )
-        for p in tier.placements or []:
-            share = f"{p.share * 100:.0f}% of delivery" if p.share is not None else "unknown share"
-            parts = []
-            if p.hook_rate is not None:
-                fit = f", fit {_signed(p.hook_fit)}" if p.hook_fit is not None else ""
-                parts.append(f"hook {_pct(p.hook_rate, 1)}{fit}")
-            if p.link_ctr is not None:
-                fit = f", fit {_signed(p.ctr_fit)}" if p.ctr_fit is not None else ""
-                parts.append(f"link CTR {_pct(p.link_ctr, 2)}{fit}")
-            if not p.readable:
-                parts.append("too little volume to rate")
-            lines.append(f"  {p.label}: {share} · " + "; ".join(parts))
         if tier.audience:
             lines.append("who Meta found, not who was targeted (share of impressions):")
             for s in tier.audience:

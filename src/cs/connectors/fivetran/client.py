@@ -28,7 +28,6 @@ REQUIRED_TABLES = (
 
 VIDEO_RETENTION_TABLE = "video_retention_ad"
 AD_SIGNALS_TABLE = "ad_signals"
-PLACEMENT_TABLE = "placement_ad"
 DEMOGRAPHICS_TABLE = "demographics_ad"
 CAROUSEL_CARD_TABLE = "carousel_card_ad"
 ASSET_TABLES = {
@@ -39,8 +38,13 @@ ASSET_TABLES = {
 
 # Reports whose definition must never change on an existing connector: the diagnosis reads
 # them, and a changed definition makes Fivetran re-sync. Other reports of ours may only
-# gain fields (see plan_custom_reports); nothing is ever removed.
+# gain fields (see plan_custom_reports); nothing is removed except RETIRED_REPORTS.
 FROZEN_REPORTS = frozenset({VIDEO_RETENTION_TABLE})
+
+# Reports we added once and have since dropped on purpose; retire_custom_reports removes them
+# from existing connectors. placement_ad (weekly delivery per placement) was retired on
+# 2026-09-21: under Advantage+ Meta picks the placements, and nothing read it any more.
+RETIRED_REPORTS = frozenset({"placement_ad"})
 
 # Every report is at ad level: Fivetran queries at ad level only when `ad_id` is a field
 # (its prebuilt breakdown reports have no ad_id and run at account level). Each list-typed
@@ -127,31 +131,6 @@ CUSTOM_TABLES = (
             "video_play_retention_0_to_15s_actions",
             "video_play_retention_20_to_60s_actions",
             "video_play_retention_graph_actions",
-        ],
-    },
-    # Placement (Reels / Feed / Stories ...): delivery, clicks, retention, 3-second views
-    # and funnel actions per placement.
-    {
-        "table_name": PLACEMENT_TABLE,
-        **_REPORT,
-        "aggregation": "Week",
-        **_ATTRIBUTION,
-        "breakdowns": ["publisher_platform", "platform_position"],
-        "fields": [
-            "ad_id",
-            "impressions",
-            "spend",
-            "inline_link_clicks",
-            "outbound_clicks",
-            "video_play_actions",
-            "video_thruplay_watched_actions",
-            "video_p25_watched_actions",
-            "video_p50_watched_actions",
-            "video_p75_watched_actions",
-            "video_p100_watched_actions",
-            "reach",
-            "actions",
-            "action_values",
         ],
     },
     # Age x gender delivery mix per ad. Meta omits off-Meta conversions under demographic
@@ -400,7 +379,44 @@ def plan_custom_reports(connector: dict) -> dict:
         "missing": missing,
         "extend": extend,
         "conflicts": conflicts,
+        "retire": sorted(n for n in by_name if n in RETIRED_REPORTS),
     }
+
+
+async def retire_custom_reports(
+    settings: Settings, http: httpx.AsyncClient, connector_id: str
+) -> list[str]:
+    """Remove RETIRED_REPORTS from an existing connector's custom reports, leaving every other
+    report exactly as it is. Guarded like apply_custom_reports: Fivetran's setup tests run
+    after the change, and if the connector is not `connected` the previous report list is
+    restored and FivetranError raised. Returns the retired report names. Idempotent. The
+    tables Fivetran already landed stay in the destination schema; dropping them is separate."""
+    connector = await get_connector(settings, http, connector_id)
+    current = [
+        _without_read_only(t) for t in (connector.get("config") or {}).get("custom_tables") or []
+    ]
+    keep = [t for t in current if t.get("table_name") not in RETIRED_REPORTS]
+    retired = sorted(t.get("table_name") for t in current if t.get("table_name") in RETIRED_REPORTS)
+    if not retired:
+        return []
+    await _call(
+        settings, http, "PATCH", f"/connectors/{connector_id}", {"config": {"custom_tables": keep}}
+    )
+    tests = await run_setup_tests(settings, http, connector_id)
+    if tests["setup_state"] != "connected":
+        await _call(
+            settings,
+            http,
+            "PATCH",
+            f"/connectors/{connector_id}",
+            {"config": {"custom_tables": current}},
+        )
+        restored = await run_setup_tests(settings, http, connector_id)
+        raise FivetranError(
+            "setup tests failed after retiring reports; previous reports restored "
+            f"(setup_state now {restored['setup_state']}): {'; '.join(tests['failed'])}"
+        )
+    return retired
 
 
 async def run_setup_tests(settings: Settings, http: httpx.AsyncClient, connector_id: str) -> dict:

@@ -73,28 +73,6 @@ class MetricRow:
 
 
 @dataclass
-class PlacementRow:
-    """One ad's week in one placement (publisher_platform x platform_position)."""
-
-    platform_ad_id: str
-    week: date
-    publisher_platform: str
-    platform_position: str
-    impressions: int = 0
-    reach: int = 0
-    spend: Decimal = Decimal(0)
-    link_clicks: int = 0
-    video_3s_views: int = 0
-    video_plays: int = 0
-    video_thruplay: int = 0
-    video_p25: int = 0
-    video_p50: int = 0
-    video_p75: int = 0
-    video_p100: int = 0
-    purchases: int = 0
-
-
-@dataclass
 class AudienceRow:
     """One ad's month for one age x gender cell."""
 

@@ -6,8 +6,6 @@ import pytest
 
 from cs.insights.diagnosis import (
     AUDIENCE_SLICES,
-    LIFT_THRESHOLD,
-    PLACEMENT_SHARE_FLOOR,
     Siblings,
     Sums,
     attention_tier,
@@ -240,126 +238,13 @@ def test_fatigue_early_decay_and_stable():
     assert fatigue_tier("image", first, trailing, 40).metrics[1].key == "link_ctr"
 
 
-def test_context_is_locked_without_placement_data():
-    t = context_tier("video", None, None)
-    assert t.tier == 5 and t.status == "not_measured"
-    assert "not connected" in t.reason and t.metrics == []
-
-
-REELS = ("instagram", "instagram_reels")
-FEED = ("facebook", "feed")
-STORIES = ("instagram", "instagram_stories")
 SIX = Siblings("ad set", 6)
 
 
-def _sibs() -> dict:
-    """Peers whose hook rate is 25% in every placement, so the placement itself is worth the
-    same to everyone and any fit the ad shows is its own."""
-    return {
-        REELS: sums(impressions=80_000, link_clicks=800, video_3s_views=20_000),
-        FEED: sums(impressions=40_000, link_clicks=400, video_3s_views=10_000),
-        STORIES: sums(impressions=40_000, link_clicks=400, video_3s_views=10_000),
-    }
-
-
-def test_fit_is_zero_when_the_creative_is_uniformly_better():
-    """A creative twice as good as its peers everywhere travels perfectly: the level is high,
-    the fit is flat. This is the whole point of dividing out the creative's own average."""
-    window = {
-        REELS: sums(impressions=8_000, link_clicks=160, video_3s_views=4_000),
-        FEED: sums(impressions=4_000, link_clicks=80, video_3s_views=2_000),
-    }
-    t = context_tier("video", window, _sibs(), SIX)
-    assert t.status == "on_par"
-    assert [round(p.hook_fit, 6) for p in t.placements] == [0.0, 0.0]
-    assert t.placements[0].hook_rate == pytest.approx(0.5)  # level is still reported
-
-
-def test_context_is_weak_where_the_creative_does_not_travel():
-    window = {
-        REELS: sums(impressions=8_000, link_clicks=80, video_3s_views=4_000),
-        STORIES: sums(impressions=4_000, link_clicks=40, video_3s_views=1_000),
-    }
-    t = context_tier("video", window, _sibs(), SIX)
-    assert t.status == "weak"
-    assert "Instagram · Stories takes 33% of delivery" in t.decision
-    assert "\u2014 a gap 6 other creatives in the same ad set" in t.decision
-    assert "Supply a native Instagram · Stories cut" in t.decision
-    # Never a targeting instruction: Meta picked the mix, the advertiser did not.
-    assert "exclude" not in t.decision.lower()
-    stories = next(p for p in t.placements if p.position == "instagram_stories")
-    assert stories.hook_fit < -LIFT_THRESHOLD
-
-
-def test_a_placement_below_the_share_floor_cannot_break_the_tier():
-    window = {
-        REELS: sums(impressions=20_000, link_clicks=200, video_3s_views=10_000),
-        STORIES: sums(impressions=2_000, link_clicks=20, video_3s_views=200),
-    }
-    t = context_tier("video", window, _sibs(), SIX)
-    stories = next(p for p in t.placements if p.position == "instagram_stories")
-    assert stories.hook_fit < -LIFT_THRESHOLD  # it is still reported as a bad fit
-    assert t.status != "weak" and (stories.share or 0) < PLACEMENT_SHARE_FLOOR
-
-
-def test_context_is_strong_where_the_main_placement_over_travels():
-    """Fit is zero-sum, so a strong reading needs the placements it out-travels to be small:
-    any placement carrying a fifth of delivery and mirroring that gap makes the tier weak."""
-    window = {
-        REELS: sums(impressions=20_000, link_clicks=200, video_3s_views=10_000),
-        FEED: sums(impressions=2_000, link_clicks=20, video_3s_views=700),
-    }
-    t = context_tier("video", window, _sibs(), SIX)
-    assert t.status == "strong"
-    assert "Meta put 91% of delivery into Instagram · Reels" in t.decision
-    assert "Brief the next batch for Instagram · Reels" in t.decision
-
-
-def test_fit_needs_two_comparable_placements():
-    """With one placement the creative's own average *is* that placement, so fit would be
-    zero by construction and would say nothing."""
-    window = {REELS: sums(impressions=8_000, link_clicks=80, video_3s_views=4_000)}
-    t = context_tier("video", window, _sibs(), SIX)
-    assert t.status == "not_enough_data"
-    assert "two placements" in t.reason and "6 other creatives" in t.reason
-    assert t.placements[0].hook_fit is None
-
-
-def test_a_placement_the_siblings_barely_ran_is_shown_but_not_rated():
-    window = {
-        REELS: sums(impressions=8_000, link_clicks=80, video_3s_views=4_000),
-        FEED: sums(impressions=4_000, link_clicks=40, video_3s_views=1_000),
-        ("facebook", "marketplace"): sums(impressions=2_000, link_clicks=4, video_3s_views=100),
-    }
-    siblings = _sibs()
-    siblings[("facebook", "marketplace")] = sums(impressions=900, link_clicks=9)
-    t = context_tier("video", window, siblings, SIX)
-    thin = next(p for p in t.placements if p.position == "marketplace")
-    assert thin.readable is False and thin.hook_fit is None
-    assert thin.hook_rate == pytest.approx(0.05)  # the rate is still shown
-
-
-def test_the_long_tail_of_tiny_placements_is_not_shown_but_still_counts_in_the_share():
-    window = {
-        REELS: sums(impressions=8_000, link_clicks=80, video_3s_views=2_000),
-        FEED: sums(impressions=4_000, link_clicks=40, video_3s_views=1_000),
-        ("facebook", "search"): sums(impressions=120, link_clicks=1, video_3s_views=30),
-    }
-    t = context_tier("video", window, _sibs(), SIX)
-    assert [p.position for p in t.placements] == ["instagram_reels", "feed"]
-    # 8,000 of 12,120 impressions, not of the 12,000 the two visible rows carry.
-    assert t.placements[0].share == pytest.approx(8_000 / 12_120)
-
-
-def test_context_reads_ctr_only_for_images():
-    window = {
-        REELS: sums(impressions=8_000, link_clicks=80),
-        FEED: sums(impressions=4_000, link_clicks=20),
-    }
-    t = context_tier("image", window, _sibs(), SIX)
-    assert t.status == "weak" and "link CTR" in t.decision
-    assert t.placements[0].hook_rate is None and t.placements[0].hook_fit is None
-    assert t.placements[1].ctr_fit < -LIFT_THRESHOLD
+def test_context_without_audience_rows_says_so():
+    t = context_tier(SIX)
+    assert t.tier == 5 and t.status == "not_measured"
+    assert t.audience == [] and "No age and gender breakdown" in t.reason
 
 
 def test_sibling_label_names_the_scope():
@@ -369,19 +254,13 @@ def test_sibling_label_names_the_scope():
 
 
 def test_audience_mix_is_measured_against_siblings_and_never_sets_the_status():
-    window = {
-        REELS: sums(impressions=8_000, link_clicks=80, video_3s_views=2_000),
-        FEED: sums(impressions=4_000, link_clicks=40, video_3s_views=1_000),
-    }
     t = context_tier(
-        "video",
-        window,
-        _sibs(),
         SIX,
         {("25-34", "female"): 9_000, ("35-44", "female"): 3_000},
         {("25-34", "female"): 40_000, ("35-44", "female"): 40_000},
     )
-    assert t.status == "on_par"  # unchanged by a skewed mix
+    assert t.status == "not_measured"  # a skewed mix is context, never a verdict
+    assert t.comparison == "6 other creatives in the same ad set"
     assert [(s.label, s.share, s.baseline_share) for s in t.audience] == [
         ("25-34 female", 0.75, 0.5),
         ("35-44 female", 0.25, 0.5),
@@ -391,14 +270,10 @@ def test_audience_mix_is_measured_against_siblings_and_never_sets_the_status():
 def test_audience_gathers_what_the_listed_rows_leave_out():
     """Both columns have to read as a whole 100%, or a reader cannot tell a concentrated
     audience from a long tail that simply was not listed."""
-    window = {
-        REELS: sums(impressions=8_000, link_clicks=80, video_3s_views=2_000),
-        FEED: sums(impressions=4_000, link_clicks=40, video_3s_views=1_000),
-    }
     ages = ("18-24", "25-34", "35-44", "45-54", "55-64", "65+", "13-17")
     mine = {(age, "female"): 1_000 - i * 100 for i, age in enumerate(ages)}
     peers = {(age, "female"): 1_000 for age in ages}
-    t = context_tier("video", window, _sibs(), SIX, mine, peers)
+    t = context_tier(SIX, mine, peers)
     assert len(t.audience) == AUDIENCE_SLICES + 1
     rest = t.audience[-1]
     assert rest.label == "Everyone else" and rest.age == "other"
@@ -407,21 +282,13 @@ def test_audience_gathers_what_the_listed_rows_leave_out():
 
 
 def test_audience_has_no_remainder_row_when_every_slice_is_listed():
-    window = {
-        REELS: sums(impressions=8_000, link_clicks=80, video_3s_views=2_000),
-        FEED: sums(impressions=4_000, link_clicks=40, video_3s_views=1_000),
-    }
     mine = {("25-34", "female"): 6_000, ("35-44", "female"): 4_000}
-    t = context_tier("video", window, _sibs(), SIX, mine, mine)
+    t = context_tier(SIX, mine, mine)
     assert [s.label for s in t.audience] == ["25-34 female", "35-44 female"]
 
 
 def test_context_never_becomes_the_broken_layer():
-    """Placement fit is a brief for the next asset, not a step to fix before the others."""
-    window = {
-        REELS: sums(impressions=8_000, link_clicks=80, video_3s_views=4_000),
-        STORIES: sums(impressions=4_000, link_clicks=40, video_3s_views=1_000),
-    }
+    """The audience mix is context: it never holds back a healthy verdict."""
     healthy = sums(impressions=100_000, link_clicks=1_500, video_3s_views=40_000)
     account = sums(impressions=1_000_000, link_clicks=12_000, video_3s_views=300_000)
     d = diagnose(
@@ -435,12 +302,12 @@ def test_context_never_becomes_the_broken_layer():
         duration_ms=None,
         window_start=date(2026, 8, 14),
         window_end=date(2026, 9, 12),
-        placements=window,
-        placement_siblings=_sibs(),
         siblings=SIX,
+        audience={("25-34", "female"): 9_000},
+        audience_siblings={("25-34", "female"): 1_000, ("65+", "female"): 9_000},
     )
     context = next(t for t in d.tiers if t.key == "context")
-    assert context.status == "weak"
+    assert context.status == "not_measured"
     assert d.broken_tier is None and d.verdict.kind == "healthy"
 
 

@@ -6,7 +6,6 @@ docs/superpowers/specs/2026-09-12-creative-diagnosis-panel-design.md
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
 from datetime import date
@@ -26,42 +25,12 @@ CURVE_POINTS = (0, 25, 50, 75, 95, 100)
 # things, and a curve at "50% of runtime" is 5s into one ad and 30s into another. Buckets
 # are (low, high] seconds; the first boundary is the ThruPlay rule.
 LENGTH_BUCKETS_S: tuple[tuple[int, int | None], ...] = ((0, 15), (15, 30), (30, 60), (60, None))
-# Context tier. A placement is only rated once both this creative and its siblings clear the
-# floor there; only placements carrying a real share of delivery can break the tier.
-PLACEMENT_FLOOR = 1_000
-PLACEMENT_SHARE_FLOOR = 0.20
+# Context tier: the audience mix only. Placement fit was removed on 2026-09-21: under
+# Advantage+ Meta picks the placements, the page no longer showed it, and the placement report
+# is no longer ingested.
 AUDIENCE_SLICES = 6
 # Below this the remainder is not worth a row of its own.
 AUDIENCE_REMAINDER_FLOOR = 0.005
-
-_PLATFORM_LABELS = {
-    "facebook": "Facebook",
-    "instagram": "Instagram",
-    "messenger": "Messenger",
-    "audience_network": "Audience Network",
-    "threads": "Threads",
-    "whatsapp": "WhatsApp",
-    "unknown": "Unknown",
-}
-_POSITION_LABELS = {
-    "feed": "Feed",
-    "reels": "Reels",
-    "stories": "Stories",
-    "story": "Stories",
-    "explore": "Explore",
-    "explore_home": "Explore home",
-    "profile_feed": "Profile feed",
-    "profile_reels": "Profile reels",
-    "reels_overlay": "Reels overlay",
-    "video_feeds": "Video feeds",
-    "marketplace": "Marketplace",
-    "search": "Search",
-    "right_hand_column": "Right column",
-    "instream_video": "In-stream video",
-    "facebook_stories": "Stories",
-    "biz_inbox": "Business inbox",
-    "unknown": "Unknown",
-}
 
 Status = Literal[
     "strong", "on_par", "weak", "not_applicable", "not_enough_data", "too_young", "not_measured"
@@ -146,20 +115,6 @@ class Step:
 
 
 @dataclass
-class Placement:
-    platform: str
-    position: str
-    label: str
-    impressions: int
-    share: float | None
-    hook_rate: float | None
-    hook_fit: float | None
-    link_ctr: float | None
-    ctr_fit: float | None
-    readable: bool
-
-
-@dataclass
 class AudienceSlice:
     label: str
     age: str
@@ -170,8 +125,8 @@ class AudienceSlice:
 
 @dataclass
 class Siblings:
-    """The creatives this one is measured against, and how they were chosen. Placement and
-    audience are set by Meta's optimiser, not by the advertiser, so the only fair comparison
+    """The creatives this one is measured against, and how they were chosen. The audience is
+    set by Meta's optimiser, not by the advertiser, so the only fair comparison
     is creatives that ran under the same targeting: same ad set first, then same campaign,
     and the whole account only as a last resort."""
 
@@ -185,9 +140,8 @@ class Siblings:
         return f"{self.creatives} other {noun} in {where}"
 
 
-# Per-placement and per-age/gender window sums, keyed the way the breakdown tables are.
+# Per-age/gender window impressions, keyed the way the breakdown table is.
 Key = tuple[str, str]
-PlacementSums = Mapping[Key, Sums]
 AudienceSums = Mapping[Key, int]
 
 
@@ -203,7 +157,6 @@ class Tier:
     metrics: list[Metric] = field(default_factory=list)
     curve: Curve | None = None
     steps: list[Step] | None = None
-    placements: list[Placement] | None = None
     audience: list[AudienceSlice] | None = None
     comparison: str | None = None
 
@@ -618,95 +571,11 @@ def fatigue_tier(
 # ---------------------------------------------------------------- tier 5: context
 
 
-def placement_label(platform: str, position: str) -> str:
-    """'instagram' + 'instagram_reels' -> 'Instagram · Reels'. Meta repeats the platform in
-    most position values and spells the rest in snake case."""
-    plat = _PLATFORM_LABELS.get(platform, platform.replace("_", " ").title())
-    pos = position
-    for prefix in (platform + "_", "facebook_", "instagram_"):
-        if pos.startswith(prefix):
-            pos = pos[len(prefix) :]
-            break
-    pos = _POSITION_LABELS.get(pos, pos.replace("_", " ").title())
-    return f"{plat} · {pos}"
-
-
-def _rate(s: Sums, metric: str) -> float | None:
-    if metric == "hook_rate":
-        return ratio(s.video_3s_views, s.impressions)
-    return ratio(s.link_clicks, s.impressions)
-
-
-def _fit(
-    metric: str, placements: PlacementSums, siblings: PlacementSums, comparable: list[Key]
-) -> dict[Key, float]:
-    """How much better or worse this creative does in each placement than its own placement
-    average, after the siblings' own pattern for that placement is taken out.
-
-    Meta's optimiser decides where a creative runs, and it buys the impressions it expects to
-    perform, so a plain level comparison partly measures the auction's choice. Dividing by the
-    siblings' rate in the same placement removes what that placement is worth to everyone;
-    dividing by the creative's own average across placements removes how good the creative is
-    overall. What is left is the interaction -- whether this creative travels to that placement
-    -- which is the only part a recut can change. It is a ratio of ratios, so it is zero-sum by
-    construction: read it as fit, never as performance.
-
-    The creative's own average is unweighted on purpose. Weighting it by delivery would let the
-    placement Meta favoured set the reference it is then judged against, which puts the
-    optimiser's allocation back into a number whose whole job is to be free of it."""
-    ratios: dict[Key, float] = {}
-    for key in comparable:
-        ad, sib = _rate(placements[key], metric), _rate(siblings[key], metric)
-        if ad and sib:
-            ratios[key] = ad / sib
-    # One placement cannot separate fit from level: the average would be the single ratio.
-    if len(ratios) < 2:
-        return {}
-    mean_log = sum(math.log(r) for r in ratios.values()) / len(ratios)
-    return {k: r / math.exp(mean_log) - 1 for k, r in ratios.items()}
-
-
-def _placement_rows(
-    fmt: str, placements: PlacementSums, siblings: PlacementSums
-) -> list[Placement]:
-    total = sum(s.impressions for s in placements.values())
-    comparable = [
-        k
-        for k, w in placements.items()
-        if w.impressions >= PLACEMENT_FLOOR
-        and siblings.get(k, Sums()).impressions >= PLACEMENT_FLOOR
-    ]
-    hook = _fit("hook_rate", placements, siblings, comparable) if fmt == "video" else {}
-    ctr = _fit("link_ctr", placements, siblings, comparable)
-    rows: list[Placement] = []
-    for key, w in placements.items():
-        # Meta delivers a long tail of placements with a few dozen impressions each. They
-        # still count towards the share denominator, but they are not rows anyone can read.
-        if w.impressions < PLACEMENT_FLOOR:
-            continue
-        rows.append(
-            Placement(
-                platform=key[0],
-                position=key[1],
-                label=placement_label(*key),
-                impressions=w.impressions,
-                share=ratio(w.impressions, total),
-                hook_rate=_rate(w, "hook_rate") if fmt == "video" else None,
-                hook_fit=hook.get(key),
-                link_ctr=_rate(w, "link_ctr"),
-                ctr_fit=ctr.get(key),
-                readable=key in comparable,
-            )
-        )
-    rows.sort(key=lambda r: r.impressions, reverse=True)
-    return rows
-
-
 def _audience_slices(audience: AudienceSums, siblings: AudienceSums) -> list[AudienceSlice]:
     """The ad's age x gender mix beside its siblings', largest slices first, with whatever the
     listed rows leave out gathered into a final row so both columns still read as a full 100%.
 
-    Like the placement mix, this is where Meta took the creative, not who anyone targeted."""
+    This is where Meta took the creative, not who anyone targeted."""
     total = sum(audience.values())
     sib_total = sum(siblings.values())
     if not total or not sib_total:
@@ -733,76 +602,20 @@ def _audience_slices(audience: AudienceSums, siblings: AudienceSums) -> list[Aud
 
 
 def context_tier(
-    fmt: str,
-    placements: PlacementSums | None,
-    siblings: PlacementSums | None,
     sibling_set: Siblings | None = None,
     audience: AudienceSums | None = None,
     audience_siblings: AudienceSums | None = None,
 ) -> Tier:
-    """Whether the creative travels across the placements Meta chose for it.
-
-    Under Advantage+ the advertiser picks neither the placement mix nor the audience -- the
-    optimiser does, per creative -- so this layer is not a targeting diagnosis and never names
-    a targeting fix. It reports fit (see _fit), and the only lever it can call for is a native
-    asset for the placement. The audience mix is shown as context and never sets the status."""
-    tier = Tier(
-        5,
-        "context",
-        "Context",
-        "Does the creative travel across the placements Meta chose for it?",
-        "not_measured",
-    )
-    if not placements:
-        tier.reason = (
-            "Placement breakdown (Reels vs Feed vs Stories) is not connected for this account "
-            "yet. When it is, this row shows how the creative travels between placements."
-        )
-        return tier
+    """Who Meta delivered the creative to, beside its peers. Under Advantage+ the optimiser,
+    not the advertiser, picks the audience per creative, so this is context: it never sets a
+    status and never names a targeting fix."""
+    tier = Tier(5, "context", "Context", "Who did Meta deliver the creative to?", "not_measured")
     tier.comparison = sibling_set.label if sibling_set else None
-    tier.placements = _placement_rows(fmt, placements, siblings or {})
     tier.audience = _audience_slices(audience or {}, audience_siblings or {})
-    primary = "hook_fit" if fmt == "video" else "ctr_fit"
-    rated = [r for r in tier.placements if getattr(r, primary) is not None]
-    if len(rated) < 2:
-        tier.status = "not_enough_data"
-        against = tier.comparison or "the baseline"
-        tier.reason = (
-            f"Fit needs two placements where both this creative and {against} cleared "
-            f"{PLACEMENT_FLOOR:,} impressions; "
-            f"{'only one' if len(rated) == 1 else 'none'} did."
-        )
-        return tier
-
-    def fit(row: Placement) -> float:
-        return getattr(row, primary)
-
-    metric = "hook rate" if primary == "hook_fit" else "link CTR"
-    carrying = [r for r in rated if (r.share or 0) >= PLACEMENT_SHARE_FLOOR]
-    failing = [r for r in carrying if fit(r) <= -LIFT_THRESHOLD]
-    if failing:
-        row = min(failing, key=fit)
-        tier.status = "weak"
-        tier.decision = (
-            f"{row.label} takes {row.share:.0%} of delivery, and the ad's {metric} there runs "
-            f"{abs(fit(row)):.0%} below its own placement average \u2014 a gap {tier.comparison} "
-            f"do not have. Supply a native {row.label} cut instead of the master."
-        )
-        return tier
-    main = rated[0]
-    if fit(main) >= LIFT_THRESHOLD:
-        tier.status = "strong"
-        tier.decision = (
-            f"Meta put {main.share:.0%} of delivery into {main.label} and the ad's {metric} "
-            f"there runs {fit(main):.0%} above its own placement average, beyond what "
-            f"{tier.comparison} get from that placement. Brief the next batch for {main.label}."
-        )
-        return tier
-    tier.status = "on_par"
     tier.reason = (
-        f"Performs evenly across placements. No placement with {PLACEMENT_SHARE_FLOOR:.0%} or "
-        f"more of delivery runs {LIFT_THRESHOLD:.0%} above or below this ad's own average, "
-        f"after adjusting for how {tier.comparison} do there."
+        "Context only: Meta's optimiser chose this audience, so it is shown, not judged."
+        if tier.audience
+        else "No age and gender breakdown for this creative in the window."
     )
     return tier
 
@@ -839,9 +652,8 @@ _UNMEASURED = {"not_applicable", "not_enough_data", "too_young", "not_measured"}
 
 
 def _verdict(tiers: list[Tier], window: Sums) -> tuple[int | None, Verdict]:
-    # Context is advisory, not a defect layer. Under Advantage+ the advertiser chooses neither
-    # the placement mix nor the audience, so a poor fit is a brief for the next asset, never a
-    # broken step to fix before the others -- and it must not hold back a healthy verdict.
+    # Context is advisory, not a defect layer: under Advantage+ the advertiser does not choose
+    # the audience, and the tier never sets a status. It must not hold back a healthy verdict.
     tiers = [t for t in tiers if t.key != "context"]
     weak = [t for t in tiers if t.status == "weak"]
     if weak:
@@ -902,8 +714,6 @@ def diagnose(
     window_end: date,
     retention_baseline: Sums | None = None,
     retention_baseline_creatives: int = 0,
-    placements: PlacementSums | None = None,
-    placement_siblings: PlacementSums | None = None,
     siblings: Siblings | None = None,
     audience: AudienceSums | None = None,
     audience_siblings: AudienceSums | None = None,
@@ -922,7 +732,7 @@ def diagnose(
         ),
         conversion_tier(window, baseline),
         fatigue_tier(fmt, prior14, trailing7, days_live),
-        context_tier(fmt, placements, placement_siblings, siblings, audience, audience_siblings),
+        context_tier(siblings, audience, audience_siblings),
     ]
     broken, verdict = _verdict(tiers, window)
     return Diagnosis(window_start, window_end, fmt, baseline_creatives, broken, verdict, tiers)

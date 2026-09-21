@@ -14,11 +14,12 @@ DRY RUN IS THE DEFAULT: it only reads the connector config from Fivetran. --appl
 PATCHes the connector's custom_tables (missing reports added, our non-frozen reports gain
 missing fields, nothing is removed), runs Fivetran's setup tests and restores the previous
 reports if the connector is no longer `connected`, then enables the reports' tables and any
-disabled REQUIRED_TABLES. Fivetran may list a report's child tables only after its next
+disabled REQUIRED_TABLES. `--retire --apply` instead removes RETIRED_REPORTS, under the same
+setup-test guard. Fivetran may list a report's child tables only after its next
 sync, so re-run with --apply after that sync; it is idempotent.
 
-Cost: every new report adds Fivetran monthly active rows (placement_ad multiplies
-ad-days by placements; each list field is its own child table).
+Cost: every new report adds Fivetran monthly active rows (a breakdown report multiplies
+ad-days by its breakdown values; each list field is its own child table).
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ from cs.core.db import Database
 from cs.core.repo import get_meta_connection
 
 
-async def run(org_id: UUID, apply: bool) -> None:
+async def run(org_id: UUID, apply: bool, retire: bool = False) -> None:
     settings = get_settings()
     db = await Database.connect(settings.database_url)
     try:
@@ -56,6 +57,14 @@ async def run(org_id: UUID, apply: bool) -> None:
             print(f"  extend {name}: + {', '.join(fields)}")
         if plan["conflicts"]:
             print(f"  conflicts (breakdowns differ, left alone): {', '.join(plan['conflicts'])}")
+        print(f"  reports retired: {', '.join(plan['retire']) or '(none)'} present")
+        if retire:
+            if not apply:
+                print("dry run -- pass --retire --apply to remove the retired reports")
+                return
+            gone = await fivetran_client.retire_custom_reports(settings, http, connector_id)
+            print(f"  retired: {', '.join(gone) or '(none)'}; setup tests passed")
+            return
         if not apply:
             print("dry run -- pass --apply to add missing reports and enable their tables")
             return
@@ -74,8 +83,13 @@ def main() -> None:
     p.add_argument(
         "--apply", action="store_true", help="change the connector (default: dry run, read-only)"
     )
+    p.add_argument(
+        "--retire",
+        action="store_true",
+        help="remove RETIRED_REPORTS from the connector instead (with --apply; dry run without)",
+    )
     args = p.parse_args()
-    asyncio.run(run(UUID(args.org), args.apply))
+    asyncio.run(run(UUID(args.org), args.apply, args.retire))
 
 
 if __name__ == "__main__":

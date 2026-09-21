@@ -31,18 +31,6 @@ export type PlayCurvePoint = { start_s: number; end_s: number | null; share: num
 export type PlayCurve = { points: PlayCurvePoint[]; plays: number; baseline_plays: number; baseline_label: string | null; duration_s: number | null };
 export type DiagnosisCurve = { points: DiagnosisCurvePoint[]; drop_segment: [number, number] | null; avg_watch_s: number | null; duration_s: number | null; baseline_label: string | null };
 export type DiagnosisStep = { key: string; label: string; rate: number | null; baseline_rate: number | null; lift: number | null; numerator: number; denominator: number; readable: boolean };
-export type DiagnosisPlacement = {
-  platform: string;
-  position: string;
-  label: string;
-  impressions: number;
-  share: number | null;
-  hook_rate: number | null;
-  hook_fit: number | null;
-  link_ctr: number | null;
-  ctr_fit: number | null;
-  readable: boolean;
-};
 export type DiagnosisAudienceSlice = { label: string; age: string; gender: string; share: number; baseline_share: number };
 export type DiagnosisTier = {
   tier: number;
@@ -55,7 +43,6 @@ export type DiagnosisTier = {
   metrics: DiagnosisMetric[];
   curve: DiagnosisCurve | null;
   steps: DiagnosisStep[] | null;
-  placements: DiagnosisPlacement[] | null;
   audience: DiagnosisAudienceSlice[] | null;
   comparison: string | null;
 };

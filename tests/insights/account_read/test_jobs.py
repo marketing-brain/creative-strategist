@@ -204,8 +204,9 @@ async def test_patterns_for_a_file_drop_rows_the_tagger_flips_on(db, org_id, ad_
                 },
                 {
                     **test,
-                    "dimension": "ending",
-                    "value": "cta_card",
+                    # Visible by 0:03, so the hook-rate row may reach the page.
+                    "dimension": "captions",
+                    "value": "both",
                     "confounds": ["budget_concentration"],
                     "cell_shas": cells[2],
                 },
@@ -217,7 +218,7 @@ async def test_patterns_for_a_file_drop_rows_the_tagger_flips_on(db, org_id, ad_
     rows = await repo.patterns_for_file(db, org_id, ad_account_id, sha)
     assert [(r["dimension"], r["value"]) for r in rows] == [
         ("messenger", "expert"),
-        ("ending", "cta_card"),  # other flags still show, with their caution
+        ("captions", "both"),  # other flags still show, with their caution
     ]
     assert "cell_key" not in rows[0]  # the dedupe key never leaves the repo
 

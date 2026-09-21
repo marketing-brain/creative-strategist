@@ -425,37 +425,6 @@ async def baseline_window_sums(
     )
 
 
-_PLACEMENT_SUMS_SQL = """
-    sum(impressions) AS impressions, sum(reach) AS reach, sum(spend) AS spend,
-    sum(link_clicks) AS link_clicks, sum(video_3s_views) AS video_3s_views,
-    sum(video_plays) AS video_plays, sum(video_thruplay) AS video_thruplay,
-    sum(video_p25) AS video_p25, sum(video_p50) AS video_p50, sum(video_p75) AS video_p75,
-    sum(video_p100) AS video_p100, sum(purchases) AS purchases
-"""
-
-
-# Placement rows are weekly and the funnel window is 30 days, so a week is counted when it
-# overlaps the window at all. Both the creative and its baseline use the same rule, so the
-# comparison stays like-for-like even where a boundary week reaches outside the window.
-def _week_overlap(since: int, until: int) -> str:
-    return f"p.week <= ${until} AND p.week + 6 >= ${since}"
-
-
-async def creative_placement_sums(
-    db: Database, org_id: UUID, creative_id: UUID | list[UUID], since: date, until: date
-) -> list[asyncpg.Record]:
-    return await db.fetch(
-        f"SELECT p.publisher_platform, p.platform_position, {_PLACEMENT_SUMS_SQL} "
-        "FROM metric_placement p "
-        f"WHERE p.org_id=$1 AND p.creative_id = ANY($2) AND {_week_overlap(3, 4)} "
-        "GROUP BY 1, 2",
-        org_id,
-        _ids(creative_id),
-        since,
-        until,
-    )
-
-
 SIBLING_SCOPES = ("ad set", "campaign", "account")
 MIN_SIBLINGS = 3
 
@@ -479,7 +448,7 @@ async def sibling_creative_ids(
     members are never its peers: they are the same file. The caller walks the scopes from
     narrowest out (see SIBLING_SCOPES) and takes the first with enough delivery to compare.
 
-    Peers only count when they have placement rows in the window; otherwise a narrow scope
+    Peers only count when they have audience rows in the window; otherwise a narrow scope
     would win on paper and contribute nothing to compare with."""
     if scope == "account":
         return await _peers_in_account(db, org_id, ad_account_id, creative_id, fmt, since, until)
@@ -487,9 +456,14 @@ async def sibling_creative_ids(
     return await _peers_sharing(db, org_id, creative_id, fmt, since, until, column)
 
 
-_HAS_PLACEMENT_ROWS = f"""
-    EXISTS (SELECT 1 FROM metric_placement p
-            WHERE p.creative_id = c.id AND {_week_overlap(4, 5)})
+# Audience rows are monthly; any month touching the window counts, on both sides.
+def _month_overlap(since: int, until: int) -> str:
+    return f"a.month <= ${until} AND (a.month + INTERVAL '1 month' - INTERVAL '1 day') >= ${since}"
+
+
+_HAS_AUDIENCE_ROWS = f"""
+    EXISTS (SELECT 1 FROM metric_audience a
+            WHERE a.creative_id = c.id AND {_month_overlap(4, 5)})
 """
 
 
@@ -509,7 +483,7 @@ async def _peers_sharing(
         JOIN ad peer ON peer.org_id = mine.org_id AND peer.{column} = mine.{column}
         JOIN creative c ON c.id = peer.creative_id
         WHERE mine.org_id = $1 AND mine.creative_id = ANY($2) AND mine.{column} IS NOT NULL
-          AND c.id <> ALL($2) AND c.format = $3 AND {_HAS_PLACEMENT_ROWS}
+          AND c.id <> ALL($2) AND c.format = $3 AND {_HAS_AUDIENCE_ROWS}
         """,
         org_id,
         _ids(creative_id),
@@ -533,7 +507,7 @@ async def _peers_in_account(
         f"""
         SELECT c.id FROM creative c
         WHERE c.org_id = $1 AND c.ad_account_id = $6 AND c.id <> ALL($2) AND c.format = $3
-          AND {_HAS_PLACEMENT_ROWS}
+          AND {_HAS_AUDIENCE_ROWS}
         """,
         org_id,
         _ids(creative_id),
@@ -543,29 +517,6 @@ async def _peers_in_account(
         ad_account_id,
     )
     return [r["id"] for r in rows]
-
-
-async def sibling_placement_sums(
-    db: Database, org_id: UUID, creative_ids: list[UUID], since: date, until: date
-) -> list[asyncpg.Record]:
-    """Pooled per-placement totals over the sibling set."""
-    if not creative_ids:
-        return []
-    return await db.fetch(
-        f"SELECT p.publisher_platform, p.platform_position, {_PLACEMENT_SUMS_SQL} "
-        "FROM metric_placement p "
-        f"WHERE p.org_id=$1 AND p.creative_id = ANY($2) AND {_week_overlap(3, 4)} "
-        "GROUP BY 1, 2",
-        org_id,
-        creative_ids,
-        since,
-        until,
-    )
-
-
-# Audience rows are monthly; any month touching the window counts, on both sides.
-def _month_overlap(since: int, until: int) -> str:
-    return f"a.month <= ${until} AND (a.month + INTERVAL '1 month' - INTERVAL '1 day') >= ${since}"
 
 
 async def creative_audience_sums(

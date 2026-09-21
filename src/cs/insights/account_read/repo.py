@@ -322,7 +322,7 @@ async def patterns_for_file(
         d = r["dimension"]
         r["prescribable"] = policy.prescribable(d) if r["has"] else policy.explorable(d)
         # The run's window, so the page can say which days the patterns were measured over.
-        r["window_start"] = run["window_start"].isoformat()
-        r["window_end"] = run["window_end"].isoformat()
+        r["window_start"] = run["window_start"].isoformat() if run["window_start"] else None
+        r["window_end"] = run["window_end"].isoformat() if run["window_end"] else None
     _FILE_PATTERNS[key] = kept
     return _FILE_PATTERNS[key]

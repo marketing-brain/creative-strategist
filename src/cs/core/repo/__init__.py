@@ -36,7 +36,6 @@ from cs.core.repo.creatives import (
     creative_counts,
     creative_first_metric_day,
     creative_metrics,
-    creative_placement_sums,
     creative_window_sums,
     get_creative,
     list_creatives,
@@ -44,11 +43,10 @@ from cs.core.repo.creatives import (
     set_creative_format,
     sibling_audience_sums,
     sibling_creative_ids,
-    sibling_placement_sums,
     upsert_creative,
 )
 from cs.core.repo.footage import footage_ads, footage_member_ids, footage_members
-from cs.core.repo.metrics import upsert_audience, upsert_metrics, upsert_placement
+from cs.core.repo.metrics import upsert_audience, upsert_metrics
 from cs.core.repo.partitions import ensure_metric_partition
 
 __all__ = [
@@ -64,7 +62,6 @@ __all__ = [
     "creative_first_metric_day",
     "creative_audience_sums",
     "creative_metrics",
-    "creative_placement_sums",
     "creative_window_sums",
     "delete_assets_by_kind",
     "ensure_metric_partition",
@@ -87,7 +84,6 @@ __all__ = [
     "set_creative_format",
     "sibling_audience_sums",
     "sibling_creative_ids",
-    "sibling_placement_sums",
     "set_meta_connection_status",
     "set_asset_duration",
     "set_primary_asset",
@@ -97,5 +93,4 @@ __all__ = [
     "upsert_meta_connection",
     "upsert_audience",
     "upsert_metrics",
-    "upsert_placement",
 ]

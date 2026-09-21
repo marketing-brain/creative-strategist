@@ -81,7 +81,7 @@ def test_brief_names_the_drop_window_in_seconds():
     assert '<layer name="attention" status="strong" tier="reliable">' in brief
     assert "volume: 20,000 impressions" in brief
     assert "baseline for this layer: the 18 other videos 15–30s long" in brief
-    assert '<layer name="context" status="not_measured" reason="Placement' in brief
+    assert '<layer name="context" status="not_measured" reason="No age and gender' in brief
     # Model-facing reason text for measured layers is left out: it is interpretation.
     assert "Nothing to change here" not in brief
 

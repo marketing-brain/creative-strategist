@@ -10,7 +10,6 @@ const tier = (over: Partial<DiagnosisTier> & Pick<DiagnosisTier, 'tier' | 'key' 
   metrics: [],
   curve: null,
   steps: null,
-  placements: null,
   audience: null,
   comparison: null,
   ...over,
@@ -82,7 +81,7 @@ const broken: Diagnosis = {
         { key: 'engagement_rate', label: 'Engagement rate', value: 0.019, baseline: 0.021, lift: -0.1, note: 'reactions ÷ impressions' },
       ],
     }),
-    tier({ tier: 5, key: 'context', name: 'Context', status: 'not_measured', reason: 'Placement breakdown is not connected.' }),
+    tier({ tier: 5, key: 'context', name: 'Context', status: 'not_measured', reason: 'No age and gender breakdown for this creative in the window.' }),
   ],
 };
 
@@ -95,20 +94,16 @@ describe('DiagnosisPanel', () => {
     expect(screen.getAllByText('Weak')).toHaveLength(1); // fatigue's weak is labelled differently
     expect(screen.getByText('Early decay')).toBeInTheDocument();
     expect(screen.getByText('On par')).toBeInTheDocument();
-    expect(screen.getByText('Not measured')).toBeInTheDocument();
+    // The API's context layer (audience mix) is not shown on the page.
+    expect(screen.queryByText('Context')).not.toBeInTheDocument();
   });
 
-  it('formats ratios as percentages with baseline and lift, and frequency as a plain number', () => {
-    render(<DiagnosisPanel diagnosis={broken} />);
-    // Each layer's headline number shows twice: in its one-line summary and in its body.
-    const once = (text: string) => expect(screen.getAllByText(text).length).toBeGreaterThan(0);
-    once('38%');
-    once('vs 31%');
-    once('+23%');
-    once('−38%');
-    once('2.3');
-    once('was 1.4');
-    once('$41');
+  it("puts each layer's headline number in its one-line summary, never as a block", () => {
+    const { container } = render(<DiagnosisPanel diagnosis={broken} />);
+    const summary = (name: string) => [...container.querySelectorAll('summary')].find((el) => el.textContent?.includes(name))?.textContent ?? '';
+    expect(summary('Attention')).toMatch(/Hook rate\s*38%\s*vs 31%\s*\+23%/);
+    expect(summary('Conversion')).toMatch(/CPA\s*\$41\s*vs \$44/);
+    expect(summary('Fatigue')).toMatch(/Daily frequency\s*2\.3\s*was 1\.4/);
   });
 
   it('shows the decision only on weak tiers and the reason otherwise', () => {
@@ -116,14 +111,18 @@ describe('DiagnosisPanel', () => {
     // The broken layer's decision is the verdict; the layer does not repeat it underneath.
     expect(screen.getByText('Broken layer: Retention. Attention drops between 25% and 50%.')).toBeInTheDocument();
     expect(screen.queryByText('Attention drops between 25% and 50%.')).not.toBeInTheDocument();
-    expect(screen.getByText('Nothing to change here.')).toBeInTheDocument();
+    // A weak layer that is not the broken one carries its advice; a healthy layer's sentence
+    // would only restate its pill, so it is not shown.
+    expect(screen.getByText('Frequency is climbing faster than the hook is holding.')).toBeInTheDocument();
+    expect(screen.queryByText('Nothing to change here.')).not.toBeInTheDocument();
   });
 
   it('opens the layers that need work and folds the rest to one line', () => {
     const { container } = render(<DiagnosisPanel diagnosis={broken} />);
     const layers = [...container.querySelectorAll('details')];
-    expect(layers.length).toBe(broken.tiers.length);
-    for (const [i, t] of broken.tiers.entries()) expect(layers[i].open).toBe(t.status === 'weak');
+    const shown = broken.tiers.filter((t) => t.key !== 'context');
+    expect(layers.length).toBe(shown.length);
+    for (const [i, t] of shown.entries()) expect(layers[i].open).toBe(t.status === 'weak');
   });
 
   it('prints a cost change the way a buyer reads it: cheaper is minus', () => {
@@ -133,13 +132,14 @@ describe('DiagnosisPanel', () => {
     expect(screen.queryByText('+20%')).not.toBeInTheDocument();
   });
 
-  it('draws the retention curve with point labels and marks unreadable steps', () => {
+  it('draws the quartile curve in seconds and the funnel up to the last readable step', () => {
     render(<DiagnosisPanel diagnosis={broken} />);
-    expect(screen.getByText('50%')).toBeInTheDocument();
+    expect(screen.getByText('0:12')).toBeInTheDocument(); // 50% of a 24s video
     expect(screen.getByText('29%')).toBeInTheDocument();
-    expect(screen.getByText(/Average watch 7.1s of 24s/)).toBeInTheDocument();
-    expect(screen.getByText(/dashed line is the 12 other videos 15–30s long/)).toBeInTheDocument();
-    expect(screen.getByText('42 · below floor')).toBeInTheDocument();
+    expect(screen.getByText(/average watch 0:07 of 0:24/)).toBeInTheDocument();
+    expect(screen.getByText(/dashed: the 12 other videos 15–30s long/)).toBeInTheDocument();
+    expect(screen.getByText('content view')).toBeInTheDocument();
+    expect(screen.queryByText('add to cart')).not.toBeInTheDocument(); // too few to read
   });
 
   it('renders healthy and too-early verdicts and not-applicable retention', () => {
@@ -152,47 +152,8 @@ describe('DiagnosisPanel', () => {
     const { unmount } = render(<DiagnosisPanel diagnosis={healthy} />);
     expect(screen.getByText('No broken layer.')).toBeInTheDocument();
     expect(screen.getByText('Not applicable')).toBeInTheDocument();
-    expect(screen.getByText('Image creative.')).toBeInTheDocument();
     unmount();
     render(<DiagnosisPanel diagnosis={{ ...broken, verdict: { kind: 'too_early', headline: 'Too early to diagnose.', detail: 'Only 640 impressions.' } }} />);
     expect(screen.getByText('Too early to diagnose.')).toBeInTheDocument();
-  });
-
-  it('renders placement cards and the most divergent audience slice on the context tier', () => {
-    const withContext: Diagnosis = {
-      ...broken,
-      tiers: broken.tiers.map((t) =>
-        t.key === 'context'
-          ? {
-              ...t,
-              status: 'weak' as const,
-              reason: null,
-              decision: "Facebook · Feed takes 31% of delivery, and the ad's hook rate there runs 34% below its own placement average.",
-              comparison: '6 other creatives in the same ad set',
-              placements: [
-                { platform: 'instagram', position: 'instagram_reels', label: 'Instagram · Reels', impressions: 214000, share: 0.52, hook_rate: 0.61, hook_fit: 0.18, link_ctr: 0.035, ctr_fit: 0.06, readable: true },
-                { platform: 'facebook', position: 'feed', label: 'Facebook · Feed', impressions: 127000, share: 0.31, hook_rate: 0.39, hook_fit: -0.34, link_ctr: 0.021, ctr_fit: -0.19, readable: true },
-                { platform: 'facebook', position: 'marketplace', label: 'Facebook · Marketplace', impressions: 800, share: 0.02, hook_rate: null, hook_fit: null, link_ctr: null, ctr_fit: null, readable: false },
-              ],
-              audience: [
-                { label: '25-34 female', age: '25-34', gender: 'female', share: 0.41, baseline_share: 0.29 },
-                { label: '35-44 female', age: '35-44', gender: 'female', share: 0.27, baseline_share: 0.3 },
-                { label: 'Everyone else', age: 'other', gender: 'other', share: 0.32, baseline_share: 0.41 },
-              ],
-            }
-          : t
-      ),
-    };
-    render(<DiagnosisPanel diagnosis={withContext} />);
-    expect(screen.getByText('Instagram · Reels')).toBeInTheDocument();
-    expect(screen.getByText('−34%')).toBeInTheDocument();
-    expect(screen.getByText(/fit vs 6 other creatives in the same ad set/)).toBeInTheDocument();
-    // The unrated placement gets no card of its own, only a count.
-    expect(screen.queryByText('Facebook · Marketplace')).not.toBeInTheDocument();
-    expect(screen.getByText('+ 1 too thin to rate')).toBeInTheDocument();
-    // Only the slice that diverges most from the peers is named.
-    expect(screen.getByText('25-34 female')).toBeInTheDocument();
-    expect(screen.queryByText('35-44 female')).not.toBeInTheDocument();
-    expect(screen.getByText(/took 41% of delivery, against 29% for peers \(\+12 pts\)/)).toBeInTheDocument();
   });
 });
