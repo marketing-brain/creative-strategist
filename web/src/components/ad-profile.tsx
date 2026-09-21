@@ -58,7 +58,7 @@ const METRIC_LABEL: Record<CreativePattern['metric'], string> = {
   // ThruPlays ÷ plays, not the header's hold rate (ThruPlays ÷ 3-second views).
   thruplay_rate: 'plays past 15s',
   cpa: 'cost per purchase',
-  purchases_per_1k: 'purchases per 1,000 impressions',
+  purchases_per_1k: 'purchases / 1k impressions',
 };
 // A cost going down is the good direction; every other metric here is a rate going up.
 const isGood = (p: CreativePattern) => (p.metric === 'cpa' ? p.change < 0 : p.change > 0);
@@ -87,7 +87,7 @@ const detail = (p: CreativePattern, fmt: Formatters) =>
 function PatternGroup({ title, rows, fmt }: { title: string; rows: CreativePattern[]; fmt: Formatters }) {
   if (!rows.length) return null;
   return (
-    <div className="grid grid-cols-[4.5rem_3.5rem_6.5rem_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 text-sm">
+    <div className="grid grid-cols-[4.5rem_3.5rem_11rem_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 text-sm">
       {rows.map((p, i) => (
         // `contents` has no box to hover, so each cell carries the figures.
         <div key={`${p.has}-${p.dimension}-${p.value}-${p.metric}`} className="contents">
@@ -176,19 +176,54 @@ function OpeningLines({ tags, seekable }: { tags: Tag[]; seekable: boolean }) {
   );
 }
 
-function TierEvidence({ tier, tags, patterns, seekable, fmt }: { tier: DiagnosisTier; tags: Tag[]; patterns: CreativePattern[]; seekable: boolean; fmt: Formatters }) {
-  const attention = tier.key === 'attention';
-  const rows = (attention ? [] : TIER_TAGS[tier.key]).map((d) => [d, valuesOf(tags, d)] as const).filter(([, v]) => v.length);
-  // Retention drops what another layer already says (the same trait under Attention), length
-  // (ThruPlay counts 15 seconds watched, so longer videos pass it by arithmetic), and traits
-  // most tagged videos share, which tell this ad apart from nothing.
-  const inAttention = new Set(patterns.filter((p) => p.has && TIER_OF_METRIC[p.metric] === 'attention').map((p) => `${p.dimension}=${p.value}`));
-  const mine = patterns.filter(
+// Which of this ad's traits a layer shows. The same rules for every layer:
+// - a trait most tagged videos share (70% or more) tells this ad apart from nothing;
+// - length is left out of the ThruPlay rate, which counts 15 seconds watched, so longer videos
+//   pass it by arithmetic rather than by holding anyone;
+// - a trait an earlier layer already shows is not repeated (`shown` carries them down).
+const NEAR_UNIVERSAL = 0.7;
+function layerTraits(tier: DiagnosisTier, patterns: CreativePattern[], shown: Set<string>) {
+  const key = (p: CreativePattern) => `${p.dimension}=${p.value}`;
+  const rows = patterns.filter(
     (p) =>
       p.has &&
       TIER_OF_METRIC[p.metric] === tier.key &&
-      (tier.key !== 'retention' || (!inAttention.has(`${p.dimension}=${p.value}`) && p.dimension !== 'duration_s' && p.n_cell < 0.7 * (p.n_cell + p.n_complement)))
+      p.n_cell < NEAR_UNIVERSAL * (p.n_cell + p.n_complement) &&
+      !(p.metric === 'thruplay_rate' && p.dimension === 'duration_s') &&
+      !shown.has(key(p))
   );
+  const hurting = rows.filter((p) => !isGood(p)).slice(0, 3);
+  const helping = rows.filter(isGood).slice(0, 3);
+  [...hurting, ...helping].forEach((p) => shown.add(key(p)));
+  return { hurting, helping };
+}
+
+// Short labels for the tag rows, in the same label column as every other row in the layers.
+const ROW_LABELS: Record<string, string> = {
+  offer_elements: 'Offer',
+  proof_devices: 'Proof',
+  cta_modes: 'CTA',
+  aspect_ratio: 'Aspect',
+  captions: 'Captions',
+  native_format_cues: 'Native look',
+};
+
+function TierEvidence({
+  tier,
+  tags,
+  traits,
+  seekable,
+  fmt,
+}: {
+  tier: DiagnosisTier;
+  tags: Tag[];
+  traits: { hurting: CreativePattern[]; helping: CreativePattern[] };
+  seekable: boolean;
+  fmt: Formatters;
+}) {
+  const attention = tier.key === 'attention';
+  const rows = (attention ? [] : TIER_TAGS[tier.key]).map((d) => [d, valuesOf(tags, d)] as const).filter(([, v]) => v.length);
+  const mine = [...traits.hurting, ...traits.helping];
   const drop = tier.key === 'retention' ? dropBeats(tier, tags) : null;
   // Retention lists the ad's beats the way Attention lists its hook: name, then a timestamp
   // that plays the video from there. The opening beat is Attention's Hook row, so it is left out.
@@ -201,7 +236,7 @@ function TierEvidence({ tier, tags, patterns, seekable, fmt }: { tier: Diagnosis
   if (!attention && !rows.length && !mine.length && !drop && !beats.length) return null;
   // Attention and Retention are label-column rows all the way down, so nothing needs dividing;
   // the other layers still separate their metric blocks from the evidence under them.
-  const rowsOnly = attention || tier.key === 'retention';
+  const rowsOnly = attention || tier.key === 'retention' || tier.key === 'conversion';
   return (
     // Attention prints no numbers of its own, so nothing sits above to divide it from.
     <div className={rowsOnly ? 'space-y-4' : 'space-y-4 border-t border-dashed border-border pt-4'}>
@@ -221,10 +256,10 @@ function TierEvidence({ tier, tags, patterns, seekable, fmt }: { tier: Diagnosis
             </p>
           )}
           {rows.length > 0 && (
-            <dl className="space-y-1 text-sm">
+            <dl className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
               {rows.map(([d, v]) => (
-                <div key={d} className="flex min-w-0 gap-2">
-                  <dt className="w-40 shrink-0 text-muted-foreground">{label(d)}</dt>
+                <div key={d} className="contents">
+                  <dt className="text-muted-foreground">{ROW_LABELS[d] ?? label(d)}</dt>
                   <dd className="flex min-w-0 flex-wrap gap-x-3">
                     {v.map((t, i) => (
                       <span key={`${t.value}-${i}`}>
@@ -240,7 +275,7 @@ function TierEvidence({ tier, tags, patterns, seekable, fmt }: { tier: Diagnosis
       )}
       {beats.length > 0 && (
         <dl className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 text-sm">
-          <dt className="text-muted-foreground">Beats</dt>
+          <dt className="text-muted-foreground">Sections</dt>
           <dd className="flex min-w-0 flex-wrap gap-x-3">
             {beats.map((b, i) => (
               <span key={`${b.value}-${i}`}>
@@ -251,17 +286,20 @@ function TierEvidence({ tier, tags, patterns, seekable, fmt }: { tier: Diagnosis
         </dl>
       )}
       <div className="space-y-2">
-        <PatternGroup title="Hurting" rows={mine.filter((p) => !isGood(p)).slice(0, 3)} fmt={fmt} />
-        <PatternGroup title="Helping" rows={mine.filter(isGood).slice(0, 3)} fmt={fmt} />
+        <PatternGroup title="Hurting" rows={traits.hurting} fmt={fmt} />
+        <PatternGroup title="Helping" rows={traits.helping} fmt={fmt} />
       </div>
     </div>
   );
 }
 
 // One block per diagnosis layer, keyed by tier, for the panel to render under its numbers.
+// Layers are walked in funnel order so a trait lands in the first layer that shows it.
 export function tierEvidence(diagnosis: Diagnosis, tags: Tag[], patterns: CreativePattern[], seekable: boolean, fmt: Formatters) {
+  const shown = new Set<string>();
+  const byTier = [...diagnosis.tiers].sort((a, b) => a.tier - b.tier).map((t) => [t, layerTraits(t, patterns, shown)] as const);
   return Object.fromEntries(
-    diagnosis.tiers.map((t) => [t.key, <TierEvidence key={t.key} tier={t} tags={tags} patterns={patterns} seekable={seekable} fmt={fmt} />])
+    byTier.map(([t, traits]) => [t.key, <TierEvidence key={t.key} tier={t} tags={tags} traits={traits} seekable={seekable} fmt={fmt} />])
   ) as Partial<Record<DiagnosisTier['key'], React.ReactNode>>;
 }
 
@@ -318,6 +356,13 @@ function traitPhrase(p: CreativePattern): string {
       return an(v);
     case 'setting':
       return p.value === 'none' ? 'no live footage' : `${an(v)} setting`;
+    case 'concept_tags':
+      return `the “${v}” concept`;
+    case 'features_mentioned':
+    case 'products_mentioned':
+      return `mentions “${v}”`;
+    case 'topics':
+      return `talks about “${v}”`;
     case 'claims':
       return `the claim “${v}”`;
     case 'production':

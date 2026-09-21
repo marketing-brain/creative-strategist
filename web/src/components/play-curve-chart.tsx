@@ -7,7 +7,7 @@ import type { PlayCurve, PlayCurvePoint } from '@/lib/types';
 // Time runs on a square-root scale: the first three seconds, where most viewers leave, get a
 // fifth of the width instead of a twentieth, and every tick is labelled so the stretch is
 // visible. 0:00-0:03 is banded as the hook, the attention layer's window. Beats are faint
-// markers; their names and timestamps are the Beats row under the chart, and hovering names
+// markers; their names and timestamps are the Sections row under the chart, and hovering names
 // the beat on screen at that second. Clicking plays the video from there.
 
 const H = 168;

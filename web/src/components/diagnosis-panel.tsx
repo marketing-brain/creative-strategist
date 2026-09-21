@@ -150,25 +150,46 @@ function RetentionCurve({ curve, status }: { curve: DiagnosisCurve; status: Diag
   );
 }
 
-function StepChain({ steps }: { steps: DiagnosisStep[] }) {
+// The funnel as one row in the layers' label column: each step's rate, with similar videos in
+// muted brackets. Steps the account does not track are named under it, because leaving them
+// out silently would make "landing page → checkout" look like one step.
+const FUNNEL = [
+  ['landing_page', 'landing page'],
+  ['content_view', 'content view'],
+  ['add_to_cart', 'add to cart'],
+  ['checkout', 'checkout'],
+  ['purchase', 'purchase'],
+] as const;
+
+function FunnelRow({ steps }: { steps: DiagnosisStep[] }) {
+  const name = (key: string) => FUNNEL.find(([k]) => k === key)?.[1] ?? key.replaceAll('_', ' ');
+  const present = new Set(steps.map((st) => st.key));
+  const last = steps[steps.length - 1]?.key;
+  const lastAt = FUNNEL.findIndex(([k]) => k === last);
+  const untracked = FUNNEL.filter(([k], i) => i < lastAt && !present.has(k)).map(([, n]) => n);
   return (
-    <div className="flex w-full flex-wrap items-stretch gap-2">
-      {steps.map((s) => (
-        <div
-          key={s.key}
-          className={cn('flex min-w-[8.5rem] flex-1 flex-col gap-1 rounded-lg border px-3 py-2.5', s.readable ? 'border-border' : 'border-dashed border-muted-foreground/40')}
-        >
-          <span className="text-sm text-muted-foreground">{s.label}</span>
-          {s.readable && s.rate != null ? (
-            <div className="flex items-baseline gap-2">
-              <span className="text-base font-semibold tabular-nums">{pct(s.rate)}</span>
-              {s.baseline_rate != null && <span className="text-sm text-muted-foreground tabular-nums">{`vs ${pct(s.baseline_rate)}`}</span>}
-            </div>
-          ) : (
-            <span className="text-sm text-muted-foreground tabular-nums">{s.numerator > 0 ? `${s.numerator} · below floor` : '—'}</span>
-          )}
-        </div>
-      ))}
+    <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 text-sm">
+      <span className="text-muted-foreground">Funnel</span>
+      <div className="min-w-0 space-y-0.5">
+        <p className="tabular-nums">
+          click
+          {steps.map((st) => (
+            <span key={st.key}>
+              {' → '}
+              {name(st.key)}{' '}
+              {st.readable && st.rate != null ? (
+                <>
+                  <span className="font-semibold">{pct(st.rate)}</span>
+                  {st.baseline_rate != null && <span className="text-muted-foreground"> ({pct(st.baseline_rate)})</span>}
+                </>
+              ) : (
+                <span className="text-muted-foreground">too few to read</span>
+              )}
+            </span>
+          ))}
+        </p>
+        {untracked.length > 0 && <p className="text-muted-foreground">{`${untracked.join(' and ')} ${untracked.length > 1 ? "aren't" : "isn't"} tracked for this account`}</p>}
+      </div>
     </div>
   );
 }
@@ -248,12 +269,13 @@ function TierBody({ tier, broken, format, evidence, chart }: { tier: DiagnosisTi
   const weak = tier.status === 'weak';
   // The verdict above already carries the broken layer's decision word for word.
   // A healthy retention layer's sentence only restates its pill.
-  const text = broken ? null : weak ? tier.decision : tier.key === 'retention' ? null : tier.reason;
+  // A healthy retention or conversion layer's sentence only restates its pill.
+  const text = broken ? null : weak ? tier.decision : tier.key === 'retention' || tier.key === 'conversion' ? null : tier.reason;
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {text && <p className={cn('max-w-prose text-sm leading-relaxed', weak ? 'font-semibold' : 'text-muted-foreground')}>{text}</p>}
       {/* Attention's hook rate and link CTR, and retention's hold rate, are already in the header. */}
-      {tier.key !== 'attention' && tier.key !== 'retention' && tier.metrics.length > 0 && (
+      {tier.key !== 'attention' && tier.key !== 'retention' && tier.key !== 'conversion' && tier.metrics.length > 0 && (
         <div className="flex flex-wrap gap-x-10 gap-y-4">
           {tier.metrics.map((m) => (
             <MetricBlock key={m.key} tier={tier} m={m} />
@@ -271,7 +293,7 @@ function TierBody({ tier, broken, format, evidence, chart }: { tier: DiagnosisTi
       ) : (
         tier.curve && <RetentionCurve curve={tier.curve} status={tier.status} />
       )}
-      {tier.steps && tier.steps.length > 0 && <StepChain steps={tier.steps} />}
+      {tier.steps && tier.steps.length > 0 && <FunnelRow steps={tier.steps} />}
       {tier.placements && tier.placements.length > 0 && (
         <div className="flex flex-col gap-2">
           <span className="text-sm text-muted-foreground">
