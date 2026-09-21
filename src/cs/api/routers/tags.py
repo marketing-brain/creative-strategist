@@ -1,7 +1,6 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
 
 from cs.api.auth import AuthContext, current_auth, require_admin
 from cs.api.deps import get_db
@@ -13,10 +12,6 @@ from cs.tagging import repo, vocab
 from cs.tagging.taxonomy import load_taxonomy
 
 router = APIRouter()
-
-
-class BackfillBody(BaseModel):
-    limit: int = Field(500, ge=1, le=5000)
 
 
 @router.get("/creatives/{creative_id}/tags")
@@ -165,13 +160,3 @@ async def dimension_values(
     return [
         {"value": slug, "count": n} for slug, n in await vocab.hints(db, auth.org_id, name, 200)
     ]
-
-
-@router.post("/tagging/backfill")
-async def backfill(
-    body: BackfillBody, auth: AuthContext = Depends(require_admin), db: Database = Depends(get_db)
-) -> dict:
-    jid = await queue.enqueue(
-        db, auth.org_id, "tagging.batch_submit", {"limit": body.limit}, dedup_key="batch_submit"
-    )
-    return {"job_id": str(jid) if jid else None}

@@ -60,19 +60,6 @@ async def test_tags_endpoints(client, db, settings):
     r = await client.post(f"/creatives/{cid}/retag", headers=H)
     assert r.status_code == 200
     assert await db.fetchval("SELECT job_type FROM job") == "tagging.tag_creative"
-    r = await client.post("/tagging/backfill", headers=H, json={"limit": 10})
-    assert (
-        r.status_code == 200
-        and await db.fetchval("SELECT count(*) FROM job WHERE job_type='tagging.batch_submit'") == 1
-    )
-
-
-async def test_backfill_rejects_out_of_range_limit(client, db, settings):
-    await _seed(client, db, settings)
-    r = await client.post("/tagging/backfill", headers=H, json={"limit": -1})
-    assert r.status_code == 422
-    r = await client.post("/tagging/backfill", headers=H, json={"limit": 0})
-    assert r.status_code == 422
 
 
 async def test_retag_rejects_unresolved_format(client, db, settings):
