@@ -9,7 +9,7 @@ export type SyncStatus = {
   app?: { ads: number; metrics_through: string | null };
   last_sync?: SyncJob | null;
   auto_sync?: { enabled: boolean; next_run_at: string | null };
-  backlog?: { files: number; tagging: number; insights: number };
+  backlog?: { files: number; tagging: number };
 };
 export type Creative = { id: string; ad_account_id: string; platform_creative_id: string; format: 'image' | 'video' | 'carousel' | 'unresolved'; headline: string | null; primary_text: string | null; cta_type: string | null; link_url: string | null; primary_asset_url: string | null; primary_asset_mime?: string | null; first_seen_at: string; distance?: number; spend_30d: number; ctr_30d?: number | null; creative_count?: number; ad_count?: number; copy_variants?: number; ad_name?: string | null; poster_url?: string | null; totals?: GridRates; baseline?: GridRates };
 // A grid card's 30-day numbers, and the same numbers pooled over the rest of its account and format.
@@ -65,8 +65,6 @@ export type Diagnosis = {
   verdict: { kind: 'broken' | 'healthy' | 'too_early'; headline: string; detail: string; converting?: boolean };
   tiers: DiagnosisTier[];
 };
-export type CreativeInsightReason = 'rejected' | 'failed' | 'no_asset' | 'unresolved' | 'format_limit' | 'lengths_pending' | 'unreadable' | 'paused' | 'waiting';
-export type CreativeInsight = { paragraph: string | null; window_start?: string; window_end?: string; created_at?: string; reason?: CreativeInsightReason; format?: string; limit?: number };
 export type AccountReadTest = { dimension: string; value: string; group: string | null; metric: string; kind: 'per_unit' | 'pooled'; n_cell: number; n_complement: number; cell_value: number; comp_value: number; change: number; p: number; grade: string; confounds: string[]; cell_shas: string[]; bin_edges: [number, number] | null; cell_purchases: number | null; pid?: string };
 export type AccountReadFinding = { title: string; layer: string; paragraph: string; mechanism: string; exemplars: string[]; exception: string; why_non_obvious: string; pattern_ids: string[]; confidence: string };
 export type AccountReadText = { overview: string; findings: AccountReadFinding[]; entangled: string; no_evidence: string; next_tests: string[]; data_needed: string[] };

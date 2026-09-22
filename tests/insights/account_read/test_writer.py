@@ -40,7 +40,6 @@ def _unit(sha, headline, facets, spend=1000):
         first_product_s=None,
         concept_summary="Pharmacist warns about Benadryl.",
         hook_verbatim="Worst OTC sleep aids",
-        insight_paragraph="Strong filter hook.",
     )
 
 
@@ -124,7 +123,7 @@ def test_brief_carries_qualitative_record_and_pattern_lines():
         in b
     )
     assert "Worst OTC sleep aids" in b and "Pharmacist warns about Benadryl." in b
-    assert "Strong filter hook." in b and '"Ad 0"' in b
+    assert '"Ad 0"' in b
 
 
 def test_check_read_rejects_invented_numbers_missing_exemplars_and_empty_why():

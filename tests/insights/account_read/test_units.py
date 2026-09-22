@@ -9,7 +9,7 @@ from cs.tagging import repo as tag_repo
 from cs.tagging.taxonomy import load_taxonomy
 
 
-async def _creative(db, org_id, aid, name, sha, spend, tags, insight=None):
+async def _creative(db, org_id, aid, name, sha, spend, tags):
     cid, _ = await ingest_repo.upsert_creative(
         db,
         org_id,
@@ -56,16 +56,6 @@ async def _creative(db, org_id, aid, name, sha, spend, tags, insight=None):
         tv = await tag_repo.ensure_taxonomy_version(db, load_taxonomy())
         rid = await tag_repo.start_tag_run(db, org_id, cid, tv, "fake")
         await tag_repo.finish_tag_run(db, org_id, rid, tags, "s", 1, 1)
-    if insight:
-        await db.execute(
-            "INSERT INTO creative_insight (creative_id, org_id, status, paragraph, moments, "
-            "problems, brief, window_start, window_end, model, prompt_sha256, input_tokens, "
-            "output_tokens) VALUES ($1,$2,'done',$3,'[]','[]','b','2026-06-01','2026-06-30',"
-            "'m','s',1,1)",
-            cid,
-            org_id,
-            insight,
-        )
     return cid
 
 
@@ -93,7 +83,7 @@ async def test_units_pool_copies_by_sha_and_take_facets_from_top_spend_copy(
         _tag("concept_summary", "text", "Creator testimonial"),
         _tag("hook_verbatim", "text", "I was wrong"),
     ]
-    big = await _creative(db, org_id, aid, "big", "sha_a", "900", v2, insight="Strong hook.")
+    big = await _creative(db, org_id, aid, "big", "sha_a", "900", v2)
     small = await _creative(
         db,
         org_id,
@@ -124,8 +114,6 @@ async def test_units_pool_copies_by_sha_and_take_facets_from_top_spend_copy(
     assert a.has("messenger", "creator_on_camera")
     assert not a.has("messenger", "expert_on_camera")
     assert a.concept_summary == "Creator testimonial" and a.hook_verbatim == "I was wrong"
-    assert a.insight_paragraph == "Strong hook."
     assert a.first_day == date(2026, 6, 1) and a.last_day == date(2026, 6, 2)
     assert a.duration_s == 60.0
-    assert by["sha_b"].insight_paragraph is None
     assert edges == {}  # fewer than 6 units: no terciles

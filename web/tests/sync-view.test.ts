@@ -8,7 +8,7 @@ const base: SyncStatus = {
   app: { ads: 1197, metrics_through: '2026-09-14' },
   last_sync: { id: 'j', kind: 'sync', status: 'done', retrying: false, error: null, queued_at: '', started_at: null, finished_at: '2026-09-14T17:06:46Z' },
   auto_sync: { enabled: false, next_run_at: null },
-  backlog: { files: 0, tagging: 0, insights: 0 },
+  backlog: { files: 0, tagging: 0 },
 };
 
 describe('sync view', () => {

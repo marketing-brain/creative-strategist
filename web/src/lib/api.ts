@@ -42,7 +42,6 @@ export const api = {
     apiFetch<import('./types').Diagnosis>(`/creatives/${id}/diagnosis?scope=${scope}`),
   creativePlayCurve: (id: string, scope: import('./types').Scope = 'footage') =>
     apiFetch<import('./types').PlayCurve | null>(`/creatives/${id}/play-curve?scope=${scope}`),
-  creativeInsight: (id: string) => apiFetch<import('./types').CreativeInsight>(`/creatives/${id}/insight`),
   creativeTags: (id: string) => apiFetch<import('./types').Tag[]>(`/creatives/${id}/tags`),
   dimensions: () => apiFetch<import('./types').Dimension[]>('/tags/dimensions'),
   dimensionValues: (name: string) => apiFetch<import('./types').DimensionValue[]>(`/tags/dimensions/${encodeURIComponent(name)}/values`),

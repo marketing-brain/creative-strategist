@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import date
 from uuid import UUID
 
 from cs.core import queue
@@ -8,29 +8,10 @@ from cs.core import repo as core_repo
 from cs.core.config import Settings
 from cs.core.db import Database
 from cs.insights import repo
-from cs.insights.creative_insight import GeminiGatewayInsightWriter, InsightWriter
-from cs.insights.creative_insight_gates import FORMATS, NIGHTLY_SCHEDULE
-from cs.insights.creative_insight_runner import write_creative_insight
-from cs.insights.diagnosis import ATTENTION_FLOOR
 from cs.insights.explain import _template
 from cs.insights.fatigue import compute_fatigue
 from cs.jobs.registry import JobContext, handler
 from cs.jobs.scheduler import register_schedule
-
-WINDOW_DAYS = 30
-
-
-def default_insight_writer_factory(settings: Settings) -> InsightWriter:
-    return GeminiGatewayInsightWriter(settings)
-
-
-INSIGHT_WRITER_FACTORY = default_insight_writer_factory
-CREATIVE_INSIGHT_JOB = "insights.creative_insight"
-CREATIVE_INSIGHT_MAX_ATTEMPTS = 3
-
-
-def creative_insight_dedup_key(creative_id: UUID) -> str:
-    return f"creative_insight:{creative_id}"
 
 
 async def _account(ctx: JobContext):
@@ -74,45 +55,3 @@ async def _enqueue_for_active(db: Database, job_type: str, prefix: str) -> None:
 @register_schedule("insights.periodic_fatigue", every_seconds=21600)
 async def periodic_fatigue(db: Database, settings: Settings) -> None:
     await _enqueue_for_active(db, "insights.compute_fatigue", "fatigue")
-
-
-@handler(CREATIVE_INSIGHT_JOB)
-async def creative_insight(ctx: JobContext) -> None:
-    creative_id = UUID(ctx.job.payload["creative_id"])
-    await write_creative_insight(ctx, creative_id, INSIGHT_WRITER_FACTORY(ctx.settings))
-
-
-@register_schedule(NIGHTLY_SCHEDULE, every_seconds=86400)
-async def nightly_creative_insights(db: Database, settings: Settings) -> None:
-    """Pick up creatives that were too new to read when they were tagged, and videos, which
-    are not tagged while video tagging is off. The candidate query skips any footage with a
-    creative_insight row, and a failed paid call writes one, so nothing is paid for twice.
-    A job that ran out of retries never reached the paid call and may be queued again."""
-    until = datetime.now(UTC).date()
-    rows = await repo.creative_insight_candidates(
-        db,
-        until - timedelta(days=WINDOW_DAYS - 1),
-        until,
-        FORMATS,
-        ATTENTION_FLOOR,
-        settings.creative_insight_nightly_limit,
-        settings.creative_insight_limit_per_format,
-    )
-    # Queue no more per org and format than the cap still allows; the job re-checks.
-    room: dict[tuple[UUID, str], int] = {}
-    for r in rows:
-        slot = (r["org_id"], r["format"])
-        if slot not in room:
-            written = await repo.count_creative_insights(db, r["org_id"], r["format"])
-            room[slot] = settings.creative_insight_limit_per_format - written
-        if room[slot] <= 0:
-            continue
-        room[slot] -= 1
-        await queue.enqueue(
-            db,
-            r["org_id"],
-            CREATIVE_INSIGHT_JOB,
-            {"creative_id": str(r["id"])},
-            dedup_key=creative_insight_dedup_key(r["id"]),
-            max_attempts=CREATIVE_INSIGHT_MAX_ATTEMPTS,
-        )

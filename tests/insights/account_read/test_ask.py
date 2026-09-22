@@ -46,7 +46,6 @@ def _units():
                 first_product_s=None,
                 concept_summary=None,
                 hook_verbatim=None,
-                insight_paragraph=None,
             )
         )
     return us

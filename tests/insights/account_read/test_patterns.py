@@ -49,7 +49,6 @@ def synth(seed: int, n: int = 40, planted: str | None = "warning_or_risk", lift:
                 first_product_s=2.0 if i % 4 == 0 else 40.0,
                 concept_summary=f"concept {i}",
                 hook_verbatim=f"hook {i}",
-                insight_paragraph=None,
             )
         )
     return units

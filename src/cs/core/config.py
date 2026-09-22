@@ -66,16 +66,9 @@ class Settings(BaseSettings):
     )
     account_read_min_units: int = 10
     account_read_permutation_draws: int = 1000
-    # Per-creative insight paragraph (ad + diagnosis brief). Needs cross-modal reasoning, so
-    # the stronger tier. Independent of video_tagging_enabled: videos get an insight even with
-    # tagging off, bounded by creative_insight_limit_per_format.
-    creative_insight_model: str = "google/gemini-3-flash"
-    # Cap on creatives the nightly sweep enqueues, highest 30-day spend first.
-    creative_insight_nightly_limit: int = 200
-    # Hard cap on insights per org, per format (image, video, carousel each). Rejected drafts
-    # count: they were paid for. Kept tiny while the output is being validated; raise
-    # deliberately.
-    creative_insight_limit_per_format: int = 2
+    # The account read's writer. It reasons over a long brief of graded comparisons, so the
+    # stronger tier.
+    account_read_model: str = "google/gemini-3-flash"
 
     # Fallback for videos Fivetran's Meta connector can never expose: Partnership Ads,
     # where the video lives in the creator's own Instagram account rather than the

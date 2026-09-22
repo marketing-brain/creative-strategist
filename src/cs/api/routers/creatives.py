@@ -6,21 +6,17 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from cs.api.auth import AuthContext, current_auth
-from cs.api.deps import get_blobs, get_db, get_settings_dep
+from cs.api.deps import get_blobs, get_db
 from cs.connectors.fivetran.connect import schema_for
 from cs.core import repo
 from cs.core.blobs import BlobStore
-from cs.core.config import Settings
 from cs.core.db import Database
 from cs.core.metrics import derived_metrics
 from cs.core.repo import rollups
 from cs.insights import play_curve
-from cs.insights import repo as insights_repo
 from cs.insights.account_read import repo as account_read_repo
-from cs.insights.creative_insight_gates import NIGHTLY_SCHEDULE, insight_blocker
 from cs.insights.diagnose_creative import WINDOW_DAYS, diagnose_creative
 from cs.insights.diagnosis import bucket_label, length_bucket
-from cs.jobs.scheduler import schedule_paused
 
 router = APIRouter(prefix="/creatives")
 
@@ -426,45 +422,3 @@ async def creative_diagnosis(
         db, auth.org_id, c, await _until(db, auth.org_id, c["ad_account_id"]), member_ids=ids
     )
     return diagnosed.diagnosis.to_dict()
-
-
-@router.get("/{creative_id}/insight")
-async def creative_insight(
-    creative_id: UUID,
-    auth: AuthContext = Depends(current_auth),
-    db: Database = Depends(get_db),
-    settings: Settings = Depends(get_settings_dep),
-) -> dict:
-    """The written insight for the creative's footage, or {"paragraph": null, "reason": ...}
-    naming why there is none. Rejected drafts (numbers or timestamps not in the brief) and
-    failed model calls are never served. The reason comes from the same gates the insight
-    job obeys."""
-    c = await repo.get_creative(db, auth.org_id, creative_id)
-    if not c:
-        raise HTTPException(404)
-    # The paragraph is written once per footage group, so any copy of the file serves it.
-    ids = await repo.footage_member_ids(db, auth.org_id, creative_id)
-    row = await insights_repo.get_footage_insight(db, auth.org_id, ids)
-    if row is not None and row["status"] != "done":
-        return {"paragraph": None, "reason": "failed" if row["status"] == "failed" else "rejected"}
-    if row is None:
-        blocker, _ = await insight_blocker(
-            db, settings, auth.org_id, c, await _until(db, auth.org_id, c["ad_account_id"]), ids
-        )
-        if blocker == "format_limit":
-            return {
-                "paragraph": None,
-                "reason": blocker,
-                "format": c["format"],
-                "limit": settings.creative_insight_limit_per_format,
-            }
-        if blocker is None:
-            paused = await schedule_paused(db, NIGHTLY_SCHEDULE)
-            return {"paragraph": None, "reason": "paused" if paused else "waiting"}
-        return {"paragraph": None, "reason": blocker}
-    return {
-        "paragraph": row["paragraph"],
-        "window_start": row["window_start"].isoformat(),
-        "window_end": row["window_end"].isoformat(),
-        "created_at": row["created_at"].isoformat(),
-    }

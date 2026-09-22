@@ -43,7 +43,6 @@ class Unit:
     # Qualitative record for the writer.
     concept_summary: str | None
     hook_verbatim: str | None
-    insight_paragraph: str | None
 
     def has(self, dimension: str, value: str) -> bool:
         return (dimension, value) in self.facets
@@ -155,7 +154,6 @@ def unit_from_json(d: dict) -> Unit:
         first_product_s=d.get("first_product_s"),
         concept_summary=d.get("concept_summary"),
         hook_verbatim=d.get("hook_verbatim"),
-        insight_paragraph=d.get("insight_paragraph"),
     )
 
 

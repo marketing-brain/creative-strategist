@@ -30,9 +30,7 @@ SELECT c.id, a.sha256, a.duration_ms, l.run_id,
        coalesce(m.spend, 0) spend, coalesce(m.imp, 0) imp, coalesce(m.plays, 0) plays,
        coalesce(m.v3, 0) v3, coalesce(m.thru, 0) thru, coalesce(m.p25, 0) p25,
        coalesce(m.p50, 0) p50, coalesce(m.p75, 0) p75, coalesce(m.p100, 0) p100,
-       coalesce(m.lc, 0) lc, coalesce(m.purch, 0) purch, m.first_day, m.last_day,
-       (SELECT paragraph FROM creative_insight ci
-         WHERE ci.creative_id = c.id AND ci.status = 'done' LIMIT 1) AS insight
+       coalesce(m.lc, 0) lc, coalesce(m.purch, 0) purch, m.first_day, m.last_day
 FROM creative c
 JOIN asset a ON a.id = c.primary_asset_id
 LEFT JOIN latest l ON l.creative_id = c.id
@@ -65,8 +63,6 @@ async def build_units(
         duration_ms = max((r["duration_ms"] or 0) for r in rs)
         duration_s = duration_ms / 1000.0 if duration_ms else None
         x = extract(tag_rows, duration_s)
-        by_spend = sorted(rs, key=lambda r: -r["spend"])
-        insight = next((r["insight"] for r in by_spend if r["insight"]), None)
         units.append(
             Unit(
                 sha256=sha,
@@ -92,7 +88,6 @@ async def build_units(
                 first_product_s=x.first_product_s,
                 concept_summary=x.concept_summary,
                 hook_verbatim=x.hook_verbatim,
-                insight_paragraph=insight,
             )
         )
     edges: dict[str, tuple[float, float]] = {}

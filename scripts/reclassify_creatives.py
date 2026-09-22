@@ -313,8 +313,6 @@ async def _apply_one(db: Database, org_id: UUID, row: ReclassifyRow) -> list[str
             )
         # tag references tag_run with no ON DELETE clause, so tags go first.
         await tx.execute("DELETE FROM tag WHERE creative_id=$1", row.creative_id)
-        # The insight paragraph was written against the wrong format too.
-        await tx.execute("DELETE FROM creative_insight WHERE creative_id=$1", row.creative_id)
         await tx.execute("DELETE FROM tag_run WHERE creative_id=$1", row.creative_id)
         if row.is_image_to_video and row.asset_url:
             await queue.enqueue(
@@ -359,7 +357,6 @@ async def _replace_with_image_download(tx, org_id: UUID, row: ReclassifyRow) -> 
     )
     # tag references tag_run with no ON DELETE clause, so tags go first.
     await tx.execute("DELETE FROM tag WHERE creative_id=$1", row.creative_id)
-    await tx.execute("DELETE FROM creative_insight WHERE creative_id=$1", row.creative_id)
     await tx.execute("DELETE FROM tag_run WHERE creative_id=$1", row.creative_id)
     await queue.enqueue(
         tx,

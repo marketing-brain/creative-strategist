@@ -49,7 +49,7 @@ export function syncBusy(s: SyncStatus): boolean {
 
 export function backlogTotal(s: SyncStatus): number {
   const b = s.backlog;
-  return b ? b.files + b.tagging + b.insights : 0;
+  return b ? b.files + b.tagging : 0;
 }
 
 export function backlogWords(s: SyncStatus): string {
@@ -58,7 +58,6 @@ export function backlogWords(s: SyncStatus): string {
   return [
     b.files ? `${plural(b.files, 'file')} to fetch` : '',
     b.tagging ? `${plural(b.tagging, 'ad')} to tag` : '',
-    b.insights ? `${plural(b.insights, 'write-up')} to go` : '',
   ]
     .filter(Boolean)
     .join(' · ');

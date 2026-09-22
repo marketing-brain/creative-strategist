@@ -42,7 +42,6 @@ def _unit(
         first_product_s=None,
         concept_summary=concept_summary,
         hook_verbatim=None,
-        insight_paragraph=None,
     )
 
 

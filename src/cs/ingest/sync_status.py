@@ -26,7 +26,6 @@ STAGES = {
         "meta.resolve_facebook_video",
     ),
     "tagging": ("tagging.tag_creative",),
-    "insights": ("insights.creative_insight",),
 }
 
 

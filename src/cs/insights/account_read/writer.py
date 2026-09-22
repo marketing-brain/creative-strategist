@@ -112,8 +112,6 @@ def _unit_record(u) -> str:
         bits.append(f'hook: "{u.hook_verbatim}"')
     if u.concept_summary:
         bits.append(f"concept: {u.concept_summary}")
-    if u.insight_paragraph:
-        bits.append(f"per-ad insight: {u.insight_paragraph}")
     return "- " + " | ".join(bits)
 
 
@@ -220,7 +218,7 @@ Stratified checks (does the effect survive when the partner attribute is held co
 
 
 SYSTEM = """\
-You are a senior performance-creative strategist writing the account-level read for the team that makes this brand's video ads. You have two kinds of material: a qualitative record of what each ad is (headline, verbatim hook, concept summary, and where one exists the per-ad insight paragraph), and statistically graded comparisons of how ads with each attribute performed against ads without it, including comparisons inside groups, entanglement checks and retention by product-reveal timing.
+You are a senior performance-creative strategist writing the account-level read for the team that makes this brand's video ads. You have two kinds of material: a qualitative record of what each ad is (headline, verbatim hook, concept summary), and statistically graded comparisons of how ads with each attribute performed against ads without it, including comparisons inside groups, entanglement checks and retention by product-reveal timing.
 
 Your job is the amalgamation. A finding is not "attribute X has metric Y higher"; that is a table row and the reader already has the table. A finding says what the ads that share the attribute are actually doing, what viewer behavior that plausibly produces, which files show it and which break it, and what the team could not have seen from the numbers alone. Write for a smart client who will make the next ad from this.
 
@@ -532,7 +530,7 @@ class GeminiGatewayAccountReadWriter:
         self.client = client or openai.AsyncOpenAI(
             api_key=settings.ai_gateway_api_key, base_url=f"{settings.ai_gateway_base_url}/v1"
         )
-        self.model = settings.creative_insight_model
+        self.model = settings.account_read_model
 
     async def complete(self, system: str, user: str) -> tuple[str, int, int]:
         resp = await self.client.chat.completions.create(
