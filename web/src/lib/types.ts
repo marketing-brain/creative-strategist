@@ -10,6 +10,8 @@ export type SyncStatus = {
   last_sync?: SyncJob | null;
   auto_sync?: { enabled: boolean; next_run_at: string | null };
   backlog?: { files: number; tagging: number; insights: number };
+  // Queued jobs parked on purpose (paid lookups stopped by hand); they never run on their own.
+  held?: number;
 };
 export type Creative = { id: string; ad_account_id: string; platform_creative_id: string; format: 'image' | 'video' | 'carousel' | 'unresolved'; headline: string | null; primary_text: string | null; cta_type: string | null; link_url: string | null; primary_asset_url: string | null; primary_asset_mime?: string | null; first_seen_at: string; distance?: number; spend_30d: number; ctr_30d?: number | null; creative_count?: number; ad_count?: number; copy_variants?: number; ad_name?: string | null; poster_url?: string | null; totals?: GridRates; baseline?: GridRates };
 // A grid card's 30-day numbers, and the same numbers pooled over the rest of its account and format.

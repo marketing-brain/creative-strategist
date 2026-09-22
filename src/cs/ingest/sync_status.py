@@ -119,10 +119,19 @@ async def _auto_sync(db: Database) -> dict:
     return {"enabled": True, "next_run_at": _iso(last + SCHEDULE_EVERY if last else now)}
 
 
-async def _backlog(db: Database, org_id: UUID) -> dict:
+# A job parked far in the future (run_after set to 2100 by hand to stop paid work) is on
+# hold, not in progress. Retry backoff never pushes run_after more than minutes out.
+HELD_AFTER = "now() + interval '1 day'"
+
+
+async def _backlog(db: Database, org_id: UUID) -> tuple[dict, int]:
+    """Work a sync queued that will still run, by stage, and the count of held jobs."""
     rows = await db.fetch(
-        """
-        SELECT job_type, count(*) n FROM job
+        f"""
+        SELECT job_type,
+               count(*) FILTER (WHERE run_after <= {HELD_AFTER}) n,
+               count(*) FILTER (WHERE run_after > {HELD_AFTER}) held
+        FROM job
         WHERE org_id = $1 AND status IN ('pending', 'running') AND job_type = ANY($2)
         GROUP BY 1
         """,
@@ -130,7 +139,8 @@ async def _backlog(db: Database, org_id: UUID) -> dict:
         [t for types in STAGES.values() for t in types],
     )
     by_type = {r["job_type"]: r["n"] for r in rows}
-    return {stage: sum(by_type.get(t, 0) for t in types) for stage, types in STAGES.items()}
+    backlog = {stage: sum(by_type.get(t, 0) for t in types) for stage, types in STAGES.items()}
+    return backlog, sum(r["held"] for r in rows)
 
 
 async def sync_status(db: Database, org_id: UUID) -> dict:
@@ -144,6 +154,7 @@ async def sync_status(db: Database, org_id: UUID) -> dict:
             org_id,
         )
     ]
+    backlog, held = await _backlog(db, org_id)
     return {
         "connection": {
             "status": conn["sync_status"],
@@ -154,5 +165,6 @@ async def sync_status(db: Database, org_id: UUID) -> dict:
         "app": await _app(db, org_id),
         "last_sync": await _last_sync(db, org_id),
         "auto_sync": await _auto_sync(db),
-        "backlog": await _backlog(db, org_id),
+        "backlog": backlog,
+        "held": held,
     }
