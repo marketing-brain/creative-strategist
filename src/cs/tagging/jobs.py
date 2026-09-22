@@ -84,13 +84,10 @@ WHERE (f.format <> 'video' OR $2::boolean)
       AND split_part(v.version, '.', 1)::int >= CASE WHEN f.format = 'video' THEN 2 ELSE 1 END
   ) < $5
 ORDER BY f.spend DESC, f.rep_id
-LIMIT $6
 """
 
 
-async def tagging_candidates(db: Database, settings: Settings, room: int) -> list:
-    if room <= 0:
-        return []
+async def tagging_candidates(db: Database, settings: Settings) -> list:
     return await db.fetch(
         _CANDIDATES,
         ["image", "video", "carousel"],
@@ -98,7 +95,6 @@ async def tagging_candidates(db: Database, settings: Settings, room: int) -> lis
         settings.tagging_min_impressions,
         settings.tagging_min_video_plays,
         settings.tagging_repeat_per_footage,
-        room,
     )
 
 
@@ -116,11 +112,10 @@ async def pending_tag_jobs(db: Database) -> int:
 async def tagging_sweep(db: Database, settings: Settings) -> None:
     """Files that have since earned a tag. A creative arrives with no delivery at all, so the
     gate turns it away at download; this is what picks it up once it has run, highest spend
-    first. It tops the queue up to `tagging_queue_depth` rather than queueing everything: one
-    worker claims jobs in order, so a long tagging backlog would delay every other job behind
-    it. The job re-checks the gate, so a candidate that stops qualifying costs nothing."""
-    room = settings.tagging_queue_depth - await pending_tag_jobs(db)
-    rows = await tagging_candidates(db, settings, room)
+    first and with no cap: the gate decides what is worth paying for, and a tag run is claimed
+    only when nothing else is waiting, so the backlog delays no other work. The job re-checks
+    the gate, so a candidate that stops qualifying costs nothing."""
+    rows = await tagging_candidates(db, settings)
     queued = 0
     for r in rows:
         if await queue.enqueue(

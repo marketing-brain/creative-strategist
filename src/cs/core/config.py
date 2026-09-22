@@ -58,12 +58,9 @@ class Settings(BaseSettings):
     # Paid tag runs allowed per file. Raise it to measure tagger agreement deliberately
     # (cs.insights.account_read.reliability scores files tagged more than once).
     tagging_repeat_per_footage: int = 1
-    # How many tagging jobs may wait in the queue at once. One worker claims jobs in order
-    # with no priority, so every pending tag run delays whatever is queued next; at roughly
-    # four minutes a file, 40 is about two and a half hours of head start. The sweep tops the
-    # queue back up every few hours, so a backlog drains as fast as the worker allows without
-    # burying the rest of the work behind it.
-    tagging_queue_depth: int = 40
+    # No cap on how many files the sweep queues: what is worth tagging is decided by the
+    # gate above, and tagging is claimed only when no other job is waiting
+    # (cs.core.queue.BACKGROUND_JOB_TYPES), so a long backlog delays nothing else.
     insights_model: str = "google/gemini-2.5-flash-lite"
     # Open-vocabulary merge (spec 2026-09-16-vocab-merge-design.md): slug embeddings for
     # candidate recall. pgvector HNSW caps at 2000 dims; 1536 keeps the index option open.

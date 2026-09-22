@@ -67,6 +67,13 @@ async def is_dead(db: Database, org_id: UUID, job_type: str, dedup_key: str) -> 
     )
 
 
+# Work that is never urgent: a backlog of it may be thousands of jobs long, and one worker
+# claims jobs in order, so without this a drain would put every sync, download and page
+# rebuild behind hours of it. False sorts before true, so these are claimed only once
+# nothing else is waiting.
+BACKGROUND_JOB_TYPES = ("tagging.tag_creative",)
+
+
 async def claim(db: Database, worker_id: str, job_types: list[str] | None = None) -> Job | None:
     row = await db.fetchrow(
         """
@@ -74,7 +81,7 @@ async def claim(db: Database, worker_id: str, job_types: list[str] | None = None
           SELECT id FROM job
           WHERE status = 'pending' AND run_after <= now()
             AND ($1::text[] IS NULL OR job_type = ANY($1))
-          ORDER BY run_after, id
+          ORDER BY (job_type = ANY($3::text[])), run_after, id
           FOR UPDATE SKIP LOCKED
           LIMIT 1
         )
@@ -84,6 +91,7 @@ async def claim(db: Database, worker_id: str, job_types: list[str] | None = None
         """,
         job_types,
         worker_id,
+        list(BACKGROUND_JOB_TYPES),
     )
     if not row:
         return None
