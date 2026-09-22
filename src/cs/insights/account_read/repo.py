@@ -347,15 +347,22 @@ FROM (
 
 
 async def coverage(
-    db: Database, org_id: UUID, ad_account_id: UUID, fmt: str = "video"
+    db: Database, org_id: UUID, ad_account_id: UUID, fmt: str = "video", covered_spend=None
 ) -> dict | None:
-    """Files the read could have used, and the share of spend behind them."""
+    """What the account ran, against what saw it.
+
+    `covered_spend` is the spend of the files a particular read used, and it is what the
+    share is measured from. Without it the share describes everything tagged right now --
+    right for a tag filter, wrong under a stored read, whose file count belongs to the day it
+    ran. Mixing the two once put "99% of account spend" beside a read that covered 87%.
+    """
     r = await db.fetchrow(_COVERAGE, org_id, ad_account_id, fmt)
     if r is None or not r["files"]:
         return None
-    spend, tagged_spend = float(r["spend"]), float(r["tagged_spend"])
+    spend = float(r["spend"])
+    covered = float(covered_spend) if covered_spend is not None else float(r["tagged_spend"])
     return {
         "files": r["files"],
         "tagged_files": r["tagged_files"],
-        "spend_share": (tagged_spend / spend) if spend else None,
+        "spend_share": (covered / spend) if spend else None,
     }
