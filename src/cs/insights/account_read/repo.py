@@ -346,21 +346,34 @@ FROM (
 """
 
 
-async def coverage(
-    db: Database, org_id: UUID, ad_account_id: UUID, fmt: str = "video", covered_spend=None
-) -> dict | None:
-    """What the account ran, against what saw it.
+_COVERED_SPEND = """
+SELECT coalesce(sum(w.spend), 0) AS spend
+FROM footage f
+JOIN footage_metric_window w ON w.footage_id = f.id AND w.window_kind = 'lifetime'
+WHERE f.org_id = $1 AND f.ad_account_id = $2 AND f.format = $3 AND f.sha256 = ANY($4::text[])
+"""
 
-    `covered_spend` is the spend of the files a particular read used, and it is what the
-    share is measured from. Without it the share describes everything tagged right now --
-    right for a tag filter, wrong under a stored read, whose file count belongs to the day it
-    ran. Mixing the two once put "99% of account spend" beside a read that covered 87%.
+
+async def coverage(
+    db: Database, org_id: UUID, ad_account_id: UUID, fmt: str = "video", shas=None
+) -> dict | None:
+    """What the account ran, against what a read saw.
+
+    `shas` names the files a particular read used, and both sides are then measured from
+    today's data. Measuring one side at the time of the run and the other now is how a read
+    covering 95% got labelled 87% (its files have since been restated upward by $74k), and
+    leaving `shas` out is how it got labelled 99% (that describes everything tagged today,
+    which is right for a tag filter and wrong under a stored read).
     """
     r = await db.fetchrow(_COVERAGE, org_id, ad_account_id, fmt)
     if r is None or not r["files"]:
         return None
     spend = float(r["spend"])
-    covered = float(covered_spend) if covered_spend is not None else float(r["tagged_spend"])
+    covered = (
+        float(await db.fetchval(_COVERED_SPEND, org_id, ad_account_id, fmt, list(shas)))
+        if shas
+        else float(r["tagged_spend"])
+    )
     return {
         "files": r["files"],
         "tagged_files": r["tagged_files"],

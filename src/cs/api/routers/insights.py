@@ -54,9 +54,9 @@ async def account_read(
         "tests": page.get("tests", []),
         "sibling_tests": page.get("sibling_tests", []),
         "units": units,
-        # Measured from this run's own files, not from whatever is tagged today.
+        # This run's own files, both sides measured from today's data.
         "coverage": await account_read_repo.coverage(
-            db, auth.org_id, ad_account_id, covered_spend=(page.get("summary") or {}).get("spend")
+            db, auth.org_id, ad_account_id, shas=[u["sha256"] for u in units if u.get("sha256")]
         ),
         "error": row["error"],
         "newer_failed_error": row.get("newer_failed_error"),
