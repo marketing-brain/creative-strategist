@@ -762,7 +762,9 @@ async def test_unresolved_video_with_instagram_permalink_enqueues_resolve_job(
     job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.resolve_instagram_video'")
     assert job is not None
     assert job["payload"]["permalink_url"] == "https://www.instagram.com/p/abc123/"
-    assert job["max_attempts"] == 3
+    # The Apify lookup is one-shot because `video_resolution` claims it before the call
+    # (cs.ingest.jobs), not because the job runs out of attempts, so this keeps the default.
+    assert job["max_attempts"] == 5
     assert (
         await db.fetchval("SELECT count(*) FROM job WHERE job_type='meta.download_creative'") == 0
     )
@@ -801,7 +803,9 @@ async def test_unresolved_video_without_instagram_permalink_resolves_its_video_i
     job = await db.fetchrow("SELECT * FROM job WHERE job_type='meta.resolve_facebook_video'")
     assert job["payload"]["video_ids"] == ["vid_not_in_video_history"]
     assert job["payload"]["kind"] == "original_video"
-    assert job["max_attempts"] == 3
+    # The Apify lookup is one-shot because `video_resolution` claims it before the call
+    # (cs.ingest.jobs), not because the job runs out of attempts, so this keeps the default.
+    assert job["max_attempts"] == 5
     assert await db.fetchval("SELECT count(*) FROM job") == 1
 
 
