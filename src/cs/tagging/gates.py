@@ -16,19 +16,14 @@ Delivery is pooled over the file's copies, because a tag describes the file: ten
 
 from __future__ import annotations
 
-import logging
 from typing import Literal
 from uuid import UUID
 
 import asyncpg
 
-from cs.core import queue
-from cs.core import repo as core_repo
 from cs.core.config import Settings
 from cs.core.db import Database
-from cs.jobs.registry import JobContext
 
-log = logging.getLogger("cs.tagging")
 TAG_JOB = "tagging.tag_creative"
 
 TAGGABLE_FORMATS = ("image", "video", "carousel")
@@ -144,28 +139,3 @@ def explain(blocker: Blocker, facts: dict) -> str:
         "unresolved": "the creative's format is not proven, so there is no taxonomy to tag with",
         "video_tagging_off": "video tagging is switched off",
     }[blocker]
-
-
-async def enqueue_tagging(ctx: JobContext, creative_id: UUID, *, force: bool = False) -> bool:
-    """Queue a tagging job unless the gate refuses. Returns whether it was queued."""
-    creative = await core_repo.get_creative(ctx.db, ctx.job.org_id, creative_id)
-    if creative is None:
-        return False
-    if not force:
-        blocker, facts = await tag_blocker(ctx.db, ctx.settings, ctx.job.org_id, creative)
-        if blocker is not None:
-            log.info(
-                "not tagging creative %s: %s",
-                creative_id,
-                explain(blocker, facts),
-                extra={"creative_id": str(creative_id), "blocker": blocker},
-            )
-            return False
-    await queue.enqueue(
-        ctx.db,
-        ctx.job.org_id,
-        TAG_JOB,
-        {"creative_id": str(creative_id)},
-        dedup_key=f"tag:{creative_id}",
-    )
-    return True

@@ -21,7 +21,9 @@ async def _creative(db, org_id):
 
 
 @respx.mock
-async def test_download_creative_stores_asset_and_queues_tagging(db, blobs, settings, org_id):
+async def test_download_creative_stores_the_asset_and_queues_no_tagging(
+    db, blobs, settings, org_id
+):
     respx.get("https://cdn.example/img.jpg").mock(
         return_value=httpx.Response(200, content=b"\x89PNG", headers={"content-type": "image/png"})
     )
@@ -32,7 +34,9 @@ async def test_download_creative_stores_asset_and_queues_tagging(db, blobs, sett
             ctx, http, cid, "https://cdn.example/img.jpg", "original_image"
         )
     assert await repo.creative_has_primary_asset(db, org_id, cid)
-    assert await db.fetchval("SELECT job_type FROM job") == "tagging.tag_creative"
+    # Downloading a file queues no tagging: the creative has delivered nothing yet, so the
+    # gate would refuse it. `tagging.sweep` picks it up once it has run (cs.tagging.gates).
+    assert await db.fetchval("SELECT count(*) FROM job WHERE job_type='tagging.tag_creative'") == 0
 
 
 @respx.mock
@@ -114,7 +118,7 @@ async def test_download_creative_skips_tagging_when_video_tagging_disabled(
 
 
 @respx.mock
-async def test_download_creative_still_tags_images_when_video_tagging_disabled(
+async def test_download_creative_queues_no_tagging_for_a_file_that_has_not_run(
     db, blobs, settings, org_id
 ):
     settings.video_tagging_enabled = False
@@ -132,7 +136,11 @@ async def test_download_creative_still_tags_images_when_video_tagging_disabled(
             await assets.download_creative(
                 ctx, http, cid, "https://cdn.example/img2.jpg", "original_image"
             )
-        assert await db.fetchval("SELECT job_type FROM job") == "tagging.tag_creative"
+        # Nothing to do with the video switch: no file is tagged at download, because a
+        # creative that has delivered nothing cannot be compared to anything yet.
+        assert (
+            await db.fetchval("SELECT count(*) FROM job WHERE job_type='tagging.tag_creative'") == 0
+        )
     finally:
         settings.video_tagging_enabled = True
 

@@ -240,10 +240,8 @@ async def test_resolve_instagram_video_downloads_and_tags_on_success(db, blobs, 
         await db.fetchval("SELECT status FROM job WHERE job_type='meta.resolve_instagram_video'")
         == "done"
     )
-    assert (
-        await db.fetchval("SELECT job_type FROM job WHERE job_type='tagging.tag_creative'")
-        == "tagging.tag_creative"
-    )
+    # No tag job at download: the creative has no delivery yet, so the sweep owns it.
+    assert await db.fetchval("SELECT count(*) FROM job WHERE job_type='tagging.tag_creative'") == 0
     creative = await db.fetchrow("SELECT format, format_source FROM creative WHERE id=$1", cid)
     assert (creative["format"], creative["format_source"]) == ("video", "meta_object_type")
 

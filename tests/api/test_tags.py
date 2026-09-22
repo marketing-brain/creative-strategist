@@ -57,7 +57,15 @@ async def test_tags_endpoints(client, db, settings):
     ]
     r = await client.get("/tags/dimensions", headers=H)
     assert any(d["name"] == "hook_type" for d in r.json())
+    # The gate refuses and names the rule -- here the creative has no stored file -- so the
+    # caller sees the reason rather than a silent no-op.
     r = await client.post(f"/creatives/{cid}/retag", headers=H)
+    assert r.status_code == 422
+    assert r.json()["detail"]["reason"] == "no_asset"
+    assert await db.fetchval("SELECT count(*) FROM job") == 0
+    # force is an admin paying anyway: that is how a file is tagged twice on purpose, to
+    # measure how far the tagger agrees with itself.
+    r = await client.post(f"/creatives/{cid}/retag?force=true", headers=H)
     assert r.status_code == 200
     assert await db.fetchval("SELECT job_type FROM job") == "tagging.tag_creative"
 
