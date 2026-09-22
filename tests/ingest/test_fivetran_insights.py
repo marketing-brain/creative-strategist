@@ -135,6 +135,24 @@ async def test_attribution_split_is_zero_when_a_window_column_is_null(db, blobs,
     assert row["purchases_click_7d"] == 2 and row["purchases_view_1d"] == 0
 
 
+async def test_an_empty_action_value_falls_back_to_its_windows(db, blobs, settings, org_id):
+    """Meta sends some action rows with `value` NULL and only the windows filled (seen on
+    org 3 from 2026-09-14). One such row used to fail the whole metrics sync."""
+    await _seed(db, org_id, with_retention=False)
+    await db.execute(
+        f'UPDATE "{SCHEMA}".basic_ad_actions SET value = NULL, _7_d_click = NULL, _1_d_view = 1 '
+        "WHERE action_type = 'omni_add_to_cart'"
+    )
+    conn_id = await repo.upsert_meta_connection(db, org_id, "conn_1", SCHEMA)
+    connection = await repo.get_meta_connection_by_id(db, conn_id)
+    ctx = JobContext(db=db, blobs=blobs, settings=settings, job=None)
+
+    summary = await fivetran_insights.sync_insights(ctx, org_id, connection)
+    assert summary["written"] == 1
+    row = await db.fetchrow("SELECT * FROM metric_daily WHERE org_id=$1", org_id)
+    assert row["add_to_carts"] == 1 and row["purchases"] == 2
+
+
 async def test_sync_insights_without_retention_report_writes_zeros(db, blobs, settings, org_id):
     """Org 1's Fivetran schema has no video_retention_ad tables at all. The sync must
     still land everything else and say so in the summary, never raise."""

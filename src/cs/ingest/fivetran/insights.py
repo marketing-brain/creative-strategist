@@ -62,12 +62,26 @@ def _pid(value: object) -> str | None:
 
 
 async def _action_totals(db, schema: str, table: str) -> dict[tuple[str, date], dict[str, Decimal]]:
+    # Meta sometimes sends a row with an empty `value` and only the window columns filled
+    # (35 add-to-cart/view-content rows from 2026-09-14 on). `value` is the account's
+    # default attribution, 7-day click plus 1-day view (true on 217,601 of 217,695 rows that
+    # carry both), so that sum stands in. A total that is still empty is left out, never
+    # allowed to fail the whole metrics sync.
+    windows = [c for c in ATTRIBUTION_WINDOW_COLUMNS if await _column_exists(db, schema, table, c)]
+    fallback = " + ".join(f"coalesce({c}, 0)" for c in windows)
+    value = (
+        f"coalesce(value, {fallback})"
+        if len(windows) == len(ATTRIBUTION_WINDOW_COLUMNS)
+        else "value"
+    )
     rows = await db.fetch(f"""
-        SELECT ad_id, date, action_type, sum(value) AS total
+        SELECT ad_id, date, action_type, sum({value}) AS total
         FROM {_q(schema, table)} GROUP BY ad_id, date, action_type
     """)
     out: dict[tuple[str, date], dict[str, Decimal]] = {}
     for r in rows:
+        if r["total"] is None:
+            continue
         bucket = out.setdefault((_pid(r["ad_id"]), r["date"]), {})
         bucket[r["action_type"]] = Decimal(str(r["total"]))
     return out
