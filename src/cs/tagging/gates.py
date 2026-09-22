@@ -133,7 +133,12 @@ def explain(blocker: Blocker, facts: dict) -> str:
             f"under the {floors} a comparison needs"
         )
     if blocker == "already_tagged":
-        return f"this file already has {facts['paid_runs']} paid tag run(s), the limit per file"
+        n = facts["paid_runs"]
+        return (
+            "this file has already been tagged"
+            if n == 1
+            else f"this file has been tagged {n} times, the limit per file"
+        )
     return {
         "no_asset": "the file has not been downloaded yet",
         "unresolved": "the creative's format is not proven, so there is no taxonomy to tag with",

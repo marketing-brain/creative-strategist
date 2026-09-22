@@ -54,6 +54,7 @@ async def account_read(
         "tests": page.get("tests", []),
         "sibling_tests": page.get("sibling_tests", []),
         "units": units,
+        "coverage": await account_read_repo.coverage(db, auth.org_id, ad_account_id),
         "error": row["error"],
         "newer_failed_error": row.get("newer_failed_error"),
     }

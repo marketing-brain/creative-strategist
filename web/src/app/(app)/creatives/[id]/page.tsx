@@ -128,7 +128,11 @@ export default async function CreativeDetail({ params, searchParams }: Props) {
             {tags.length ? (
               <TagList tags={tags} dimensions={dims} seekable={isVideo} />
             ) : (
-              <p className="text-sm text-muted-foreground">Not tagged yet.</p>
+              <p className="text-sm text-muted-foreground">
+                {creative.tag_status?.detail
+                  ? `Not tagged — ${creative.tag_status.detail}.`
+                  : 'Queued for tagging.'}
+              </p>
             )}
           </section>
         </div>

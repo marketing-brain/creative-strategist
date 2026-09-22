@@ -326,3 +326,36 @@ async def patterns_for_file(
         r["window_end"] = run["window_end"].isoformat() if run["window_end"] else None
     _FILE_PATTERNS[key] = kept
     return _FILE_PATTERNS[key]
+
+
+# What the read could see, against what the account ran. A read covers only tagged files, and
+# a page that does not say so reads as if it had seen everything.
+_COVERAGE = """
+SELECT count(*) AS files,
+       count(*) FILTER (WHERE tagged) AS tagged_files,
+       coalesce(sum(spend), 0) AS spend,
+       coalesce(sum(spend) FILTER (WHERE tagged), 0) AS tagged_spend
+FROM (
+  SELECT f.id,
+         EXISTS (SELECT 1 FROM footage_attribute a WHERE a.footage_id = f.id) AS tagged,
+         (SELECT w.spend FROM footage_metric_window w
+           WHERE w.footage_id = f.id AND w.window_kind = 'lifetime') AS spend
+  FROM footage f
+  WHERE f.org_id = $1 AND f.ad_account_id = $2 AND f.format = $3
+) x
+"""
+
+
+async def coverage(
+    db: Database, org_id: UUID, ad_account_id: UUID, fmt: str = "video"
+) -> dict | None:
+    """Files the read could have used, and the share of spend behind them."""
+    r = await db.fetchrow(_COVERAGE, org_id, ad_account_id, fmt)
+    if r is None or not r["files"]:
+        return None
+    spend, tagged_spend = float(r["spend"]), float(r["tagged_spend"])
+    return {
+        "files": r["files"],
+        "tagged_files": r["tagged_files"],
+        "spend_share": (tagged_spend / spend) if spend else None,
+    }

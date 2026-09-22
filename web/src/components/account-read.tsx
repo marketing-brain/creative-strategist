@@ -260,8 +260,9 @@ function TaggerNote({ t }: { t: NonNullable<AccountReadView['tagger']> }) {
   );
 }
 
-export function AccountReadSection({ status, nUnits, view, stale = false, currency }: {
+export function AccountReadSection({ status, nUnits, view, stale = false, currency, coverage }: {
   status: string; nUnits?: number; view: AccountReadView | null; stale?: boolean; currency?: string;
+  coverage?: { files?: number; tagged_files?: number; spend_share?: number | null } | null;
 }) {
   if (status === 'none' || status === 'insufficient') {
     return (
@@ -283,7 +284,19 @@ export function AccountReadSection({ status, nUnits, view, stale = false, curren
   }
   const f = formatters(currency);
   const b = view.basis;
-  const facts = [`${b.files} videos`, `${b.creatives} ads`, `${f.money(b.spend)} spend`, `${f.count(b.purchases)} purchases`];
+  // The read only sees tagged files, so the scope line says so rather than implying it saw
+  // the whole account.
+  const total = coverage?.files;
+  const share = coverage?.spend_share;
+  const facts = [
+    total && total > b.files ? `${b.files} of ${total} videos` : `${b.files} videos`,
+    `${b.creatives} ads`,
+    `${f.money(b.spend)} spend`,
+    `${f.count(b.purchases)} purchases`,
+  ];
+  // Floored: 99.5% must not read as "we saw all of it", which is the claim this line exists
+  // to avoid.
+  if (total && total > b.files && share != null) facts.push(`${Math.floor(share * 100)}% of account spend`);
   return (
     <div className="max-w-5xl space-y-10">
       <header className="space-y-5">

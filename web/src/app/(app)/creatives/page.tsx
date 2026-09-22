@@ -58,6 +58,15 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
   });
 
   const [list, accounts, dimensions] = await Promise.all([api.creatives(`?${apiQuery}`), api.accounts(), api.dimensions()]);
+  // A tag filter can only match tagged files, so say how many are not (they are left out by
+  // the delivery floors in cs.tagging.gates, not waiting in a queue).
+  const tagFiltered = Boolean(sp.dimension && sp.value);
+  const filterAccount = sp.account_id ?? accounts.find((a) => a.status === 'active')?.id ?? accounts[0]?.id;
+  const coverage =
+    tagFiltered && filterAccount
+      ? await api.creativeCoverage(filterAccount, sp.format === 'image' ? 'image' : 'video').catch(() => null)
+      : null;
+  const untagged = coverage?.files != null && coverage.tagged_files != null ? coverage.files - coverage.tagged_files : 0;
   const { items: creatives, total } = list;
   const selectedDim = dimensions.find((d) => d.name === sp.dimension);
   const openValues = selectedDim?.kind === 'open' ? await api.dimensionValues(selectedDim.name) : undefined;
@@ -131,6 +140,14 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
           </>
         )}{' '}
         <span className="hidden lg:inline">Percentages are the gap to the rest of the account, same format.</span>
+        {untagged > 0 && (
+          <>
+            {' '}
+            <span>
+              {untagged} of {coverage?.files} files are untagged and cannot match a tag filter.
+            </span>
+          </>
+        )}
       </p>
       {creatives.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border py-20 text-center">

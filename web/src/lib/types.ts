@@ -11,7 +11,9 @@ export type SyncStatus = {
   auto_sync?: { enabled: boolean; next_run_at: string | null };
   backlog?: { files: number; tagging: number };
 };
-export type Creative = { id: string; ad_account_id: string; platform_creative_id: string; format: 'image' | 'video' | 'carousel' | 'unresolved'; headline: string | null; primary_text: string | null; cta_type: string | null; link_url: string | null; primary_asset_url: string | null; primary_asset_mime?: string | null; first_seen_at: string; distance?: number; spend_30d: number; ctr_30d?: number | null; creative_count?: number; ad_count?: number; copy_variants?: number; ad_name?: string | null; poster_url?: string | null; totals?: GridRates; baseline?: GridRates };
+export type TagStatus = { reason: 'no_asset' | 'unresolved' | 'video_tagging_off' | 'already_tagged' | 'below_threshold' | null; detail: string | null; impressions?: number | null; plays?: number | null };
+export type Coverage = { files?: number; tagged_files?: number; spend_share?: number | null };
+export type Creative = { tag_status?: TagStatus; id: string; ad_account_id: string; platform_creative_id: string; format: 'image' | 'video' | 'carousel' | 'unresolved'; headline: string | null; primary_text: string | null; cta_type: string | null; link_url: string | null; primary_asset_url: string | null; primary_asset_mime?: string | null; first_seen_at: string; distance?: number; spend_30d: number; ctr_30d?: number | null; creative_count?: number; ad_count?: number; copy_variants?: number; ad_name?: string | null; poster_url?: string | null; totals?: GridRates; baseline?: GridRates };
 // A grid card's 30-day numbers, and the same numbers pooled over the rest of its account and format.
 export type GridRates = { spend: number; impressions: number; link_clicks: number; purchases: number; hook_rate: number | null; link_ctr: number | null; cpa: number | null; roas: number | null };
 // 30-day totals for one ad, one copy variant, or a whole footage group.
@@ -72,7 +74,7 @@ export type AccountReadUnit = { sha256: string; headline: string; spend: number;
 export type AccountRead = {
   status: 'none' | 'done' | 'insufficient' | 'rejected' | 'failed'; n_units?: number; created_at?: string; window_start?: string | null; window_end?: string | null;
   summary?: Record<string, unknown>; tests?: AccountReadTest[]; sibling_tests?: AccountReadTest[]; overlaps?: unknown[]; stratified?: unknown[]; retention_by_reveal?: Record<string, unknown>;
-  units?: AccountReadUnit[]; read?: AccountReadText | null; error?: string | null; newer_failed_error?: string | null;
+  units?: AccountReadUnit[]; coverage?: import('./types').Coverage | null; read?: AccountReadText | null; error?: string | null; newer_failed_error?: string | null;
 };
 export type NextDecline = { metric: 'cpa' | 'ctr'; baseline: number; observed: number; ratio: number; capped: boolean };
 export type NextStake = { amount: number; share: number; window: 'window' | '30d'; basis: string };

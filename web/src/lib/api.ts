@@ -31,6 +31,8 @@ export const api = {
   fivetranDisconnect: () => apiFetch<{ ok: boolean }>('/connections/meta/disconnect', { method: 'POST' }),
   creatives: (q: string) =>
     apiFetch<import('./types').Paginated<import('./types').Creative>>(`/creatives${q}`),
+  creativeCoverage: (accountId: string, format = 'video') =>
+    apiFetch<import('./types').Coverage>(`/creatives/coverage?ad_account_id=${accountId}&format=${format}`),
   creative: (id: string) => apiFetch<import('./types').Creative>(`/creatives/${id}`),
   creativeSummary: (id: string, scope: import('./types').Scope = 'footage') =>
     apiFetch<import('./types').CreativeSummary>(`/creatives/${id}/summary?scope=${scope}`),

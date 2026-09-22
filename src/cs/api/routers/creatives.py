@@ -6,10 +6,11 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from cs.api.auth import AuthContext, current_auth
-from cs.api.deps import get_blobs, get_db
+from cs.api.deps import get_blobs, get_db, get_settings_dep
 from cs.connectors.fivetran.connect import schema_for
 from cs.core import repo
 from cs.core.blobs import BlobStore
+from cs.core.config import Settings
 from cs.core.db import Database
 from cs.core.metrics import derived_metrics
 from cs.core.repo import rollups
@@ -17,6 +18,7 @@ from cs.insights import play_curve
 from cs.insights.account_read import repo as account_read_repo
 from cs.insights.diagnose_creative import WINDOW_DAYS, diagnose_creative
 from cs.insights.diagnosis import bucket_label, length_bucket
+from cs.tagging.gates import explain, tag_blocker
 
 router = APIRouter(prefix="/creatives")
 
@@ -197,12 +199,24 @@ async def list_creatives(
     }
 
 
+@router.get("/coverage")
+async def coverage(
+    ad_account_id: UUID,
+    format: str = "video",
+    auth: AuthContext = Depends(current_auth),
+    db: Database = Depends(get_db),
+) -> dict:
+    """How much of an account a tag filter can reach: untagged files match nothing."""
+    return await account_read_repo.coverage(db, auth.org_id, ad_account_id, format) or {}
+
+
 @router.get("/{creative_id}")
 async def get_creative(
     creative_id: UUID,
     auth: AuthContext = Depends(current_auth),
     db: Database = Depends(get_db),
     blobs: BlobStore = Depends(get_blobs),
+    settings: Settings = Depends(get_settings_dep),
 ) -> dict:
     r = await repo.get_creative(db, auth.org_id, creative_id)
     if not r:
@@ -211,6 +225,16 @@ async def get_creative(
     d["primary_asset_url"] = (
         await blobs.url_for(r["primary_asset_path"]) if r["primary_asset_path"] else None
     )
+    # Why this file has no tags, in the gate's own words. "Not tagged" is usually a decision
+    # (too little delivery to compare), not a queue that has not got there yet, and the page
+    # says which.
+    blocker, facts = await tag_blocker(db, settings, auth.org_id, r)
+    d["tag_status"] = {
+        "reason": blocker,
+        "detail": explain(blocker, facts) if blocker else None,
+        "impressions": facts.get("impressions"),
+        "plays": facts.get("plays"),
+    }
     return d
 
 

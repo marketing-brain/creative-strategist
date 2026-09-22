@@ -60,6 +60,7 @@ export default async function Insights({ searchParams }: { searchParams: Promise
           status={accountRead.status}
           nUnits={accountRead.n_units}
           view={buildAccountReadView(accountRead)}
+          coverage={accountRead.coverage}
           stale={Boolean(accountRead.newer_failed_error)}
           currency={active.currency}
         />
