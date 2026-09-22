@@ -9,6 +9,7 @@ import { CopyVariants, ScopePanel } from '@/components/footage-panel';
 import { PlayCurveChart } from '@/components/play-curve-chart';
 import { TagList } from '@/components/tag-list';
 import { api } from '@/lib/api';
+import { tagStatusLine } from '@/lib/coverage';
 import { blobUrl } from '@/lib/blob-url';
 import { formatters } from '@/lib/format';
 import { requireAuth } from '@/lib/require-auth.server';
@@ -128,11 +129,7 @@ export default async function CreativeDetail({ params, searchParams }: Props) {
             {tags.length ? (
               <TagList tags={tags} dimensions={dims} seekable={isVideo} />
             ) : (
-              <p className="text-sm text-muted-foreground">
-                {creative.tag_status?.detail
-                  ? `Not tagged — ${creative.tag_status.detail}.`
-                  : 'Queued for tagging.'}
-              </p>
+              <p className="text-sm text-muted-foreground">{tagStatusLine(creative.tag_status)}</p>
             )}
           </section>
         </div>

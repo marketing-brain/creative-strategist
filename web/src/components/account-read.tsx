@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { filesRead, spendShare } from '@/lib/coverage';
 import { ChevronRight, Play } from 'lucide-react';
 import { cn } from 'cn';
 import type { AccountReadUnit } from '@/lib/types';
@@ -286,17 +287,14 @@ export function AccountReadSection({ status, nUnits, view, stale = false, curren
   const b = view.basis;
   // The read only sees tagged files, so the scope line says so rather than implying it saw
   // the whole account.
-  const total = coverage?.files;
-  const share = coverage?.spend_share;
   const facts = [
-    total && total > b.files ? `${b.files} of ${total} videos` : `${b.files} videos`,
+    filesRead(coverage, b.files),
     `${b.creatives} ads`,
     `${f.money(b.spend)} spend`,
     `${f.count(b.purchases)} purchases`,
   ];
-  // Floored: 99.5% must not read as "we saw all of it", which is the claim this line exists
-  // to avoid.
-  if (total && total > b.files && share != null) facts.push(`${Math.floor(share * 100)}% of account spend`);
+  const share = spendShare(coverage, b.files);
+  if (share) facts.push(share);
   return (
     <div className="max-w-5xl space-y-10">
       <header className="space-y-5">

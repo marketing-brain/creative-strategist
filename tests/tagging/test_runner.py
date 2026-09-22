@@ -190,9 +190,31 @@ async def test_job_handler_uses_factories(db, blobs, settings, org_id, image_cre
     monkeypatch.setattr(tagging_jobs, "TAGGER_FACTORY", lambda s: FakeTagger())
     from cs.jobs.worker import run_once
 
-    await queue.enqueue(db, org_id, "tagging.tag_creative", {"creative_id": str(image_creative)})
+    # `force` is a human saying yes: the creative has no delivery, and the gate would
+    # otherwise refuse it (see the test below).
+    await queue.enqueue(
+        db, org_id, "tagging.tag_creative", {"creative_id": str(image_creative), "force": True}
+    )
     await run_once(db, blobs, settings, "w")
     assert await db.fetchval("SELECT status FROM tag_run") == "done"
+
+
+async def test_job_handler_refuses_a_creative_that_delivered_nothing(
+    db, blobs, settings, org_id, image_creative, monkeypatch
+):
+    """The gate is re-checked where the money is spent. A creative can be queued and then
+    stop qualifying -- another copy of the file gets tagged, or it never delivered at all --
+    and the job must cost nothing rather than trust the queue."""
+    monkeypatch.setattr(tagging_jobs, "TAGGER_FACTORY", lambda s: FakeTagger())
+    from cs.jobs.worker import run_once
+
+    await queue.enqueue(db, org_id, "tagging.tag_creative", {"creative_id": str(image_creative)})
+    await run_once(db, blobs, settings, "w")
+
+    assert await db.fetchval("SELECT count(*) FROM tag_run") == 0
+    assert (
+        await db.fetchval("SELECT status FROM job WHERE job_type='tagging.tag_creative'") == "done"
+    )
 
 
 @pytest.fixture

@@ -24,9 +24,29 @@ const done: AccountRead = {
   error: null,
 };
 
-const section = (d: AccountRead) => <AccountReadSection status={d.status} nUnits={d.n_units} view={buildAccountReadView(d)} />;
+const section = (d: AccountRead) => (
+  <AccountReadSection status={d.status} nUnits={d.n_units} view={buildAccountReadView(d)} coverage={d.coverage} />
+);
 
 describe('AccountReadSection', () => {
+  it('says how much of the account the read covered', () => {
+    render(section({ ...done, coverage: { files: 363, tagged_files: 170, spend_share: 0.952 } }));
+    expect(screen.getByText(/12 of 363 videos/)).toBeInTheDocument();
+    expect(screen.getByText(/95% of account spend/)).toBeInTheDocument();
+  });
+
+  it('claims no share when the read named no files', () => {
+    render(section({ ...done, coverage: { files: 363, tagged_files: 170, spend_share: null } }));
+    expect(screen.getByText(/12 of 363 videos/)).toBeInTheDocument();
+    expect(screen.queryByText(/of account spend/)).not.toBeInTheDocument();
+  });
+
+  it('leaves the scope line plain when there is no coverage to report', () => {
+    render(section(done));
+    expect(screen.getByText(/12 videos/)).toBeInTheDocument();
+    expect(screen.queryByText(/of account spend/)).not.toBeInTheDocument();
+  });
+
   it('renders the insufficient state with the unit count', () => {
     render(section({ ...done, status: 'insufficient', n_units: 4, read: null }));
     expect(screen.getByText(/needs 10 tagged video files/i)).toBeInTheDocument();

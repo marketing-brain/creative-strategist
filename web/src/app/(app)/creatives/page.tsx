@@ -6,6 +6,7 @@ import { RememberGridUrl } from '@/components/creative-detail-client';
 import { CreativeFilters } from '@/components/creative-filters';
 import { Pagination } from '@/components/pagination';
 import { api } from '@/lib/api';
+import { untaggedNote } from '@/lib/coverage';
 import { formatters, type Formatters } from '@/lib/format';
 import { requireAuth } from '@/lib/require-auth.server';
 
@@ -66,7 +67,7 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
     tagFiltered && filterAccount
       ? await api.creativeCoverage(filterAccount, sp.format === 'image' ? 'image' : 'video').catch(() => null)
       : null;
-  const untagged = coverage?.files != null && coverage.tagged_files != null ? coverage.files - coverage.tagged_files : 0;
+  const untagged = untaggedNote(coverage);
   const { items: creatives, total } = list;
   const selectedDim = dimensions.find((d) => d.name === sp.dimension);
   const openValues = selectedDim?.kind === 'open' ? await api.dimensionValues(selectedDim.name) : undefined;
@@ -140,12 +141,10 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
           </>
         )}{' '}
         <span className="hidden lg:inline">Percentages are the gap to the rest of the account, same format.</span>
-        {untagged > 0 && (
+        {untagged && (
           <>
             {' '}
-            <span>
-              {untagged} of {coverage?.files} files are untagged and cannot match a tag filter.
-            </span>
+            <span>{untagged}</span>
           </>
         )}
       </p>
