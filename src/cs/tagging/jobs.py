@@ -14,7 +14,8 @@ from cs.tagging.gates import TAG_JOB, explain, tag_blocker
 from cs.tagging.tagger import GeminiGatewayTagger, Tagger
 
 log = logging.getLogger("cs.tagging")
-NIGHTLY_SCHEDULE = "tagging.nightly_sweep"
+SWEEP_SCHEDULE = "tagging.sweep"
+SWEEP_EVERY_SECONDS = 6 * 3600
 
 
 def default_tagger_factory(settings: Settings) -> Tagger:
@@ -87,7 +88,9 @@ LIMIT $6
 """
 
 
-async def tagging_candidates(db: Database, settings: Settings) -> list:
+async def tagging_candidates(db: Database, settings: Settings, room: int) -> list:
+    if room <= 0:
+        return []
     return await db.fetch(
         _CANDIDATES,
         ["image", "video", "carousel"],
@@ -95,17 +98,29 @@ async def tagging_candidates(db: Database, settings: Settings) -> list:
         settings.tagging_min_impressions,
         settings.tagging_min_video_plays,
         settings.tagging_repeat_per_footage,
-        settings.tagging_nightly_limit,
+        room,
     )
 
 
-@register_schedule(NIGHTLY_SCHEDULE, every_seconds=86400)
-async def nightly_tagging_sweep(db: Database, settings: Settings) -> None:
-    """Files that have since earned a tag. A creative arrives with no delivery at all, so
-    the gate turns it away at download; this is what picks it up once it has run, highest
-    spend first and capped per night. The job re-checks the gate, so a queued candidate that
-    stops qualifying costs nothing."""
-    rows = await tagging_candidates(db, settings)
+async def pending_tag_jobs(db: Database) -> int:
+    return int(
+        await db.fetchval(
+            "SELECT count(*) FROM job WHERE job_type=$1 AND status IN ('pending','running')",
+            TAG_JOB,
+        )
+        or 0
+    )
+
+
+@register_schedule(SWEEP_SCHEDULE, every_seconds=SWEEP_EVERY_SECONDS)
+async def tagging_sweep(db: Database, settings: Settings) -> None:
+    """Files that have since earned a tag. A creative arrives with no delivery at all, so the
+    gate turns it away at download; this is what picks it up once it has run, highest spend
+    first. It tops the queue up to `tagging_queue_depth` rather than queueing everything: one
+    worker claims jobs in order, so a long tagging backlog would delay every other job behind
+    it. The job re-checks the gate, so a candidate that stops qualifying costs nothing."""
+    room = settings.tagging_queue_depth - await pending_tag_jobs(db)
+    rows = await tagging_candidates(db, settings, room)
     queued = 0
     for r in rows:
         if await queue.enqueue(
@@ -113,4 +128,10 @@ async def nightly_tagging_sweep(db: Database, settings: Settings) -> None:
         ):
             queued += 1
     if queued:
-        log.info("tagging sweep queued %d of %d candidates", queued, len(rows), extra={"n": queued})
+        log.info(
+            "tagging sweep queued %d of %d candidates, queue depth now %d",
+            queued,
+            len(rows),
+            await pending_tag_jobs(db),
+            extra={"n": queued},
+        )
