@@ -13,6 +13,7 @@ from cs.core.blobs import BlobStore
 from cs.core.config import Settings
 from cs.core.db import Database
 from cs.core.metrics import derived_metrics
+from cs.core.repo import rollups
 from cs.insights import play_curve
 from cs.insights import repo as insights_repo
 from cs.insights.account_read import repo as account_read_repo
@@ -187,11 +188,16 @@ async def list_creatives(
     total_all, total_active = await repo.creative_counts(
         db, auth.org_id, account_id, format, dimension, value, group, q
     )
+    window = await rollups.rollup_window(db, auth.org_id, account_id)
     return {
         "items": out,
         "total": total_active if delivery == "active" else total_all,
         "total_all": total_all,
         "total_active": total_active,
+        # The days every number on the grid covers, so the page can name them.
+        "window": {"start": window[0].isoformat(), "end": window[1].isoformat()}
+        if window
+        else None,
     }
 
 

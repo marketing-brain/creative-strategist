@@ -80,16 +80,20 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
   const noun = (n: number) => (ungrouped ? (n === 1 ? 'Meta creative' : 'Meta creatives') : n === 1 ? 'creative' : 'creatives');
   const count = (n: number) => n.toLocaleString('en-US');
   const filtered = !!(sp.account_id || sp.format || (sp.dimension && sp.value) || search);
+  // The 30 days end on the account's newest day with delivery, not today, so name them.
+  const day = (iso: string) =>
+    new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  const span = list.window ? `${day(list.window.start)} – ${day(list.window.end)}` : 'Last 30 days';
 
   return (
     <div className="space-y-4">
       <RememberGridUrl />
-      <div>
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <h1 className="text-2xl font-semibold tracking-tight">Creatives</h1>
-        <p className="text-sm text-muted-foreground">
-          {ungrouped
-            ? 'Every Meta creative from your connected accounts, copies included. Numbers cover the last 30 days.'
-            : 'Copies of the same file are shown once, with their numbers combined. Numbers cover the last 30 days.'}
+        {/* The one place the window is named: every number below covers these days. */}
+        <p className="shrink-0 text-sm text-muted-foreground sm:pt-1.5">
+          {list.window && <span className="mr-2 font-medium text-foreground">30d</span>}
+          <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums">{span}</span>
         </p>
       </div>
       <CreativeFilters accounts={accounts} dimensions={dimensions} openValues={openValues} />
@@ -103,7 +107,7 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
             </span>
             {idle > 0 && (
               <>
-                , {count(idle)} with no delivery in the last 30 days.{' '}
+                , {count(idle)} with no delivery.{' '}
                 <Link href={href(params({ delivery: null, page: null }))} className="font-medium text-foreground underline underline-offset-4 hover:no-underline">
                   Hide those
                 </Link>
@@ -115,7 +119,7 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
             <span className="font-medium text-foreground tabular-nums">
               {count(active)} {noun(active)}
             </span>{' '}
-            with delivery in the last 30 days.
+            with delivery.
             {idle > 0 && (
               <>
                 {' '}
@@ -135,7 +139,7 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
             {filtered
               ? 'No creatives match these filters.'
               : all > 0
-                ? 'Nothing has delivered in the last 30 days.'
+                ? 'Nothing has delivered in this window.'
                 : 'No creatives yet. They will appear here once an account finishes syncing.'}
           </p>
           {filtered && (

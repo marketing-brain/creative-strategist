@@ -1,4 +1,4 @@
-export type Paginated<T> = { items: T[]; total: number; total_all?: number; total_active?: number };
+export type Paginated<T> = { items: T[]; total: number; total_all?: number; total_active?: number; window?: { start: string; end: string } | null };
 export type Account = { id: string; platform: string; platform_account_id: string; name: string; currency: string; status: 'active' | 'paused' | 'disconnected'; sync_cursor: Record<string, unknown>; connection_status: 'pending' | 'syncing' | 'ready' | 'error' | null; connection_error: string | null };
 export type MetaConnection = { connected: boolean; status: 'pending' | 'syncing' | 'ready' | 'error' | null; error: string | null; last_synced_at: string | null };
 // Both hops between Meta and the app: Fivetran's copy of Meta (source) and the app's own tables.
