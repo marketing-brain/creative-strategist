@@ -2,8 +2,7 @@
 
 Costs no paid call: the plan is assembled from the stored account-read run and the 30-day
 rollups, and the only model-written text it carries is `next_tests`, already paid for by the
-read. So, like `core.refresh_metric_rollups` and unlike every writer job, this schedule is not
-one of the paused ones.
+read. So, unlike every writer job, this schedule is not one of the paused ones.
 
 It runs after the nightly account read rather than beside it, because a plan built from
 yesterday's run would contradict today's `/insights`.
@@ -149,8 +148,8 @@ def _items(payload: dict) -> list[tuple[str, str, dict]]:
 async def nightly_next_plan(db: Database, settings: Settings) -> None:
     """A daily rebuild on top of the one `compute_account_read` enqueues when it finishes.
 
-    Not a duplicate: the allocation block reads a trailing-30-day window that slides every
-    day, so an ad crosses the fatigue line or falls out of the window on days when no account
+    Not a duplicate: the allocation block reads the 30-day rollups, which move whenever a sync
+    lands, so an ad crosses the fatigue line or falls out of the window on days when no account
     read runs at all. The read's own enqueue covers the other direction -- new patterns should
     reach the plan the moment they exist, not up to a day later.
 

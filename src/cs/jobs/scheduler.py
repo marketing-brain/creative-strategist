@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from cs.core import queue
 from cs.core.config import Settings, get_settings
 from cs.core.db import Database
-from cs.core.repo import rollups
 
 log = logging.getLogger("cs.scheduler")
 
@@ -87,13 +86,6 @@ async def purge_done_jobs(db: Database, settings: Settings) -> None:
     n = await queue.purge_done(db, settings.job_retention_days)
     if n:
         log.info("purged finished jobs", extra={"count": n})
-
-
-@register_schedule("core.refresh_metric_rollups", every_seconds=3600)
-async def refresh_metric_rollups(db: Database, settings: Settings) -> None:
-    # The rollups cover "the last thirty days" as of their last refresh, so the window has
-    # to keep moving on days when no sync lands. Costs no paid call, so it is never paused.
-    await rollups.refresh(db)
 
 
 async def run_scheduler(settings: Settings | None = None) -> None:

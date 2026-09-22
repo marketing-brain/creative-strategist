@@ -99,7 +99,7 @@ async def sync_from_fivetran(ctx: JobContext) -> None:
             extra={"org_id": str(ctx.job.org_id), "error": str(exc)[:500]},
         )
     # The grid reads thirty-day totals from the rollups, so new metrics show only after this.
-    # A failed refresh leaves the last totals in place and the hourly schedule retries it.
+    # A failed refresh leaves the last totals in place until the next sync refreshes them.
     try:
         await rollups.refresh(ctx.db)
     except Exception:  # noqa: BLE001
