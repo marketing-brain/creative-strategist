@@ -3,12 +3,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 
 from cs.api.auth import AuthContext, current_auth, require_admin
-from cs.api.deps import get_db
+from cs.api.deps import get_db, get_settings_dep
 from cs.core import queue
 from cs.core import repo as ingest_repo
+from cs.core.config import Settings
 from cs.core.db import Database
 from cs.insights.account_read.facets import DERIVED_FROM_SCENES, REVEAL_BINS, extract
 from cs.tagging import repo, vocab
+from cs.tagging.gates import TAG_JOB, explain, tag_blocker
 from cs.tagging.taxonomy import load_taxonomy
 
 router = APIRouter()
@@ -90,26 +92,31 @@ async def creative_transcript(
     return {"transcript": await repo.latest_tag_value(db, auth.org_id, creative_id, "transcript")}
 
 
-TAGGABLE_FORMATS = ("image", "video", "carousel")
-
-
 @router.post("/creatives/{creative_id}/retag")
 async def retag(
-    creative_id: UUID, auth: AuthContext = Depends(require_admin), db: Database = Depends(get_db)
+    creative_id: UUID,
+    force: bool = False,
+    auth: AuthContext = Depends(require_admin),
+    db: Database = Depends(get_db),
+    settings: Settings = Depends(get_settings_dep),
 ) -> dict:
+    """Queue a tag run. The gate (cs.tagging.gates) refuses a creative the sync would not
+    have tagged either -- no file, no proven format, too little delivery to compare, or the
+    file's tag budget already spent -- and says which, so the caller is never left guessing.
+    `force=true` is an admin paying for it anyway, which is how a file gets tagged a second
+    time to measure how far the tagger agrees with itself."""
     creative = await ingest_repo.get_creative(db, auth.org_id, creative_id)
     if not creative:
         raise HTTPException(404)
-    if creative["format"] not in TAGGABLE_FORMATS:
-        # 'unresolved' creatives have no proven format: taxonomy.for_format('unresolved')
-        # returns [], which turns into a JSON schema enum of [] -- a request structured-
-        # output APIs reject outright. Never enqueue a job doomed to fail before it starts.
-        raise HTTPException(422, f"cannot tag a creative with format '{creative['format']}'")
+    if not force:
+        blocker, facts = await tag_blocker(db, settings, auth.org_id, creative)
+        if blocker is not None:
+            raise HTTPException(422, {"reason": blocker, "detail": explain(blocker, facts)})
     jid = await queue.enqueue(
         db,
         auth.org_id,
-        "tagging.tag_creative",
-        {"creative_id": str(creative_id)},
+        TAG_JOB,
+        {"creative_id": str(creative_id), "force": force},
         dedup_key=f"tag:{creative_id}",
     )
     return {"job_id": str(jid) if jid else None}

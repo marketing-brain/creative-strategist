@@ -50,6 +50,16 @@ class Settings(BaseSettings):
     # flash-lite) is unaffected. False stops new video downloads from enqueueing a
     # tagging.tag_creative job at all; it does not touch jobs already in the queue.
     video_tagging_enabled: bool = True
+    # Tagging gates (cs.tagging.gates). A file is tagged once it can answer a question:
+    # the rate metrics need impressions, the retention curve needs plays, and both floors
+    # match the ones the analysis applies (account_read.stats, insights.play_curve).
+    tagging_min_impressions: int = 2000
+    tagging_min_video_plays: int = 1000
+    # Paid tag runs allowed per file. Raise it to measure tagger agreement deliberately
+    # (cs.insights.account_read.reliability scores files tagged more than once).
+    tagging_repeat_per_footage: int = 1
+    # Cap on creatives the nightly sweep queues once they clear the floors, best first.
+    tagging_nightly_limit: int = 100
     insights_model: str = "google/gemini-2.5-flash-lite"
     # Open-vocabulary merge (spec 2026-09-16-vocab-merge-design.md): slug embeddings for
     # candidate recall. pgvector HNSW caps at 2000 dims; 1536 keeps the index option open.

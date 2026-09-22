@@ -6,10 +6,11 @@ from uuid import UUID
 
 import httpx
 
-from cs.core import queue, repo
+from cs.core import repo
 from cs.core.blobs import sha256_hex
 from cs.ingest.posters import ensure_poster
 from cs.jobs.registry import JobContext
+from cs.tagging.gates import enqueue_tagging
 from cs.tagging.video import probe_duration_ms
 
 log = logging.getLogger("cs.ingest.assets")
@@ -66,14 +67,7 @@ async def download_creative(
     await _poster(ctx, creative_id, key, data, mime)
     if verdict is not None:
         await repo.set_creative_format(ctx.db, org_id, creative_id, *verdict)
-    if kind != "original_video" or ctx.settings.video_tagging_enabled:
-        await queue.enqueue(
-            ctx.db,
-            org_id,
-            "tagging.tag_creative",
-            {"creative_id": str(creative_id)},
-            dedup_key=f"tag:{creative_id}",
-        )
+    await enqueue_tagging(ctx, creative_id)
 
 
 async def download_carousel(
@@ -99,10 +93,4 @@ async def download_carousel(
             primary_id = asset_id
     if primary_id is not None:
         await repo.set_primary_asset(ctx.db, org_id, creative_id, primary_id)
-        await queue.enqueue(
-            ctx.db,
-            org_id,
-            "tagging.tag_creative",
-            {"creative_id": str(creative_id)},
-            dedup_key=f"tag:{creative_id}",
-        )
+        await enqueue_tagging(ctx, creative_id)
