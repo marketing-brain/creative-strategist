@@ -330,27 +330,32 @@ async def patterns_for_file(
 
 # What the read could see, against what the account ran. A read covers only tagged files, and
 # a page that does not say so reads as if it had seen everything.
-_COVERAGE = """
+#
+# Read from `creative`/`asset`/`metric_daily`/`tag_run` rather than the footage tables: those
+# are rebuilt nightly, so under them a file tagged this afternoon -- or launched today -- is
+# not merely untagged, it does not exist, and both halves of the line go stale for a day.
+_FILES = """
+WITH files AS (
+  SELECT a.sha256,
+         coalesce(sum(m.spend), 0) AS spend,
+         bool_or(EXISTS (
+           SELECT 1 FROM tag_run r
+           JOIN taxonomy_version v ON v.id = r.taxonomy_version_id
+           WHERE r.creative_id = c.id AND r.status = 'done'
+             AND split_part(v.version, '.', 1)::int >= CASE WHEN $3 = 'video' THEN 2 ELSE 1 END
+         )) AS tagged
+  FROM creative c
+  JOIN asset a ON a.id = c.primary_asset_id AND a.sha256 IS NOT NULL
+  LEFT JOIN metric_daily m ON m.creative_id = c.id
+  WHERE c.org_id = $1 AND c.ad_account_id = $2 AND c.format = $3
+  GROUP BY a.sha256
+)
 SELECT count(*) AS files,
        count(*) FILTER (WHERE tagged) AS tagged_files,
        coalesce(sum(spend), 0) AS spend,
-       coalesce(sum(spend) FILTER (WHERE tagged), 0) AS tagged_spend
-FROM (
-  SELECT f.id,
-         EXISTS (SELECT 1 FROM footage_attribute a WHERE a.footage_id = f.id) AS tagged,
-         (SELECT w.spend FROM footage_metric_window w
-           WHERE w.footage_id = f.id AND w.window_kind = 'lifetime') AS spend
-  FROM footage f
-  WHERE f.org_id = $1 AND f.ad_account_id = $2 AND f.format = $3
-) x
-"""
-
-
-_COVERED_SPEND = """
-SELECT coalesce(sum(w.spend), 0) AS spend
-FROM footage f
-JOIN footage_metric_window w ON w.footage_id = f.id AND w.window_kind = 'lifetime'
-WHERE f.org_id = $1 AND f.ad_account_id = $2 AND f.format = $3 AND f.sha256 = ANY($4::text[])
+       coalesce(sum(spend) FILTER (WHERE tagged), 0) AS tagged_spend,
+       coalesce(sum(spend) FILTER (WHERE sha256 = ANY($4::text[])), 0) AS named_spend
+FROM files
 """
 
 
@@ -361,21 +366,18 @@ async def coverage(
 
     `shas` names the files a particular read used, and both sides are then measured from
     today's data. Measuring one side at the time of the run and the other now is how a read
-    covering 95% got labelled 87% (its files have since been restated upward by $74k), and
-    leaving `shas` out is how it got labelled 99% (that describes everything tagged today,
-    which is right for a tag filter and wrong under a stored read).
+    covering 95% got labelled 87% (its files have since been restated upward by $74k).
+    Passing no `shas` describes everything tagged today, which is right for a tag filter and
+    wrong under a stored read; an empty list is a read that named no files, and claims no
+    share at all rather than borrowing today's.
     """
-    r = await db.fetchrow(_COVERAGE, org_id, ad_account_id, fmt)
+    r = await db.fetchrow(_FILES, org_id, ad_account_id, fmt, list(shas or []))
     if r is None or not r["files"]:
         return None
     spend = float(r["spend"])
-    covered = (
-        float(await db.fetchval(_COVERED_SPEND, org_id, ad_account_id, fmt, list(shas)))
-        if shas
-        else float(r["tagged_spend"])
-    )
+    covered = float(r["named_spend"]) if shas is not None else float(r["tagged_spend"])
     return {
         "files": r["files"],
         "tagged_files": r["tagged_files"],
-        "spend_share": (covered / spend) if spend else None,
+        "spend_share": (covered / spend) if spend and (shas is None or shas) else None,
     }
