@@ -197,11 +197,6 @@ function SyncCard({ s, isAdmin, onSync, busy }: { s: SyncStatus; isAdmin: boolea
           </div>
         )}
         {running && backlogTotal(s) > 0 && <Notice>Queued behind it: {backlogWords(s)}.</Notice>}
-        {!!s.held && (
-          <Notice>
-            {s.held.toLocaleString('en-US')} paid video lookups are on hold. They don’t run unless someone releases them.
-          </Notice>
-        )}
 
         {s.connection && s.auto_sync && (
           <p className="border-t border-border pt-3 text-sm text-muted-foreground">

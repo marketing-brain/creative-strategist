@@ -40,10 +40,13 @@ async def load_schedule_state(db: Database) -> dict[str, float]:
 
 
 async def schedule_paused(db: Database, name: str) -> bool:
-    """A schedule is paused by setting its last run far in the future, so it never comes due."""
-    return bool(
-        await db.fetchval("SELECT last_run_at > now() FROM schedule_state WHERE name = $1", name)
-    )
+    return bool(await db.fetchval("SELECT paused FROM schedule_state WHERE name = $1", name))
+
+
+async def paused_schedules(db: Database) -> set[str]:
+    """Read every tick, so pausing or resuming (`UPDATE schedule_state SET paused = ...`)
+    takes effect within seconds, with no restart."""
+    return {r["name"] for r in await db.fetch("SELECT name FROM schedule_state WHERE paused")}
 
 
 async def _record_run(db: Database, name: str, now: float) -> None:
@@ -61,9 +64,10 @@ async def run_scheduler_tick(
     db: Database, settings: Settings, state: dict[str, float], now: float
 ) -> list[str]:
     fired: list[str] = []
+    paused = await paused_schedules(db)
     for s in SCHEDULES:
         last = state.get(s.name, float("-inf"))
-        if now - last >= s.every_seconds:
+        if s.name not in paused and now - last >= s.every_seconds:
             try:
                 await s.fn(db, settings)
                 fired.append(s.name)

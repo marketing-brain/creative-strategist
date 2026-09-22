@@ -96,8 +96,8 @@ async def test_qualifying_creative_is_waiting_or_paused_with_the_nightly_run(cli
     await _delivering(db, blobs, org_id, acct, "peer", "image", daily_impressions=5_000, ctr=0.01)
     assert await _reason(client, cid) == {"paragraph": None, "reason": "waiting"}
     await db.execute(
-        "INSERT INTO schedule_state (name, last_run_at) VALUES ($1, '2100-01-01') "
-        "ON CONFLICT (name) DO UPDATE SET last_run_at = EXCLUDED.last_run_at",
+        "INSERT INTO schedule_state (name, last_run_at, paused) VALUES ($1, now(), true) "
+        "ON CONFLICT (name) DO UPDATE SET paused = true",
         "insights.nightly_creative_insights",
     )
     assert await _reason(client, cid) == {"paragraph": None, "reason": "paused"}

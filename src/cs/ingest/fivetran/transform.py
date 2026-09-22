@@ -282,7 +282,11 @@ async def _discover_accounts(db, org_id: UUID, connection_id: UUID, schema: str)
 
 
 async def _sync_ads_and_creatives(
-    db, org_id: UUID, schema: str, accounts_by_platform_id: dict[str, UUID]
+    db,
+    org_id: UUID,
+    schema: str,
+    accounts_by_platform_id: dict[str, UUID],
+    apify_limit: int,
 ) -> dict[str, int]:
     creative_rows = await _latest_rows(db, schema, CREATIVE_HISTORY)
     creatives_by_platform_id: dict[str, asyncpg.Record] = {_pid(r["id"]): r for r in creative_rows}
@@ -312,6 +316,7 @@ async def _sync_ads_and_creatives(
     new_creatives = 0
     synced_ads = 0
     failed = 0
+    apify_queued = apify_deferred = 0
     for ad_row in ad_rows:
         try:
             acct_id = accounts_by_platform_id.get(_pid(ad_row["account_id"]))
@@ -403,11 +408,15 @@ async def _sync_ads_and_creatives(
                 and not await repo.creative_has_asset(db, org_id, creative_id, kind)
                 and not await repo.has_video_resolution(db, creative_id)
             ):
+                if apify_queued >= apify_limit:
+                    apify_deferred += 1
+                    continue
                 # video_video_id didn't resolve against ad_video_history -- this is a
                 # Partnership Ad whose video lives in the creator's own Instagram account,
                 # not the ad account's video library. Apify can still fetch it from the
                 # permalink. The video_resolution ledger allows one paid lookup per creative,
                 # so a creative that was ever looked up is never queued again.
+                apify_queued += 1
                 await queue.enqueue(
                     db,
                     org_id,
@@ -429,8 +438,12 @@ async def _sync_ads_and_creatives(
                 and not await repo.creative_has_asset(db, org_id, creative_id, kind)
                 and not await repo.has_video_resolution(db, creative_id)
             ):
+                if apify_queued >= apify_limit:
+                    apify_deferred += 1
+                    continue
                 # No synced source and no Instagram post: Facebook's public player serves
                 # the video if it was published on the Page. One Apify run tries every id.
+                apify_queued += 1
                 await queue.enqueue(
                     db,
                     org_id,
@@ -454,7 +467,18 @@ async def _sync_ads_and_creatives(
                 extra={"org_id": str(org_id), "platform_ad_id": ad_row["id"]},
             )
 
-    return {"new_creatives": new_creatives, "synced_ads": synced_ads, "failed": failed}
+    if apify_deferred:
+        log.warning(
+            "apify lookups over the per-sync limit wait for a later sync",
+            extra={"org_id": str(org_id), "queued": apify_queued, "deferred": apify_deferred},
+        )
+    return {
+        "new_creatives": new_creatives,
+        "synced_ads": synced_ads,
+        "failed": failed,
+        "apify_queued": apify_queued,
+        "apify_deferred": apify_deferred,
+    }
 
 
 async def discover_and_sync_entities(
@@ -472,7 +496,9 @@ async def discover_and_sync_entities(
     active_by_platform_id = {
         pid: aid for pid, aid in accounts_by_platform_id.items() if aid in active_ids
     }
-    counts = await _sync_ads_and_creatives(ctx.db, org_id, schema, active_by_platform_id)
+    counts = await _sync_ads_and_creatives(
+        ctx.db, org_id, schema, active_by_platform_id, ctx.settings.apify_lookups_per_sync
+    )
     # Display only, so nothing about the sync depends on it.
     try:
         counts["meta_thumbnails"] = await meta_thumbnails(ctx.db, ctx.blobs, org_id)

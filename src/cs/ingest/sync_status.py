@@ -112,26 +112,19 @@ async def _last_sync(db: Database, org_id: UUID) -> dict | None:
 
 
 async def _auto_sync(db: Database) -> dict:
-    last = await db.fetchval("SELECT last_run_at FROM schedule_state WHERE name = $1", SCHEDULE)
-    now = datetime.now(UTC)
-    if last is not None and last > now:
+    row = await db.fetchrow(
+        "SELECT last_run_at, paused FROM schedule_state WHERE name = $1", SCHEDULE
+    )
+    if row is not None and row["paused"]:
         return {"enabled": False, "next_run_at": None}
-    return {"enabled": True, "next_run_at": _iso(last + SCHEDULE_EVERY if last else now)}
+    next_run = row["last_run_at"] + SCHEDULE_EVERY if row else datetime.now(UTC)
+    return {"enabled": True, "next_run_at": _iso(next_run)}
 
 
-# A job parked far in the future (run_after set to 2100 by hand to stop paid work) is on
-# hold, not in progress. Retry backoff never pushes run_after more than minutes out.
-HELD_AFTER = "now() + interval '1 day'"
-
-
-async def _backlog(db: Database, org_id: UUID) -> tuple[dict, int]:
-    """Work a sync queued that will still run, by stage, and the count of held jobs."""
+async def _backlog(db: Database, org_id: UUID) -> dict:
     rows = await db.fetch(
-        f"""
-        SELECT job_type,
-               count(*) FILTER (WHERE run_after <= {HELD_AFTER}) n,
-               count(*) FILTER (WHERE run_after > {HELD_AFTER}) held
-        FROM job
+        """
+        SELECT job_type, count(*) n FROM job
         WHERE org_id = $1 AND status IN ('pending', 'running') AND job_type = ANY($2)
         GROUP BY 1
         """,
@@ -139,8 +132,7 @@ async def _backlog(db: Database, org_id: UUID) -> tuple[dict, int]:
         [t for types in STAGES.values() for t in types],
     )
     by_type = {r["job_type"]: r["n"] for r in rows}
-    backlog = {stage: sum(by_type.get(t, 0) for t in types) for stage, types in STAGES.items()}
-    return backlog, sum(r["held"] for r in rows)
+    return {stage: sum(by_type.get(t, 0) for t in types) for stage, types in STAGES.items()}
 
 
 async def sync_status(db: Database, org_id: UUID) -> dict:
@@ -154,7 +146,6 @@ async def sync_status(db: Database, org_id: UUID) -> dict:
             org_id,
         )
     ]
-    backlog, held = await _backlog(db, org_id)
     return {
         "connection": {
             "status": conn["sync_status"],
@@ -165,6 +156,5 @@ async def sync_status(db: Database, org_id: UUID) -> dict:
         "app": await _app(db, org_id),
         "last_sync": await _last_sync(db, org_id),
         "auto_sync": await _auto_sync(db),
-        "backlog": backlog,
-        "held": held,
+        "backlog": await _backlog(db, org_id),
     }

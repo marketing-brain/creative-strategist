@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     # advertiser's ad-account video library. Empty means the feature is simply off --
     # meta.resolve_instagram_video gives up immediately rather than erroring.
     apify_api_key: str = ""
+    # Paid Apify lookups one sync may queue. The rest wait for a later sync, so a Fivetran
+    # change that makes hundreds of old creatives look like videos cannot spend in one go.
+    apify_lookups_per_sync: int = 20
 
     worker_poll_seconds: float = 1.0
     # 'done' jobs are deleted after this many days; 'dead' rows are kept (queue.is_dead).

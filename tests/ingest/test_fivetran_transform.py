@@ -852,6 +852,36 @@ async def test_feed_spec_video_loader_is_empty_when_the_table_has_not_synced(db)
     assert await fivetran_transform._feed_spec_video_ids(db, SCHEMA) == {}
 
 
+async def test_apify_lookups_stop_at_the_per_sync_limit(db, blobs, settings, org_id):
+    """A Fivetran change can make many old creatives look like videos at once; one sync
+    queues at most the limit and leaves the rest for later syncs."""
+    settings.apify_lookups_per_sync = 1
+    await create_fixture_schema(db, SCHEMA)
+    for i in (1, 2):
+        await insert_campaign_ad_creative(
+            db,
+            SCHEMA,
+            campaign_id="c1",
+            account_id="999",
+            adset_id="as1",
+            ad_id=f"ad{i}",
+            creative_id=f"cr{i}",
+            name="n",
+            headline="H",
+            image_url=None,
+            object_type="SHARE",
+        )
+        await insert_asset_feed_spec_video(db, SCHEMA, creative_id=f"cr{i}", video_id=f"v{i}")
+
+    summary = await _sync_active(db, blobs, settings, org_id)
+
+    assert (summary["apify_queued"], summary["apify_deferred"]) == (1, 1)
+    assert (
+        await db.fetchval("SELECT count(*) FROM job WHERE job_type='meta.resolve_facebook_video'")
+        == 1
+    )
+
+
 async def _looked_up(db, org_id, job_type: str, source: str) -> None:
     """The lookup ran and gave up: its job is done (and may be purged) but the ledger says so."""
     job = await db.fetchrow("SELECT id, dedup_key FROM job WHERE job_type=$1", job_type)

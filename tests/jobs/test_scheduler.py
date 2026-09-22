@@ -73,3 +73,25 @@ async def test_purge_done_jobs_keeps_dead_and_live_rows(db, org_id):
     assert await queue.purge_done(db, 30) == 1
     left = sorted(r["status"] for r in await db.fetch("SELECT status FROM job"))
     assert left == ["dead", "done", "pending"]
+
+
+async def test_a_paused_schedule_does_not_fire_and_resumes_without_a_restart(db, settings):
+    fired: list[str] = []
+
+    async def fn(db, settings):
+        fired.append("x")
+
+    scheduler.SCHEDULES.append(scheduler.Schedule("test.pausable", 60, fn))
+    try:
+        await db.execute(
+            "INSERT INTO schedule_state (name, last_run_at, paused) VALUES ($1, now(), true)",
+            "test.pausable",
+        )
+        state: dict[str, float] = {}
+        await scheduler.run_scheduler_tick(db, settings, state, 1e12)
+        assert fired == []
+        await db.execute("UPDATE schedule_state SET paused = false WHERE name = 'test.pausable'")
+        await scheduler.run_scheduler_tick(db, settings, state, 1e12)
+        assert fired == ["x"]
+    finally:
+        scheduler.SCHEDULES[:] = [s for s in scheduler.SCHEDULES if s.name != "test.pausable"]
