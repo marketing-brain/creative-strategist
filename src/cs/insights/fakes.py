@@ -1,16 +1,6 @@
 from __future__ import annotations
 
 from cs.insights.creative_insight import WrittenInsight
-from cs.insights.types import InsightDraft
-
-
-class FakeExplainer:
-    def __init__(self):
-        self.seen: list[InsightDraft] = []
-
-    async def explain(self, draft: InsightDraft, context: dict) -> tuple[str, str]:
-        self.seen.append(draft)
-        return "fake explanation", "fake test"
 
 
 class FakeInsightWriter:

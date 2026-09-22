@@ -12,21 +12,12 @@ from cs.insights.creative_insight import GeminiGatewayInsightWriter, InsightWrit
 from cs.insights.creative_insight_gates import FORMATS, NIGHTLY_SCHEDULE
 from cs.insights.creative_insight_runner import write_creative_insight
 from cs.insights.diagnosis import ATTENTION_FLOOR
-from cs.insights.explain import Explainer, GeminiGatewayExplainer, _template
+from cs.insights.explain import _template
 from cs.insights.fatigue import compute_fatigue
-from cs.insights.types import InsightDraft
 from cs.jobs.registry import JobContext, handler
 from cs.jobs.scheduler import register_schedule
-from cs.tagging.taxonomy import load_taxonomy
 
 WINDOW_DAYS = 30
-
-
-def default_explainer_factory(settings: Settings) -> Explainer:
-    return GeminiGatewayExplainer(settings)
-
-
-EXPLAINER_FACTORY = default_explainer_factory
 
 
 def default_insight_writer_factory(settings: Settings) -> InsightWriter:
@@ -40,37 +31,6 @@ CREATIVE_INSIGHT_MAX_ATTEMPTS = 3
 
 def creative_insight_dedup_key(creative_id: UUID) -> str:
     return f"creative_insight:{creative_id}"
-
-
-async def _persist(ctx: JobContext, drafts: list[InsightDraft], account_name: str) -> int:
-    explainer = EXPLAINER_FACTORY(ctx.settings)
-    dims = {d.name: d.description for d in load_taxonomy().dimensions}
-    n = 0
-    for d in drafts:
-        exists = await ctx.db.fetchval(
-            "SELECT 1 FROM insight WHERE org_id=$1 AND kind=$2 AND dimension=$3 AND value=$4 "
-            "AND metric=$5 AND window_start=$6 AND window_end=$7 "
-            "AND creative_id IS NOT DISTINCT FROM $8",
-            ctx.job.org_id,
-            d.kind,
-            d.dimension,
-            d.value,
-            d.metric,
-            d.window_start,
-            d.window_end,
-            d.creative_id,
-        )
-        if exists:
-            continue
-        context = {"dimension_description": dims.get(d.dimension), "account_name": account_name}
-        if d.creative_id:
-            context["creative_headline"] = await ctx.db.fetchval(
-                "SELECT headline FROM creative WHERE id=$1", d.creative_id
-            )
-        explanation, test = await explainer.explain(d, context)
-        if await repo.insert_insight(ctx.db, ctx.job.org_id, d, explanation, test):
-            n += 1
-    return n
 
 
 async def _account(ctx: JobContext):

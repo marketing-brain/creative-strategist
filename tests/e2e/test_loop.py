@@ -21,8 +21,6 @@ from cs.ingest.fivetran.fixtures import (
     insert_campaign_ad_creative,
     insert_daily_insight,
 )
-from cs.insights import jobs as insight_jobs
-from cs.insights.fakes import FakeExplainer
 from cs.jobs.registry import JobContext
 from cs.jobs.worker import run_once
 from cs.tagging import jobs as tag_jobs
@@ -59,7 +57,6 @@ async def test_full_loop(client, db, blobs, settings, monkeypatch):
     # to its initial state every time and every creative would get the first entry (q_tags).
     tagger = FakeTagger(tags_by_call=[q_tags] * 6 + [s_tags] * 6)
     monkeypatch.setattr(tag_jobs, "TAGGER_FACTORY", lambda s: tagger)
-    monkeypatch.setattr(insight_jobs, "EXPLAINER_FACTORY", lambda s: FakeExplainer())
 
     # 1. seed a fixture Fivetran schema (no live connector/Meta creds needed), run the
     # transform directly to discover the account (mirroring what meta.sync_from_fivetran
