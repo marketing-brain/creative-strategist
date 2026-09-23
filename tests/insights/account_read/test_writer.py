@@ -352,3 +352,18 @@ def test_stages_the_brief_holds_no_data_on_cannot_be_blamed():
     assert any("'checkout'" in p for p in check_read(read, brief, 1))
     asking = _read(data_needed=["Checkout and landing page data."])
     assert check_read(asking, brief, 1) == []
+
+
+def test_an_exemplar_whose_copy_contains_a_line_break_is_found():
+    """Ad copy has line breaks, so the brief quotes a headline across lines. A gate that
+    cannot match across one rejects a read whose exemplars are real (2026-09-23)."""
+    from cs.insights.account_read.writer import _headline_in_brief
+
+    brief = (
+        '- "“husband needs to stop taking this tonight” my husband needs\n'
+        'to stop taking this.\n" | 11s'
+    )
+    assert _headline_in_brief(
+        "“husband needs to stop taking this tonight” my husband needs to stop taking this.", brief
+    )
+    assert not _headline_in_brief("an ad that was never in this account", brief)

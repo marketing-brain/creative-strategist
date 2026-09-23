@@ -372,11 +372,16 @@ def _mentions(text: str, partner_label: str) -> bool:
 def _headline_in_brief(exemplar: str, brief: str) -> bool:
     """Exemplars must be headlines quoted in the brief. Tolerate trailing whitespace and the
     90-character truncation the unit record applies: a quoted headline that the exemplar
-    starts with, or that starts with the exemplar (30+ chars), counts."""
+    starts with, or that starts with the exemplar (30+ chars), counts.
+
+    Ad copy contains line breaks, so a quoted headline can span lines in the brief. Refusing
+    to match across one rejected a read whose exemplars were real (2026-09-23): the model
+    named the ad correctly, the gate could not see it, and three corrections returned the
+    same answer because there was nothing to fix."""
     ex = " ".join(exemplar.split()).strip().lower()
     if not ex:
         return False
-    for m in re.finditer(r'"([^"\n]{3,})"', brief):
+    for m in re.finditer(r'"([^"]{3,400})"', brief, re.S):
         h = " ".join(m.group(1).split()).strip().lower()
         if h == ex or (len(ex) >= 30 and (h.startswith(ex) or ex.startswith(h))):
             return True
