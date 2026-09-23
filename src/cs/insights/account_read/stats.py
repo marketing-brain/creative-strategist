@@ -8,6 +8,7 @@ import statistics
 from collections.abc import Callable
 from functools import partial
 
+from cs.insights.account_read.permutations import Draws
 from cs.insights.account_read.types import RATE_METRICS, Test, Unit
 
 IMP_FLOOR = 2000
@@ -95,6 +96,7 @@ def money_permutation_p(
     seed: int = 7,
     early_stop_after: int = 200,
     early_stop_rate: float = 0.30,
+    shared: Draws | None = None,
 ) -> tuple[float, float]:
     """Permutation p-values for purchases-per-1,000 and CPA, from one set of shuffles.
 
@@ -109,6 +111,10 @@ def money_permutation_p(
     `early_stop_after` / `early_stop_rate`: a comparison whose share of extreme draws is
     already far above every grade boundary (0.25 is the loosest) cannot change grade by
     drawing more, so it stops. Its p-value is then the estimate from the draws taken.
+
+    `shared` hands over the shuffles of the whole set these files came from, so the draw
+    loop reads a running total instead of walking the files (see
+    cs.insights.account_read.permutations). Shuffling was 94% of this function's cost.
     """
     pc, pk = sum(u.purchases for u in cell), sum(u.purchases for u in comp)
     ic, ik = sum(u.impressions for u in cell), sum(u.impressions for u in comp)
@@ -118,23 +124,32 @@ def money_permutation_p(
     obs_ppk = abs((pc / ic) / (pk / ik) - 1)
     obs_cpa = abs((sc / pc) / (sk / pk) - 1)
 
-    purchases = [u.purchases for u in cell] + [u.purchases for u in comp]
-    impressions = [u.impressions for u in cell] + [u.impressions for u in comp]
-    spend = [float(u.spend) for u in cell] + [float(u.spend) for u in comp]
-    order = list(range(len(purchases)))
     tot_p, tot_i, tot_s = pc + pk, ic + ik, sc + sk
     n = len(cell)
-    rng = random.Random(seed)
+    # The set's shuffles when they are over exactly these files; otherwise this comparison's
+    # own, which is what a caller outside a run (a test, the ask box) gets.
+    use_shared = shared is not None and shared.covers(cell + comp)
+    if not use_shared:
+        purchases = [u.purchases for u in cell] + [u.purchases for u in comp]
+        impressions = [u.impressions for u in cell] + [u.impressions for u in comp]
+        spend = [float(u.spend) for u in cell] + [float(u.spend) for u in comp]
+        order = list(range(len(purchases)))
+        rng = random.Random(seed)
     hits_ppk = hits_cpa = 0
     drawn = 0
-    for _ in range(draws):
-        rng.shuffle(order)
-        ap = ai = 0
-        as_ = 0.0
-        for i in order[:n]:
-            ap += purchases[i]
-            ai += impressions[i]
-            as_ += spend[i]
+    for d in range(draws if not use_shared else min(draws, len(shared))):
+        if use_shared:
+            ap = shared.cum_purchases[d][n]
+            ai = shared.cum_impressions[d][n]
+            as_ = shared.cum_spend[d][n]
+        else:
+            rng.shuffle(order)
+            ap = ai = 0
+            as_ = 0.0
+            for i in order[:n]:
+                ap += purchases[i]
+                ai += impressions[i]
+                as_ += spend[i]
         drawn += 1
         bp, bi, bs = tot_p - ap, tot_i - ai, tot_s - as_
         if ap and bp and ai and bi:
@@ -198,6 +213,7 @@ def compare(
     group: str | None = None,
     bin_edges: tuple[float, float] | None = None,
     draws: int = 1000,
+    shared: Draws | None = None,
 ) -> list[Test]:
     """Cell vs complement on every metric. Grades stay 'ungraded' until the run's BH pass."""
     if len(cell) < MIN_CELL or len(comp) < MIN_CELL:
@@ -253,7 +269,9 @@ def compare(
             ),
         )
         # One set of shuffles answers both metrics; they partition the same files.
-        p_ppk, p_cpa = money_permutation_p(cell, comp, draws) if draws else (1.0, 1.0)
+        p_ppk, p_cpa = (
+            money_permutation_p(cell, comp, draws, shared=shared) if draws else (1.0, 1.0)
+        )
         for (metric, fn, cv, kv), p in zip(pooled_specs, (p_ppk, p_cpa), strict=True):
             ch = fn(cell, comp)
             if ch is None:

@@ -83,7 +83,10 @@ class Settings(BaseSettings):
     # result 50x harder to call strong. Off for the read; the ask box can compute a group
     # on demand.
     account_read_interactions: bool = False
-    account_read_permutation_draws: int = 1000
+    # Draws per permutation test. At 1,000 the finest p-value is 0.001 and ~1% of grades are
+    # decided by which shuffles came up; at 10,000 it is 0.0001, and since the shuffles are
+    # now shared across a run it costs seconds rather than minutes.
+    account_read_permutation_draws: int = 10_000
     # The account read's writer. It reasons over a long brief of graded comparisons, so the
     # stronger tier.
     account_read_model: str = "google/gemini-3-flash"

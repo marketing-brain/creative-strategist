@@ -72,6 +72,11 @@ class Test:
     cell_shas: list[str]
     bin_edges: tuple[float, float] | None = None
     cell_purchases: int | None = None
+    # True when this grade depends on which random shuffles the permutation test drew: the
+    # run grades itself twice, under two seeds, and disagrees with itself here. About 1% of
+    # results sit that close to a threshold, and calling one of them "strong" without
+    # saying so would dress up a coin toss (measured 2026-09-23).
+    grade_unstable: bool = False
 
 
 @dataclass
@@ -159,6 +164,7 @@ def unit_from_json(d: dict) -> Unit:
 
 def test_from_json(d: dict) -> Test:
     d = dict(d)
+    d.pop("pid", None)  # added for the page, not part of the record
     if d.get("bin_edges") is not None:
         d["bin_edges"] = tuple(d["bin_edges"])
     return Test(**d)

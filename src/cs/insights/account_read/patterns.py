@@ -5,6 +5,7 @@ from __future__ import annotations
 import statistics
 from itertools import combinations
 
+from cs.insights.account_read import permutations
 from cs.insights.account_read.facets import DERIVED_SINGLE_DIMS, NUMERIC_DIMS, REVEAL_BINS
 from cs.insights.account_read.reliability import FLAG, MIN_AGREEMENT, Reliability
 from cs.insights.account_read.stats import (
@@ -21,6 +22,7 @@ from cs.tagging.taxonomy import load_taxonomy
 
 GRADE_RANK = {"strong": 0, "suggestive": 1, "directional": 2, "thin": 3}
 MIN_GROUP = 10
+SECOND_SEED = 8  # the run grades itself twice; a grade that moves between them is not one
 
 
 def dimension_kinds() -> dict[str, str]:
@@ -44,20 +46,34 @@ def scope_units(units: list[Unit], dim: str, kinds: dict[str, str]) -> list[Unit
 
 
 def main_effects(
-    units: list[Unit], bin_edges: dict, kinds: dict[str, str], draws: int
+    units: list[Unit], bin_edges: dict, kinds: dict[str, str], draws: int, seed: int = 7
 ) -> list[Test]:
     out: list[Test] = []
+    # Facets arrive grouped by dimension, and a dimension's values all compare against the
+    # same scope, so one set of shuffles serves every value of it.
+    cache = permutations.Cache(draws, seed)
     for dim, val in _all_facets(units):
         cell = [u for u in units if u.has(dim, val)]
-        comp = [u for u in scope_units(units, dim, kinds) if not u.has(dim, val)]
+        scope = scope_units(units, dim, kinds)
+        comp = [u for u in scope if not u.has(dim, val)]
         out += compare(
-            cell, comp, dimension=dim, value=val, bin_edges=bin_edges.get(dim), draws=draws
+            cell,
+            comp,
+            dimension=dim,
+            value=val,
+            bin_edges=bin_edges.get(dim),
+            draws=draws,
+            shared=cache.for_units(scope),
         )
     return out
 
 
 def interactions(
-    units: list[Unit], grouping_dims: list[str], kinds: dict[str, str], draws: int
+    units: list[Unit],
+    grouping_dims: list[str],
+    kinds: dict[str, str],
+    draws: int,
+    seed: int = 7,
 ) -> list[Test]:
     out: list[Test] = []
     for gdim in grouping_dims:
@@ -66,12 +82,22 @@ def interactions(
             if len(group) < MIN_GROUP:
                 continue
             label = f"{gdim}={gval}"
+            cache = permutations.Cache(draws, seed)
             for dim, val in _all_facets(group):
                 if dim == gdim:
                     continue
                 cell = [u for u in group if u.has(dim, val)]
-                comp = [u for u in scope_units(group, dim, kinds) if not u.has(dim, val)]
-                out += compare(cell, comp, dimension=dim, value=val, group=label, draws=draws)
+                scope = scope_units(group, dim, kinds)
+                comp = [u for u in scope if not u.has(dim, val)]
+                out += compare(
+                    cell,
+                    comp,
+                    dimension=dim,
+                    value=val,
+                    group=label,
+                    draws=draws,
+                    shared=cache.for_units(scope),
+                )
     return out
 
 
@@ -93,6 +119,27 @@ def apply_grades(tests: list[Test]) -> None:
     passing = benjamini_hochberg([t.p for t in tests])
     for i, t in enumerate(tests):
         t.grade = grade(t.p, t.change, i in passing)
+
+
+def _key(t: Test) -> tuple:
+    return (t.group, t.dimension, str(t.value), t.metric)
+
+
+def flag_unstable_grades(tests: list[Test], second: list[Test]) -> int:
+    """Mark every result the run grades differently under a second set of shuffles.
+
+    A permutation p-value is an estimate, and the grade boundaries are hard edges, so a
+    result sitting on one is decided by the draw. Re-grading under another seed moved 13 of
+    1,175 grades with no other change (2026-09-23) -- those are the ones this marks, and
+    they are not evidence of anything.
+    """
+    other = {_key(t): t.grade for t in second}
+    n = 0
+    for t in tests:
+        if other.get(_key(t), t.grade) != t.grade:
+            t.grade_unstable = True
+            n += 1
+    return n
 
 
 def _change_within(cell: list[Unit], comp: list[Unit], metric: str) -> tuple[float | None, str]:
@@ -239,6 +286,17 @@ def run(
     if with_interactions:
         tests += interactions(units, grouping_dims, kinds, draws)
     apply_grades(tests)
+    # The same run, graded again on different shuffles. Only the pooled metrics move -- the
+    # rank tests are exact -- but the correction spans every test, so the whole set is
+    # re-graded and compared.
+    if draws:
+        second = main_effects(units, bin_edges, kinds, draws, seed=SECOND_SEED)
+        if with_interactions:
+            second += interactions(units, grouping_dims, kinds, draws, seed=SECOND_SEED)
+        apply_grades(second)
+        unstable = flag_unstable_grades(tests, second)
+    else:
+        unstable = 0
     if reliability is not None:
         flag_tagger_disagreement(tests, reliability)
     main = [t for t in tests if t.group is None]
@@ -255,6 +313,7 @@ def run(
         "tests": len(main),
         "interaction_tests": len(inter),
         "by_grade": {g: sum(1 for t in main if t.grade == g) for g in GRADE_RANK},
+        "unstable_grades": unstable,
         "dimensions": sorted({t.dimension for t in main}),
         "first_day": min(u.first_day for u in units).isoformat() if units else None,
         "last_day": max(u.last_day for u in units).isoformat() if units else None,
