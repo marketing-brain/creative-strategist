@@ -24,60 +24,27 @@ const hrefFor = (creativeId: string, scope: Scope, adsOpen: boolean) => {
   return `/creatives/${creativeId}${s ? `?${s}` : ''}`;
 };
 
+const day = (iso: string) => new Date(`${iso.slice(0, 10)}T00:00:00Z`);
 const fmtDay = (iso: string | null) =>
-  iso ? new Date(`${iso.slice(0, 10)}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '';
+  iso ? day(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '';
 
-function Covers({ footage, mine, pooled }: { footage: Footage; mine: FootageAd[]; pooled: boolean }) {
-  const { ads, creative_ids: creativeIds } = footage;
+/** "Jun 2–19" within a month, "May 21 – Jun 19" across one. */
+const fmtSpan = (from: string, to: string) =>
+  day(from).getUTCMonth() === day(to).getUTCMonth()
+    ? `${fmtDay(from)}–${day(to).getUTCDate()}`
+    : `${fmtDay(from)} – ${fmtDay(to)}`;
+
+function Covers({ footage, mine }: { footage: Footage; mine: FootageAd[] }) {
+  // The toggle beside this says whether the numbers are pooled or scoped, and the table
+  // below names every ad and campaign. All that is left to say is how many there are.
+  const { ads } = footage;
+  if (ads.length === 0) return <>No ads run this file</>;
   const campaigns = new Set(ads.map((a) => a.campaign_id).filter(Boolean)).size;
-  const across = campaigns > 1 ? ` across ${campaigns} campaigns` : '';
-  if (ads.length === 0) return <>No ad is running this creative.</>;
-  if (ads.length === 1) {
-    const a = ads[0];
-    return (
-      <>
-        <strong className="font-semibold text-foreground">One ad runs this file.</strong>{' '}
-        <span translate="no" className="break-all">
-          {a.name ?? a.platform_ad_id}
-          {a.campaign_name ? ` · ${a.campaign_name}` : ''}
-        </span>
-      </>
-    );
-  }
-  if (creativeIds.length < 2) {
-    return (
-      <>
-        <strong className="font-semibold text-foreground">
-          This file runs in {ads.length} ads{across}.
-        </strong>{' '}
-        They share one Meta creative, so every number on this page is their total.
-      </>
-    );
-  }
-  if (pooled) {
-    return (
-      <>
-        <strong className="font-semibold text-foreground">
-          This file runs in {ads.length} ads{across}.
-        </strong>{' '}
-        Meta gives every copy of an ad its own creative id. Every number on this page combines all of them.
-      </>
-    );
-  }
-  const first = mine[0];
+  const count = mine.length === ads.length ? `${ads.length}` : `${mine.length} of ${ads.length}`;
   return (
     <>
-      <strong className="font-semibold text-foreground">
-        Showing {mine.length === 1 ? 'one ad' : `${mine.length} ads`} of the {ads.length} that run this file.
-      </strong>{' '}
-      {first && (
-        <span translate="no" className="break-all">
-          {first.name ?? first.platform_ad_id}
-          {first.campaign_name ? ` · ${first.campaign_name}` : ''}
-          {mine.length > 1 ? ` and ${mine.length - 1} more` : ''}.
-        </span>
-      )}{' '}
-      Every number on this page covers this Meta creative only.
+      {count} {ads.length === 1 ? 'ad' : 'ads'}
+      {campaigns > 1 ? ` · ${campaigns} campaigns` : ''}
     </>
   );
 }
@@ -168,12 +135,25 @@ export function ScopePanel({
   // Every window on this page ends on the ad's own last delivered day, so the dates differ
   // from one creative to the next and belong beside the numbers rather than in prose under
   // them: one page means May, the next means September.
-  const span = `${fmtDay(summary.window_start)} – ${fmtDay(summary.window_end)}`;
+  // Four facts, one line: which days, whether that is all of them, whether it still runs,
+  // and what it is measured against. Everything else about the window is inference the
+  // reader should not have to make.
   const whole = life.first_day != null && life.first_day >= summary.window_start;
   const running = ads.some((a) => a.status === 'ACTIVE');
+  // All-time is worth a word only when there is materially more of it than the window
+  // shows. An ad that spent $18 in its whole life does not need "$18 all time" beside a
+  // window that already covers nearly all of it.
+  const more = !whole && life.spend >= t.spend * 1.25;
+  const covers = [
+    fmtSpan(summary.window_start, summary.window_end),
+    more ? `${fmt.money(life.spend)} all time` : null,
+    running ? null : 'stopped',
+  ]
+    .filter(Boolean)
+    .join(' · ');
   const note = seen
-    ? `Compared with ${summary.baseline_creatives} other ${isVideo ? 'videos' : 'creatives'} over the same days`
-    : `Under ${IMPRESSION_FLOOR.toLocaleString('en-US')} impressions: too little to compare with the account`;
+    ? `vs ${summary.baseline_creatives} other ${isVideo ? 'videos' : 'creatives'}, same days`
+    : `under ${IMPRESSION_FLOOR.toLocaleString('en-US')} impressions, too little to compare`;
   // To a media buyer "creative" means the video, so the narrow reading is named by what it
   // actually narrows to: the ad, or ads, under this one Meta creative.
   const own = ads.filter((a) => a.creative_id === creativeId).length;
@@ -185,16 +165,13 @@ export function ScopePanel({
     <section aria-label="What this page covers" id="ads" className="scroll-mt-16 overflow-hidden rounded-xl border border-border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-2.5">
         <p className="max-w-prose min-w-0 text-sm text-muted-foreground">
-          <Covers footage={footage} mine={mine} pooled={pooled} />
+          <Covers footage={footage} mine={mine} />
         </p>
-        <p className="flex shrink-0 items-baseline gap-2 text-sm">
-          {!running && <span className="font-medium text-muted-foreground">Stopped</span>}
-          <span className="font-mono tabular-nums" title={whole ? 'every day this ad delivered' : 'its last 30 delivered days'}>
-            {span}
-          </span>
-          <span className="text-xs text-muted-foreground">
-            {whole ? 'its whole run' : `30 days · ${fmt.money(life.spend)} over its whole run`}
-          </span>
+        <p
+          className="shrink-0 text-sm tabular-nums text-muted-foreground"
+          title={whole ? 'every day this ad delivered' : 'its last 30 delivered days'}
+        >
+          {covers}
         </p>
         {switchable && (
           <nav aria-label="Which ads the numbers cover" className="inline-flex shrink-0 rounded-lg border border-border bg-muted p-0.5 text-sm">
