@@ -151,10 +151,7 @@ function Finding({ v, index, citations, f }: { v: FindingView; index: number; ci
         </Mark>
       </div>
       <div className="min-w-0 max-w-3xl space-y-5">
-        <div>
-          <h3 className="max-w-[34ch] text-xl font-semibold leading-snug tracking-tight text-balance md:text-[22px]">{v.title}</h3>
-          <p className="mt-2 max-w-[62ch] text-[15px] leading-7 text-muted-foreground text-pretty">{v.why_non_obvious}</p>
-        </div>
+        <h3 className="max-w-[34ch] text-xl font-semibold leading-snug tracking-tight text-balance md:text-[22px]">{v.title}</h3>
 
         {shown.map((r) => (
           <FunnelStrip key={r.key} row={r} f={f} />
@@ -193,6 +190,11 @@ function Finding({ v, index, citations, f }: { v: FindingView; index: number; ci
           </summary>
           <p className="mt-3 max-w-[68ch] text-[15px] leading-7 text-pretty">
             <Cited text={v.paragraph} citations={citations} />
+          </p>
+          {/* Why the numbers alone would not have shown this: an argument for the finding,
+              read after it rather than before it. */}
+          <p className="mt-3 max-w-[68ch] text-[15px] leading-7 text-muted-foreground text-pretty">
+            {v.why_non_obvious}
           </p>
         </details>
       </div>
