@@ -29,6 +29,7 @@ MAX_ATTEMPTS = 4  # first draft plus three retries with the problems named
 # and attention, not a target: 22 surviving results on the 170-file panel were 11 ideas, and
 # a read that told four of their stories left seven unmentioned.
 MAX_FINDINGS = 12
+NO_REASONING = {"enabled": False}
 GRADE_ORDER = {"strong": 0, "suggestive": 1, "directional": 2}
 
 
@@ -551,7 +552,9 @@ def check_money(read: Read, tests: list[Test]) -> list[str]:
 
 
 class AccountReadWriter(Protocol):
-    async def complete(self, system: str, user: str) -> tuple[str, int, int]: ...
+    async def complete(
+        self, system: str, user: str, reasoning: dict | None = None
+    ) -> tuple[str, int, int]: ...
 
 
 class PaidCall(Protocol):
@@ -582,7 +585,11 @@ class GeminiGatewayAccountReadWriter:
         )
         self.model = settings.account_read_model
 
-    async def complete(self, system: str, user: str) -> tuple[str, int, int]:
+    async def complete(
+        self, system: str, user: str, reasoning: dict | None = None
+    ) -> tuple[str, int, int]:
+        """`reasoning` is the gateway's own field (mapped to Gemini's thinkingConfig);
+        leaving it None takes the model's default, which is to think."""
         stream = await self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -593,6 +600,7 @@ class GeminiGatewayAccountReadWriter:
             temperature=0.3,
             stream=True,
             stream_options={"include_usage": True},
+            extra_body={"reasoning": reasoning} if reasoning else {},
         )
         parts: list[str] = []
         tokens_in = tokens_out = 0
@@ -642,7 +650,10 @@ async def write_read(
             )
         claim = await ledger.claim() if ledger else None
         try:
-            text, ti, to = await writer.complete(SYSTEM, user)
+            # A correction applies edits the gates have already named and located; there is
+            # nothing left to work out. Thinking is what made these calls 65,000 output
+            # tokens against a 1,800-token answer, and five minutes against forty seconds.
+            text, ti, to = await writer.complete(SYSTEM, user, NO_REASONING if feedback else None)
         except Exception as exc:  # noqa: BLE001 - the call may have been billed either way
             if claim:
                 await claim.failed(f"{type(exc).__name__}: {exc}")

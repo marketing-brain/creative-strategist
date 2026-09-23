@@ -21,7 +21,9 @@ class _Dropped(Exception):
 class AnsweringWriter:
     """Answers every time, with a draft too thin to pass the content checks."""
 
-    async def complete(self, system: str, user: str) -> tuple[str, int, int]:
+    async def complete(
+        self, system: str, user: str, reasoning: dict | None = None
+    ) -> tuple[str, int, int]:
         return '{"overview": "o", "findings": []}', 100, 50
 
 
@@ -30,7 +32,9 @@ class DisconnectingWriter:
         self.calls = 0
         self.fail_after = fail_after
 
-    async def complete(self, system: str, user: str) -> tuple[str, int, int]:
+    async def complete(
+        self, system: str, user: str, reasoning: dict | None = None
+    ) -> tuple[str, int, int]:
         self.calls += 1
         if self.calls > self.fail_after:
             raise _Dropped("Server disconnected without sending a response")

@@ -7,8 +7,12 @@ class FakeAccountReadWriter:
     def __init__(self, texts: list[str]):
         self.texts = list(texts)
         self.calls: list[tuple[str, str]] = []
+        self.reasoning: list[dict | None] = []
 
-    async def complete(self, system: str, user: str) -> tuple[str, int, int]:
+    async def complete(
+        self, system: str, user: str, reasoning: dict | None = None
+    ) -> tuple[str, int, int]:
         self.calls.append((system, user))
+        self.reasoning.append(reasoning)
         text = self.texts.pop(0) if self.texts else "{}"
         return text, 10, 5
