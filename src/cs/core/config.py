@@ -86,13 +86,11 @@ class Settings(BaseSettings):
     # decided by which shuffles came up; at 10,000 it is 0.0001, and since the shuffles are
     # now shared across a run it costs seconds rather than minutes.
     account_read_permutation_draws: int = 10_000
-    # The account read's writer. Every other consequential job in this project runs on the
-    # full 2.5 flash tier -- the vocab judge moved there after flash-lite over-merged -- and
-    # the read was the one thing left on the 3 series for no recorded reason. Its drafts are
-    # machine-checked before they are stored (cs.insights.account_read.writer.check_read),
-    # so a weaker writer shows up as failed gates and extra attempts, not as a quiet drop in
-    # quality: switch back if the attempts per run rise.
-    account_read_model: str = "google/gemini-2.5-flash"
+    # The account read's writer. The hardest reasoning job here by a distance: 77k characters
+    # of graded comparisons, a dozen rules about what may be claimed from them, and citations
+    # that have to match. It stays on the newer tier even though every other job runs on 2.5,
+    # because consistency is not worth a worse read.
+    account_read_model: str = "google/gemini-3-flash"
     # One draft can run for minutes on a 23k-token brief. The client waits this long and
     # never retries on its own; a dropped call may already have been billed.
     account_read_timeout_s: float = 900.0
