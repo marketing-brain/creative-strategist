@@ -209,58 +209,6 @@ function Finding({ v, index, citations, f }: { v: FindingView; index: number; ci
   );
 }
 
-function GradeBar({ g, tagger }: { g: AccountReadView['grades']; tagger: AccountReadView['tagger'] }) {
-  const parts = [
-    { k: 'strong', n: g.strong, bar: 'bg-success' },
-    { k: 'suggestive', n: g.suggestive, bar: 'bg-foreground/70' },
-    { k: 'directional', n: g.directional, bar: 'bg-amber-500/70' },
-    { k: 'thin', n: g.thin, bar: 'bg-border' },
-  ];
-  if (!g.tests) return null;
-  return (
-    <section aria-label="How much of this is proven" className="max-w-3xl rounded-lg border border-border px-4 py-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <Mark className="text-muted-foreground">How sure is this</Mark>
-        <span className="font-mono text-[11px] tabular-nums text-muted-foreground">{g.tests.toLocaleString()} comparisons run</span>
-      </div>
-      <div className="mt-3 flex h-1.5 gap-px overflow-hidden rounded-full" aria-hidden="true">
-        {parts.map((p) => p.n > 0 && <span key={p.k} className={p.bar} style={{ flexGrow: p.n, minWidth: 4 }} />)}
-      </div>
-      <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
-        {parts.map((p) => (
-          <div key={p.k}>
-            <dt className="flex items-baseline gap-1.5">
-              <span className="font-mono text-base font-medium tabular-nums">{p.n}</span>
-              <Mark className={markClass[p.k]}>{p.k === 'thin' ? 'no call' : p.k}</Mark>
-            </dt>
-            <dd className="mt-0.5 text-[12px] leading-4 text-muted-foreground">{GRADE_HELP[p.k]}</dd>
-          </div>
-        ))}
-      </dl>
-      {g.byChance > 0 && (
-        <p className="mt-3 border-t border-border pt-3 text-[13px] leading-5 text-muted-foreground">
-          With {g.tests.toLocaleString()} comparisons, about {g.byChance} would look suggestive by luck alone. Treat a suggestive finding as a reason to run the test, not as a result.
-        </p>
-      )}
-      {tagger && <TaggerNote t={tagger} />}
-    </section>
-  );
-}
-
-/** What the tags themselves are worth. The tagger watches each video alone, so a file tagged
- *  more than once is a free re-test of its own labels, and the ones it does not reproduce are
- *  still compared here but never pinned on a single ad. */
-function TaggerNote({ t }: { t: NonNullable<AccountReadView['tagger']> }) {
-  const worst = t.worst.map((w) => `${w.label}, ${Math.round(w.agreement * 100)}% on ${w.files} ${w.files === 1 ? 'video' : 'videos'}`).join('; ');
-  const rest = t.flagged > t.worst.length ? `, and ${t.flagged - t.worst.length} more` : '';
-  return (
-    <p className="mt-3 border-t border-border pt-3 text-[13px] leading-5 text-muted-foreground">
-      {`Some files were tagged more than once, which shows how often the tagger repeats its own labels. ${t.flagged} ${t.flagged === 1 ? 'attribute' : 'attributes'} came back under ${Math.round(t.minAgreement * 100)}%. The ones on the most videos: ${worst}${rest}. `}
-      Those comparisons still run, marked <Flag>tagger disagreement</Flag>, but no single ad is said to have or lack them.
-    </p>
-  );
-}
-
 export function AccountReadSection({ status, nUnits, view, stale = false, currency, coverage }: {
   status: string; nUnits?: number; view: AccountReadView | null; stale?: boolean; currency?: string;
   coverage?: { files?: number; tagged_files?: number; spend_share?: number | null } | null;
@@ -325,8 +273,6 @@ export function AccountReadSection({ status, nUnits, view, stale = false, curren
           </p>
         )}
       </header>
-
-      <GradeBar g={view.grades} tagger={view.tagger} />
 
       <div>
         {view.findings.map((v, i) => (

@@ -70,6 +70,7 @@ describe('AccountReadSection', () => {
     expect(screen.getByText('+20%')).toHaveClass('text-destructive');
     expect(screen.getAllByText('not tested')).toHaveLength(3);
     expect(screen.getByRole('link', { name: /Worst OTC sleep aids/ })).toHaveAttribute('href', '/creatives/c1');
-    expect(screen.getByText(/about 0 would|comparisons run/)).toBeInTheDocument();
+    // No statistics card: the findings and the numbers under them are the page.
+    expect(screen.queryByText(/comparisons run|by luck alone/)).not.toBeInTheDocument();
   });
 });
