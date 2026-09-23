@@ -88,6 +88,7 @@ async def compute_account_read(ctx: JobContext) -> None:
             grouping_dims=s.account_read_grouping_dims_list,
             draws=s.account_read_permutation_draws,
             reliability=await measure_reliability(ctx.db, org_id),
+            with_interactions=s.account_read_interactions,
         )
         read, problems, ti, to = await write_read(
             result, WRITER_FACTORY(s), _Ledger(ctx.db, org_id, ad_account_id, s)

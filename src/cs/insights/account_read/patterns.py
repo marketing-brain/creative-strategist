@@ -232,10 +232,12 @@ def run(
     grouping_dims: list[str],
     draws: int,
     reliability: Reliability | None = None,
+    with_interactions: bool = False,
 ) -> RunResult:
     kinds = dimension_kinds()
     tests = main_effects(units, bin_edges, kinds, draws)
-    tests += interactions(units, grouping_dims, kinds, draws)
+    if with_interactions:
+        tests += interactions(units, grouping_dims, kinds, draws)
     apply_grades(tests)
     if reliability is not None:
         flag_tagger_disagreement(tests, reliability)

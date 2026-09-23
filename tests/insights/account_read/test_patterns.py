@@ -80,12 +80,14 @@ def test_null_facet_rarely_reaches_suggestive():
 
 
 def test_interactions_only_within_groups_of_ten_or_more():
-    r = run(synth(2), {}, grouping_dims=["messenger"], draws=100)
+    # Within-group comparisons are off for the read (they are 96% of its tests and make
+    # every account-wide result harder to call strong), so this asks for them explicitly.
+    r = run(synth(2), {}, grouping_dims=["messenger"], draws=100, with_interactions=True)
     groups = {t.group for t in r.tests if t.group}
     assert "messenger=creator_on_camera" in groups  # 27 units
     assert all(g.startswith("messenger=") for g in groups)
     # a group of 13 units is allowed (bound is >= 10); a group under 10 never appears
-    small = run(synth(2, n=12), {}, grouping_dims=["messenger"], draws=50)
+    small = run(synth(2, n=12), {}, grouping_dims=["messenger"], draws=50, with_interactions=True)
     assert "messenger=expert_on_camera" not in {t.group for t in small.tests if t.group}
 
 
@@ -148,3 +150,11 @@ def test_an_unreliable_attribute_is_flagged_and_a_steady_one_is_not():
     assert any(t.dimension == "hook_devices" and t.grade != "ungraded" for t in result.tests)
     summary = result.summary["tagger_agreement"]
     assert [r["value"] for r in summary["flagged"]] == ["warning_or_risk"]
+
+
+def test_the_read_asks_no_within_group_questions_by_default():
+    """The default run is account-wide only. Each within-group test raises the bar the
+    account-wide ones must clear, because the false-discovery correction spans the run."""
+    r = run(synth(2), {}, grouping_dims=["messenger"], draws=50)
+    assert r.tests and all(t.group is None for t in r.tests)
+    assert r.summary["interaction_tests"] == 0

@@ -76,6 +76,13 @@ class Settings(BaseSettings):
         "audience_callouts,products_mentioned,features_mentioned,messenger,duration_s"
     )
     account_read_min_units: int = 10
+    # Comparisons inside groups ("within founder-led ads..."). They are 96% of the run's
+    # work and of its tests, the read is told never to lead with them, and every one of them
+    # raises the bar the account-wide results must clear: the false-discovery correction is
+    # computed across the whole run, so 5,700 within-group tests make a real account-wide
+    # result 50x harder to call strong. Off for the read; the ask box can compute a group
+    # on demand.
+    account_read_interactions: bool = False
     account_read_permutation_draws: int = 1000
     # The account read's writer. It reasons over a long brief of graded comparisons, so the
     # stronger tier.
