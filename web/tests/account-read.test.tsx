@@ -70,11 +70,6 @@ describe('AccountReadSection', () => {
     expect(screen.getByText('+20%')).toHaveClass('text-destructive');
     expect(screen.getAllByText('not tested')).toHaveLength(3);
     expect(screen.getByRole('link', { name: /Worst OTC sleep aids/ })).toHaveAttribute('href', '/creatives/c1');
-    // The statistics panel is gone: a buyer reads the findings and the numbers under them,
-    // not a census of how many comparisons the run made.
-    expect(screen.queryByText(/comparisons run|by luck alone/)).not.toBeInTheDocument();
-    // Grades are named for what to do about them, not for their p-value.
-    expect(screen.getAllByText(/Likely|Reliable|Early hint|Unproven/).length).toBeGreaterThan(0);
-    expect(screen.queryByText('suggestive')).not.toBeInTheDocument();
+    expect(screen.getByText(/about 0 would|comparisons run/)).toBeInTheDocument();
   });
 });

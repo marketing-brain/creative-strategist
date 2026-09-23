@@ -9,26 +9,15 @@ import { formatters, type Formatters } from '@/lib/format';
 import { Flag, Mark, markClass } from '@/components/account-read-evidence';
 
 const METRIC_LABEL: Record<string, string> = {
-  hook_rate: 'Hook rate', thruplay_rate: 'Watched through', link_ctr: 'Click rate', purchases_per_1k: 'Purchase rate', cpa: 'Cost per purchase',
+  hook_rate: 'Hook rate', thruplay_rate: 'Thruplay', link_ctr: 'Link CTR', purchases_per_1k: 'Purchases / 1k', cpa: 'CPA',
 };
 const STAGE: Record<string, string> = { funnel: 'Full funnel', attention: 'Hook', hook: 'Hook', retention: 'Hold', click: 'Click', conversion: 'Purchase' };
-// The grades named for what a buyer should do about them. The statistics behind each one
-// live in cs.insights.account_read.stats.grade; nobody reading this page needs them.
-// Why a comparison cannot be taken at face value, in the reader's terms rather than ours.
-const FLAG_WORD: Record<string, string> = {
-  budget_concentration: 'one video dominates',
-  seasonality: 'ran at different times',
-  tagger_disagreement: 'tagging is inconsistent',
-};
-const GRADE_WORD: Record<string, string> = {
-  strong: 'Reliable', suggestive: 'Likely', directional: 'Early hint', thin: 'Unproven', mixed: 'Mixed',
-};
+// What each grade means, in the reader's terms. Thresholds live in cs.insights.account_read.stats.grade.
 const GRADE_HELP: Record<string, string> = {
-  strong: 'Held up against every other comparison this read made',
-  suggestive: 'A real pattern in these videos, but it could still be chance',
-  directional: 'A hint worth a test, not evidence',
-  thin: 'Too few videos, or no real gap',
-  mixed: 'Parts of this are better supported than others',
+  strong: 'Holds up after correcting for every comparison run',
+  suggestive: 'A lead: p < 0.10 on its own, not corrected',
+  directional: 'A hint: a gap of 15% or more, weak evidence',
+  thin: 'No call: too few files or no real gap',
 };
 
 const fmtChange = (x: number) => (Math.abs(x) < 0.005 ? '±0%' : `${x > 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(0)}%`);
@@ -37,16 +26,23 @@ const fmtDay = (iso: string | null, year = false) =>
   iso ? new Date(`${iso.slice(0, 10)}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: year ? 'numeric' : undefined, timeZone: 'UTC' }) : '';
 
 function Cited({ text, citations }: { text: string; citations: Record<string, string> }) {
-  // The writer cites every number as "(P1, P2)" because a gate checks it. The reader does
-  // not need the apparatus: the comparisons those ids point at are drawn underneath, with
-  // their numbers. The ids stay in the title so they can still be traced.
+  // "(P1, P2)" → superscript numbers; the tooltip names the comparison each one points at
   const parts = text.split(/(\s?\((?:P\d+(?:,\s*)?)+\))/g);
   return (
     <>
       {parts.map((p, i) => {
         const ids = /^\s?\(/.test(p) ? p.match(/P\d+/g) : null;
         if (!ids) return <span key={i}>{p}</span>;
-        return <span key={i} title={ids.map((id) => citations[id]).filter(Boolean).join('; ')} />;
+        return (
+          <sup key={i} className="ml-0.5 font-mono text-[10px] text-muted-foreground">
+            {ids.map((id, j) => (
+              <span key={id} title={citations[id]}>
+                {j > 0 && ','}
+                {id.slice(1)}
+              </span>
+            ))}
+          </sup>
+        );
       })}
     </>
   );
@@ -77,7 +73,7 @@ function FunnelCellView({ cell, metric, f }: { cell: FunnelCell | null; metric: 
           {fmtVal(cell.metric, cell.cell_value, f)} <span className="text-muted-foreground/60">vs</span> {fmtVal(cell.metric, cell.comp_value, f)}
         </div>
         <Mark className={cn('hidden text-[10px] sm:mt-1 sm:block', markClass[cell.grade] ?? markClass.thin)}>
-          <span title={GRADE_HELP[cell.grade]}>{GRADE_WORD[cell.grade] ?? cell.grade}</span>
+          <span title={GRADE_HELP[cell.grade]}>{cell.grade === 'thin' ? 'no call' : cell.grade}</span>
         </Mark>
       </div>
     </div>
@@ -96,7 +92,7 @@ function FunnelStrip({ row, f }: { row: AttributeRow; f: Formatters }) {
         <span className="flex items-center gap-2 font-mono text-[11px] tabular-nums text-muted-foreground">
           {row.n_cell} videos with · {row.n_complement} without
           {row.confounds.map((c) => (
-            <Flag key={c}>{FLAG_WORD[c] ?? c.replace(/_/g, ' ')}</Flag>
+            <Flag key={c}>{c.replace(/_/g, ' ')}</Flag>
           ))}
         </span>
       </figcaption>
@@ -151,7 +147,7 @@ function Finding({ v, index, citations, f }: { v: FindingView; index: number; ci
         <span className="font-mono text-2xl font-medium tabular-nums leading-none text-muted-foreground/50">{String(index + 1).padStart(2, '0')}</span>
         <Mark className="text-muted-foreground">{STAGE[v.layer] ?? v.layer}</Mark>
         <Mark className={markClass[v.confidence] ?? markClass.thin}>
-          <span title={GRADE_HELP[v.confidence]}>{GRADE_WORD[v.confidence] ?? v.confidence}</span>
+          <span title={GRADE_HELP[v.confidence]}>{v.confidence}</span>
         </Mark>
       </div>
       <div className="min-w-0 max-w-3xl space-y-5">
@@ -210,6 +206,58 @@ function Finding({ v, index, citations, f }: { v: FindingView; index: number; ci
         </details>
       </div>
     </article>
+  );
+}
+
+function GradeBar({ g, tagger }: { g: AccountReadView['grades']; tagger: AccountReadView['tagger'] }) {
+  const parts = [
+    { k: 'strong', n: g.strong, bar: 'bg-success' },
+    { k: 'suggestive', n: g.suggestive, bar: 'bg-foreground/70' },
+    { k: 'directional', n: g.directional, bar: 'bg-amber-500/70' },
+    { k: 'thin', n: g.thin, bar: 'bg-border' },
+  ];
+  if (!g.tests) return null;
+  return (
+    <section aria-label="How much of this is proven" className="max-w-3xl rounded-lg border border-border px-4 py-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <Mark className="text-muted-foreground">How sure is this</Mark>
+        <span className="font-mono text-[11px] tabular-nums text-muted-foreground">{g.tests.toLocaleString()} comparisons run</span>
+      </div>
+      <div className="mt-3 flex h-1.5 gap-px overflow-hidden rounded-full" aria-hidden="true">
+        {parts.map((p) => p.n > 0 && <span key={p.k} className={p.bar} style={{ flexGrow: p.n, minWidth: 4 }} />)}
+      </div>
+      <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+        {parts.map((p) => (
+          <div key={p.k}>
+            <dt className="flex items-baseline gap-1.5">
+              <span className="font-mono text-base font-medium tabular-nums">{p.n}</span>
+              <Mark className={markClass[p.k]}>{p.k === 'thin' ? 'no call' : p.k}</Mark>
+            </dt>
+            <dd className="mt-0.5 text-[12px] leading-4 text-muted-foreground">{GRADE_HELP[p.k]}</dd>
+          </div>
+        ))}
+      </dl>
+      {g.byChance > 0 && (
+        <p className="mt-3 border-t border-border pt-3 text-[13px] leading-5 text-muted-foreground">
+          With {g.tests.toLocaleString()} comparisons, about {g.byChance} would look suggestive by luck alone. Treat a suggestive finding as a reason to run the test, not as a result.
+        </p>
+      )}
+      {tagger && <TaggerNote t={tagger} />}
+    </section>
+  );
+}
+
+/** What the tags themselves are worth. The tagger watches each video alone, so a file tagged
+ *  more than once is a free re-test of its own labels, and the ones it does not reproduce are
+ *  still compared here but never pinned on a single ad. */
+function TaggerNote({ t }: { t: NonNullable<AccountReadView['tagger']> }) {
+  const worst = t.worst.map((w) => `${w.label}, ${Math.round(w.agreement * 100)}% on ${w.files} ${w.files === 1 ? 'video' : 'videos'}`).join('; ');
+  const rest = t.flagged > t.worst.length ? `, and ${t.flagged - t.worst.length} more` : '';
+  return (
+    <p className="mt-3 border-t border-border pt-3 text-[13px] leading-5 text-muted-foreground">
+      {`Some files were tagged more than once, which shows how often the tagger repeats its own labels. ${t.flagged} ${t.flagged === 1 ? 'attribute' : 'attributes'} came back under ${Math.round(t.minAgreement * 100)}%. The ones on the most videos: ${worst}${rest}. `}
+      Those comparisons still run, marked <Flag>tagger disagreement</Flag>, but no single ad is said to have or lack them.
+    </p>
   );
 }
 
@@ -277,6 +325,8 @@ export function AccountReadSection({ status, nUnits, view, stale = false, curren
           </p>
         )}
       </header>
+
+      <GradeBar g={view.grades} tagger={view.tagger} />
 
       <div>
         {view.findings.map((v, i) => (
