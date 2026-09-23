@@ -51,12 +51,26 @@ def _derived(r) -> dict:
 SCOPE = Query("footage", pattern="^(footage|creative)$")
 
 
-async def _until(db: Database, org_id: UUID, ad_account_id: UUID) -> date:
-    """The day every window on the creative page ends on: the account's newest day with
-    delivery, or today for an account that has none yet. Anchoring on the wall clock instead
-    would spend the trailing days of each window on whatever the connector has not synced."""
-    last = await repo.account_last_metric_day(db, org_id, ad_account_id)
-    return last or datetime.now(UTC).date()
+async def _until(
+    db: Database, org_id: UUID, ad_account_id: UUID, ids: list[UUID] | None = None
+) -> date:
+    """The day every window on the creative page ends on: this ad's newest day with
+    delivery, falling back to the account's, and to today for an account with none.
+
+    Anchoring on the wall clock would spend the trailing days of each window on whatever the
+    connector has not synced. Anchoring on the *account* left 310 of 758 delivered creatives
+    with an empty page: they stopped running weeks ago, so the account's trailing month holds
+    nothing of theirs. Anchored on the ad, every creative reads on the same basis -- its last
+    thirty delivered days -- which is also what makes the account comparison fair, since the
+    baseline is summed over those same days. Ads here are short: retired ones delivered for
+    fourteen days on average, and 274 of 308 ran thirty days or fewer, so for nearly all of
+    them this window is their whole life."""
+    last = await repo.creative_last_metric_day(db, org_id, ids) if ids else None
+    return (
+        last
+        or await repo.account_last_metric_day(db, org_id, ad_account_id)
+        or (datetime.now(UTC).date())
+    )
 
 
 async def _scope_ids(db: Database, org_id: UUID, creative_id: UUID, scope: str) -> list[UUID]:
@@ -357,7 +371,7 @@ async def creative_summary(
     if not c:
         raise HTTPException(404)
     ids = await _scope_ids(db, auth.org_id, creative_id, scope)
-    until = await _until(db, auth.org_id, c["ad_account_id"])
+    until = await _until(db, auth.org_id, c["ad_account_id"], ids)
     since = until - timedelta(days=WINDOW_DAYS - 1)
     mine = await repo.creative_window_sums(db, auth.org_id, ids, since, until)
     base = await repo.baseline_window_sums(
@@ -394,7 +408,7 @@ async def creative_play_curve(
     if c["format"] != "video":
         return None
     ids = await _scope_ids(db, auth.org_id, creative_id, scope)
-    until = await _until(db, auth.org_id, c["ad_account_id"])
+    until = await _until(db, auth.org_id, c["ad_account_id"], ids)
     since = until - timedelta(days=WINDOW_DAYS - 1)
     duration_ms = c["primary_asset_duration_ms"]
     bucket = length_bucket(duration_ms)
@@ -455,6 +469,10 @@ async def creative_diagnosis(
         raise HTTPException(404)
     ids = await _scope_ids(db, auth.org_id, creative_id, scope)
     diagnosed = await diagnose_creative(
-        db, auth.org_id, c, await _until(db, auth.org_id, c["ad_account_id"]), member_ids=ids
+        db,
+        auth.org_id,
+        c,
+        await _until(db, auth.org_id, c["ad_account_id"], ids),
+        member_ids=ids,
     )
     return diagnosed.diagnosis.to_dict()

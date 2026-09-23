@@ -375,6 +375,17 @@ _SUMS_SQL = """
 """
 
 
+async def creative_last_metric_day(
+    db: Database, org_id: UUID, creative_id: UUID | list[UUID]
+) -> date | None:
+    """The newest day these creatives delivered, or None if they never did."""
+    return await db.fetchval(
+        "SELECT max(day) FROM metric_daily WHERE org_id=$1 AND creative_id = ANY($2)",
+        org_id,
+        _ids(creative_id),
+    )
+
+
 async def creative_lifetime_sums(
     db: Database, org_id: UUID, creative_id: UUID | list[UUID]
 ) -> asyncpg.Record:

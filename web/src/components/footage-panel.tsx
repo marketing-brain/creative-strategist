@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { CLICK_FLOOR, gap, gapText, gapTone, IMPRESSION_FLOOR } from '@/lib/compare';
 import type { Formatters } from '@/lib/format';
-import type { CreativeSummary, Diagnosis, Footage, FootageAd, MetricWindow, Scope, Totals } from '@/lib/types';
+import type { CreativeSummary, Diagnosis, Footage, FootageAd, Scope, Totals } from '@/lib/types';
 
 // Meta mints a new creative id whenever an ad is copied into another campaign or its file is
 // uploaded again, so one file usually runs as several Meta creatives. ScopePanel is the one
@@ -16,11 +16,10 @@ const perPurchase = (t: Pick<Totals, 'spend' | 'purchases'>, fmt: Formatters) =>
 
 // `adsOpen` keeps the breakdown open across the links inside it, so stepping from one copy
 // to the next does not close the list being stepped through.
-const hrefFor = (creativeId: string, scope: Scope, adsOpen: boolean, window: MetricWindow = '30d') => {
+const hrefFor = (creativeId: string, scope: Scope, adsOpen: boolean) => {
   const q = new URLSearchParams();
   if (scope === 'creative') q.set('scope', 'creative');
   if (adsOpen) q.set('ads', 'open');
-  if (window === 'lifetime') q.set('window', 'lifetime');
   const s = q.toString();
   return `/creatives/${creativeId}${s ? `?${s}` : ''}`;
 };
@@ -136,13 +135,11 @@ export function ScopePanel({
   isVideo,
   actId,
   fmt,
-  window = '30d',
 }: {
   footage: Footage;
   creativeId: string;
   scope: Scope;
   adsOpen: boolean;
-  window?: MetricWindow;
   summary: CreativeSummary;
   diagnosis: Diagnosis;
   isVideo: boolean;
@@ -153,11 +150,11 @@ export function ScopePanel({
   const switchable = footage.creative_ids.length > 1;
   const pooled = scope === 'footage' || !switchable;
   const mine = pooled ? ads : ads.filter((a) => a.creative_id === creativeId);
-  // An ad that stopped months ago has nothing in the trailing window; its life is the only
-  // view that reads. Both are always here, and the toggle says which one the row shows.
+  // The window ends on this ad's last delivered day, not the account's, so a creative that
+  // stopped in June reads on the same basis as one running today: its last thirty delivered
+  // days. Lifetime rides along in the note for provenance, not as a second mode.
   const life = summary.lifetime;
-  const t = window === 'lifetime' ? life : summary.totals;
-  const { baseline: b } = summary;
+  const { totals: t, baseline: b } = summary;
   const seen = t.impressions >= IMPRESSION_FLOOR && b.impressions >= IMPRESSION_FLOOR;
   const clicked = seen && t.link_clicks >= CLICK_FLOOR && b.link_clicks >= CLICK_FLOOR;
   const x = (n: number | null) => (n == null ? '–' : `${n.toFixed(2)}x`);
@@ -168,17 +165,13 @@ export function ScopePanel({
   // Hold rate comes from the diagnosis, not the account pool: it is only fair against videos
   // of similar length, and the header must show the same comparison the retention layer does.
   const hold = diagnosis.tiers.find((tier) => tier.key === 'retention')?.metrics.find((m) => m.key === 'hold_rate');
-  const ran = life.first_day ? `ran ${fmtDay(life.first_day)} – ${fmtDay(life.last_day)}` : 'never delivered';
-  const other =
-    window === 'lifetime'
-      ? `Last 30 days: ${summary.totals.impressions ? fmt.money(summary.totals.spend) : 'nothing'}`
-      : `Lifetime: ${fmt.money(life.spend)}, ${ran}`;
-  const base = window === 'lifetime'
-    ? 'Lifetime · the account comparison below covers the last 30 days'
-    : seen
-      ? `Last 30 days · account = ${summary.baseline_creatives} other ${isVideo ? 'videos' : 'creatives'}`
-      : `Last 30 days · under ${IMPRESSION_FLOOR.toLocaleString('en-US')} impressions, too little to compare with the account`;
-  const note = `${base} · ${other}`;
+  const span = `${fmtDay(summary.window_start)} – ${fmtDay(summary.window_end)}`;
+  const whole = life.first_day != null && life.first_day >= summary.window_start;
+  const covers = whole ? `${span} · everything it ran` : `${span} · its last 30 delivered days`;
+  const account = seen
+    ? `account over the same days = ${summary.baseline_creatives} other ${isVideo ? 'videos' : 'creatives'}`
+    : `under ${IMPRESSION_FLOOR.toLocaleString('en-US')} impressions, too little to compare with the account`;
+  const note = whole ? `${covers} · ${account}` : `${covers} · ${fmt.money(life.spend)} over its whole run · ${account}`;
   // To a media buyer "creative" means the video, so the narrow reading is named by what it
   // actually narrows to: the ad, or ads, under this one Meta creative.
   const own = ads.filter((a) => a.creative_id === creativeId).length;
@@ -192,21 +185,6 @@ export function ScopePanel({
         <p className="max-w-prose min-w-0 text-sm text-muted-foreground">
           <Covers footage={footage} mine={mine} pooled={pooled} />
         </p>
-        <nav aria-label="Which window the numbers cover" className="inline-flex shrink-0 rounded-lg border border-border bg-muted p-0.5 text-sm">
-          {([['30d', 'Last 30 days'], ['lifetime', 'Lifetime']] as [MetricWindow, string][]).map(([value, label]) => (
-            <Link
-              key={value}
-              href={hrefFor(creativeId, scope, adsOpen, value)}
-              scroll={false}
-              aria-current={window === value ? 'page' : undefined}
-              className={`rounded-md px-3 py-1.5 font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${
-                window === value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {label}
-            </Link>
-          ))}
-        </nav>
         {switchable && (
           <nav aria-label="Which ads the numbers cover" className="inline-flex shrink-0 rounded-lg border border-border bg-muted p-0.5 text-sm">
             {options.map(([value, label]) => (
