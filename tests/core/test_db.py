@@ -74,6 +74,21 @@ def test_pool_kwargs_disable_statement_cache_for_transaction_pooler():
     assert tx["statement_cache_size"] == 0
 
 
+def test_every_pool_bounds_its_commands():
+    """A pooler that stops answering must surface as an error, not as a hang. On 2026-09-22
+    the worker waited four and a half hours on a write it could never finish, holding a lease
+    it could not renew, and lost a finished account read (two paid model calls) with it."""
+    from cs.core.db import DEFAULT_COMMAND_TIMEOUT, pool_kwargs
+
+    worker = pool_kwargs("postgres://u:p@aws-0.pooler.supabase.com:6543/postgres")
+    assert worker["command_timeout"] == DEFAULT_COMMAND_TIMEOUT
+
+    # The API's own bound is tighter, and replaces it rather than adding to it.
+    api = pool_kwargs("postgres://u:p@aws-0.pooler.supabase.com:6543/postgres", 15_000)
+    assert api["command_timeout"] == 20.0
+    assert api["command_timeout"] < DEFAULT_COMMAND_TIMEOUT
+
+
 def test_settings_pool_url_falls_back_to_database_url(monkeypatch):
     from cs.core.config import Settings
 

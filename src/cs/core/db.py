@@ -41,6 +41,9 @@ async def _init_conn(conn: asyncpg.Connection) -> None:
 # nothing on checkout, so the first query after a lull landed on a dead socket and hung or
 # raised ConnectionDoesNotExistError. Recycle well inside the pooler's window.
 POOL_IDLE_LIFETIME = 60.0
+# Long enough for a sync, a rollup refresh or a footage rebuild; short enough that a dead
+# socket surfaces the same day. The API passes its own, much tighter bound.
+DEFAULT_COMMAND_TIMEOUT = 300.0
 
 
 def _transaction_pooler(url: str) -> bool:
@@ -57,7 +60,15 @@ def pool_kwargs(url: str, statement_timeout_ms: int | None = None) -> dict:
     scheduler do not, since a sync or a rollup refresh is long on purpose. Without a bound a
     slow read never dies, each page reload stacks another behind it, and the instance stops
     answering (2026-09-18, 2026-09-20). The server-side timeout is what frees the database;
-    the client-side one, a little longer, only covers a server that has stopped replying."""
+    the client-side one, a little longer, only covers a server that has stopped replying.
+
+    `command_timeout` bounds the other half: a query that is neither slow nor cancelled but
+    waiting on a socket the pooler has stopped answering on. On 2026-09-22 the pooler refused
+    connections for a few minutes; the worker had just finished an account read and hung on
+    writing it, still waiting four and a half hours later, holding a lease it could no longer
+    renew, and the finished read (two paid model calls) was lost. Every pool gets a deadline,
+    generous enough for a sync or a rollup refresh: the point is to notice a dead peer, not
+    to cut honest work short."""
 
     async def init(conn: asyncpg.Connection) -> None:
         await _init_conn(conn)
@@ -72,6 +83,10 @@ def pool_kwargs(url: str, statement_timeout_ms: int | None = None) -> dict:
         "max_size": 10,
         "init": init,
         "max_inactive_connection_lifetime": POOL_IDLE_LIFETIME,
+        # Every command gets a deadline, so a socket the pooler has stopped answering on
+        # raises instead of waiting out the kernel's own timeout. The API's own, tighter
+        # bound below replaces this one.
+        "command_timeout": DEFAULT_COMMAND_TIMEOUT,
     }
     if statement_timeout_ms:
         kwargs["command_timeout"] = statement_timeout_ms / 1000 + 5
