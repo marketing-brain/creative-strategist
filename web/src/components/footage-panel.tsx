@@ -142,8 +142,8 @@ export function ScopePanel({
   ];
   return (
     <section aria-label="What this page covers" id="ads" className="scroll-mt-16 overflow-hidden rounded-xl border border-border bg-card">
-      {/* Toggle first, then what it covers: the control, then the consequence. The two
-          readings sit together with a hairline between them rather than pushed apart. */}
+      {/* The toggle leads; what it covers sits together at the far end, a hairline between
+          the two readings rather than a gap. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 text-sm text-muted-foreground">
         {switchable && (
           <nav aria-label="Which ads the numbers cover" className="inline-flex shrink-0 rounded-lg border border-border bg-muted p-0.5">
@@ -162,7 +162,7 @@ export function ScopePanel({
             ))}
           </nav>
         )}
-        <p className="min-w-0">
+        <p className="ml-auto min-w-0">
           <Covers footage={footage} mine={mine} />
         </p>
         <span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-border" />
