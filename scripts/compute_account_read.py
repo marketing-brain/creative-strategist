@@ -24,7 +24,9 @@ async def main(ad_account_id: UUID) -> None:
             "insights.compute_account_read",
             {"ad_account_id": str(ad_account_id)},
             dedup_key=f"account_read:{ad_account_id}",
-            max_attempts=2,
+            # The writer's call may be billed even when it fails, so the queue never
+            # re-runs this on its own (cs.core.model_calls).
+            max_attempts=1,
         )
         print("queued" if jid else "already queued", jid or "")
     finally:

@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     # The account read's writer. It reasons over a long brief of graded comparisons, so the
     # stronger tier.
     account_read_model: str = "google/gemini-3-flash"
+    # One draft can run for minutes on a 23k-token brief. The client waits this long and
+    # never retries on its own; a dropped call may already have been billed.
+    account_read_timeout_s: float = 900.0
 
     # Fallback for videos Fivetran's Meta connector can never expose: Partnership Ads,
     # where the video lives in the creator's own Instagram account rather than the

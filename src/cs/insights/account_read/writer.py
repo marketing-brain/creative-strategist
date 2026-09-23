@@ -525,15 +525,36 @@ class AccountReadWriter(Protocol):
     async def complete(self, system: str, user: str) -> tuple[str, int, int]: ...
 
 
+class PaidCall(Protocol):
+    async def done(self, input_tokens: int, output_tokens: int) -> None: ...
+    async def failed(self, error: str) -> None: ...
+
+
+class PaidCallLedger(Protocol):
+    async def claim(self) -> PaidCall: ...
+
+
 class GeminiGatewayAccountReadWriter:
+    """The brief is 23k tokens and the answer is long, so this call runs for minutes.
+
+    Two things follow. The response is streamed, because the gateway disconnects a
+    non-streaming request that takes this long ("Server disconnected without sending a
+    response", 2026-09-22), and the SDK is told never to retry: a dropped connection may
+    still have been billed, so whether to pay again is `write_read`'s decision, counted in
+    the ledger, not a silent one taken three layers down.
+    """
+
     def __init__(self, settings: Settings, client: openai.AsyncOpenAI | None = None):
         self.client = client or openai.AsyncOpenAI(
-            api_key=settings.ai_gateway_api_key, base_url=f"{settings.ai_gateway_base_url}/v1"
+            api_key=settings.ai_gateway_api_key,
+            base_url=f"{settings.ai_gateway_base_url}/v1",
+            max_retries=0,
+            timeout=settings.account_read_timeout_s,
         )
         self.model = settings.account_read_model
 
     async def complete(self, system: str, user: str) -> tuple[str, int, int]:
-        resp = await self.client.chat.completions.create(
+        stream = await self.client.chat.completions.create(
             model=self.model,
             messages=[
                 {"role": "system", "content": system},
@@ -541,20 +562,32 @@ class GeminiGatewayAccountReadWriter:
             ],
             response_format={"type": "json_object"},
             temperature=0.3,
+            stream=True,
+            stream_options={"include_usage": True},
         )
-        usage = getattr(resp, "usage", None)
-        text = resp.choices[0].message.content or "{}"
-        return (
-            text,
-            getattr(usage, "prompt_tokens", 0) or 0,
-            getattr(usage, "completion_tokens", 0) or 0,
-        )
+        parts: list[str] = []
+        tokens_in = tokens_out = 0
+        async for chunk in stream:
+            if chunk.choices and (piece := chunk.choices[0].delta.content):
+                parts.append(piece)
+            if usage := getattr(chunk, "usage", None):
+                tokens_in = getattr(usage, "prompt_tokens", 0) or tokens_in
+                tokens_out = getattr(usage, "completion_tokens", 0) or tokens_out
+        return "".join(parts) or "{}", tokens_in, tokens_out
 
 
 async def write_read(
-    run: RunResult, writer: AccountReadWriter
+    run: RunResult,
+    writer: AccountReadWriter,
+    ledger: PaidCallLedger | None = None,
 ) -> tuple[Read | None, list[str], int, int]:
-    """One draft plus retries with the problems named; None when the last one still fails."""
+    """One draft plus retries with the problems named; None when the last one still fails.
+
+    `ledger` records each draft before it is requested, so a call that dies without answering
+    is still on the books and the attempts left are counted from what was actually sent.
+    Without it a dropped connection reads as "nothing happened" and the same draft is paid
+    for again (2026-09-22).
+    """
     brief = build_brief(run)
     collapses = entanglement_collapses(run)
     tokens_in = tokens_out = 0
@@ -578,7 +611,15 @@ async def write_read(
                 "and pattern ID exactly as it is, cite only numbers and headlines that appear "
                 "in the brief exactly as written, and return the full JSON object."
             )
-        text, ti, to = await writer.complete(SYSTEM, user)
+        claim = await ledger.claim() if ledger else None
+        try:
+            text, ti, to = await writer.complete(SYSTEM, user)
+        except Exception as exc:  # noqa: BLE001 - the call may have been billed either way
+            if claim:
+                await claim.failed(f"{type(exc).__name__}: {exc}")
+            raise
+        if claim:
+            await claim.done(ti, to)
         draft = text
         tokens_in, tokens_out = tokens_in + ti, tokens_out + to
         try:

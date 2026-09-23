@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import traceback
+from datetime import date
 from uuid import UUID
 
-from cs.core import queue
+from cs.core import model_calls, queue
 from cs.core.config import Settings
 from cs.core.db import Database
 from cs.insights.account_read import repo
@@ -28,6 +29,38 @@ def _default_writer(settings: Settings):
 
 
 WRITER_FACTORY = _default_writer
+
+
+PURPOSE = "account_read.write"
+
+
+class _Ledger:
+    """Books each draft against this account's read before the request goes out."""
+
+    def __init__(self, db, org_id: UUID, ad_account_id: UUID, settings: Settings):
+        self.db, self.org_id, self.settings = db, org_id, settings
+        # One key per account per day: a second run on the same day counts its drafts
+        # against the same budget rather than starting over.
+        self.key = f"{ad_account_id}:{date.today().isoformat()}"
+
+    async def claim(self) -> _Call:
+        c = await model_calls.claim(
+            self.db, self.org_id, PURPOSE, self.key, self.settings.account_read_model
+        )
+        return _Call(self.db, c.id)
+
+
+class _Call:
+    def __init__(self, db, claim_id: UUID):
+        self.db, self.id = db, claim_id
+
+    async def done(self, input_tokens: int, output_tokens: int) -> None:
+        await model_calls.finish(
+            self.db, self.id, input_tokens=input_tokens, output_tokens=output_tokens
+        )
+
+    async def failed(self, error: str) -> None:
+        await model_calls.fail(self.db, self.id, error)
 
 
 @handler(JOB)
@@ -56,7 +89,9 @@ async def compute_account_read(ctx: JobContext) -> None:
             draws=s.account_read_permutation_draws,
             reliability=await measure_reliability(ctx.db, org_id),
         )
-        read, problems, ti, to = await write_read(result, WRITER_FACTORY(s))
+        read, problems, ti, to = await write_read(
+            result, WRITER_FACTORY(s), _Ledger(ctx.db, org_id, ad_account_id, s)
+        )
     except Exception as exc:  # noqa: BLE001 - a failed run must not hide the previous one
         await repo.insert_run(
             ctx.db,
@@ -113,7 +148,9 @@ async def nightly_account_read(db: Database, settings: Settings) -> None:
             JOB,
             {"ad_account_id": str(a["id"])},
             dedup_key=f"account_read:{a['id']}",
-            max_attempts=2,
+            # One attempt: a failure that reaches the writer may already have been billed,
+            # and the ledger, not the queue, decides whether to pay again.
+            max_attempts=1,
         )
     n = await repo.purge_runs(db, 30)
     if n:
