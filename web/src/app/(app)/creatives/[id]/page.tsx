@@ -13,7 +13,7 @@ import { tagStatusLine } from '@/lib/coverage';
 import { blobUrl } from '@/lib/blob-url';
 import { formatters } from '@/lib/format';
 import { requireAuth } from '@/lib/require-auth.server';
-import type { Creative, Scope } from '@/lib/types';
+import type { Creative, MetricWindow, Scope } from '@/lib/types';
 
 // Meta's enum, SHOP_NOW, as the button the viewer saw: Shop now.
 const cta = (slug: string) => slug.charAt(0) + slug.slice(1).toLowerCase().replaceAll('_', ' ');
@@ -21,7 +21,7 @@ const iso = (d: Date) => d.toISOString().slice(0, 10);
 // The tab title and the page both need the creative; one request serves both.
 const getCreative = cache((id: string) => api.creative(id));
 
-type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ scope?: string; ads?: string }> };
+type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ scope?: string; ads?: string; window?: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
@@ -58,6 +58,11 @@ export default async function CreativeDetail({ params, searchParams }: Props) {
   // this one Meta creative, which is what reconciles against a single row in Ads Manager.
   const sp = await searchParams;
   const scope: Scope = sp.scope === 'creative' ? 'creative' : 'footage';
+  // The headline numbers answer "how is this doing now" by default and "what did it ever do"
+  // on request. The diagnosis below stays on the trailing window: it compares this ad with
+  // the account over the same days, and a lifetime comparison would pit an ad that ran in
+  // May against an account baseline that mostly ran later.
+  const window: MetricWindow = sp.window === 'lifetime' ? 'lifetime' : '30d';
   // The daily series ends where the data ends, like every window on the page: the diagnosis's
   // window end (the account's newest day with delivery), not today. Anchored on the wall clock,
   // a paused sync would shrink "90 days" by every day it stays paused.
@@ -94,6 +99,7 @@ export default async function CreativeDetail({ params, searchParams }: Props) {
         scope={scope}
         adsOpen={sp.ads === 'open'}
         summary={summary}
+        window={window}
         diagnosis={diagnosis}
         isVideo={isVideo}
         actId={account?.platform_account_id.replace(/^act_/, '')}

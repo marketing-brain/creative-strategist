@@ -375,6 +375,19 @@ _SUMS_SQL = """
 """
 
 
+async def creative_lifetime_sums(
+    db: Database, org_id: UUID, creative_id: UUID | list[UUID]
+) -> asyncpg.Record:
+    """Every day these creatives ever delivered, with the first and last of them. The page
+    shows this beside the trailing window so an ad that stopped months ago still reads."""
+    return await db.fetchrow(
+        f"SELECT {_SUMS_SQL}, min(day) AS first_day, max(day) AS last_day FROM metric_daily "
+        "WHERE org_id=$1 AND creative_id = ANY($2)",
+        org_id,
+        _ids(creative_id),
+    )
+
+
 async def creative_window_sums(
     db: Database, org_id: UUID, creative_id: UUID | list[UUID], since: date, until: date
 ) -> asyncpg.Record:

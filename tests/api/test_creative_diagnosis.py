@@ -184,3 +184,10 @@ async def test_windows_end_on_the_last_synced_day_not_today(client, db):
 
     s = (await client.get(f"/creatives/{target}/summary", headers=H)).json()
     assert s["window_end"] == d["window_end"] and s["window_start"] == d["window_start"]
+
+    # Lifetime rides along with every summary: 310 of this account's delivered creatives ran
+    # nothing in the trailing window, and a page with only that window shows them as blank.
+    life = s["lifetime"]
+    assert life["spend"] >= s["totals"]["spend"]
+    assert life["first_day"] <= s["window_start"] or life["first_day"] == s["window_start"]
+    assert life["last_day"] is not None
