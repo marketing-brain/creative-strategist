@@ -11,7 +11,6 @@ import { Flag, Mark, markClass } from '@/components/account-read-evidence';
 const METRIC_LABEL: Record<string, string> = {
   hook_rate: 'Hook rate', thruplay_rate: 'Thruplay', link_ctr: 'Link CTR', purchases_per_1k: 'Purchases / 1k', cpa: 'CPA',
 };
-const STAGE: Record<string, string> = { funnel: 'Full funnel', attention: 'Hook', hook: 'Hook', retention: 'Hold', click: 'Click', conversion: 'Purchase' };
 // What each grade means, in the reader's terms. Thresholds live in cs.insights.account_read.stats.grade.
 const GRADE_HELP: Record<string, string> = {
   strong: 'Holds up after correcting for every comparison run',
@@ -118,9 +117,9 @@ function FileCard({ name, unit, f, note }: { name: string; unit: AccountReadUnit
         )}
         {note && <span className="absolute left-1 top-1 rounded-sm bg-background/90 px-1 py-px text-[9px] font-semibold uppercase tracking-[0.06em]">{note}</span>}
       </div>
-      <div className="mt-1.5 line-clamp-2 text-[12px] font-medium leading-4 text-foreground">{name}</div>
+      <div className="mt-2 line-clamp-2 text-[13px] font-medium leading-5 text-foreground">{name}</div>
       {unit && (
-        <div className="mt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">
+        <div className="mt-1 font-mono text-[12px] tabular-nums text-muted-foreground">
           {f.money(unit.spend)} spend
           {cpa != null && <span className="block">{f.money(cpa)} CPA</span>}
         </div>
@@ -142,14 +141,7 @@ function Finding({ v, index, citations, f }: { v: FindingView; index: number; ci
   const shown = v.attributes.slice(0, 2);
   const rest = v.attributes.slice(2);
   return (
-    <article id={`finding-${index + 1}`} className="grid scroll-mt-6 gap-x-8 gap-y-3 border-t border-border py-10 md:grid-cols-[5rem_minmax(0,1fr)_auto]">
-      <div className="flex items-baseline gap-3 md:flex-col md:items-start md:gap-1.5">
-        <span className="font-mono text-2xl font-medium tabular-nums leading-none text-muted-foreground/50">{String(index + 1).padStart(2, '0')}</span>
-        <Mark className="text-muted-foreground">{STAGE[v.layer] ?? v.layer}</Mark>
-        <Mark className={markClass[v.confidence] ?? markClass.thin}>
-          <span title={GRADE_HELP[v.confidence]}>{v.confidence}</span>
-        </Mark>
-      </div>
+    <article id={`finding-${index + 1}`} className="grid scroll-mt-6 gap-x-8 gap-y-3 border-t border-border py-10 md:grid-cols-[minmax(0,1fr)_auto]">
       <div className="min-w-0 max-w-3xl space-y-5">
         <h3 className="max-w-[34ch] text-xl font-semibold leading-snug tracking-tight text-balance md:text-[22px]">{v.title}</h3>
 
@@ -201,10 +193,11 @@ function Finding({ v, index, citations, f }: { v: FindingView; index: number; ci
       {/* The ads sit beside the claim, not under it: a reader checking "which videos are
           these?" should not have to scroll past the evidence to find out. */}
       {(v.exemplars.length > 0 || v.exception?.unit) && (
-        <div className="md:w-[16rem]">
+        <div className="md:w-[22rem]">
           <Mark className="text-muted-foreground">Watch these</Mark>
-          {/* Three across, one row: the set of ads a finding rests on, seen at once. */}
-          <div className="mt-2 grid grid-cols-3 gap-2">
+          {/* Three across, one row, on the width the removed rail gave back: big enough to
+              recognise the ad from its first frame rather than only from its name. */}
+          <div className="mt-2 grid grid-cols-3 gap-3">
             {v.exemplars.map((e) => (
               <FileCard key={e.name} name={e.name} unit={e.unit} f={f} />
             ))}
