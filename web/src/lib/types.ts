@@ -26,8 +26,7 @@ export type Scope = 'footage' | 'creative';
 // Headline numbers for the diagnosis window, and the same numbers pooled over every other
 // creative of the format in the account.
 export type SummaryRates = { spend: number; impressions: number; link_clicks: number; purchases: number; cpm: number | null; hook_rate: number | null; link_ctr: number | null; click_to_purchase: number | null; cpa: number | null; aov: number | null; roas: number | null };
-export type LifetimeRates = SummaryRates & { first_day: string | null; last_day: string | null };
-export type CreativeSummary = { window_start: string; window_end: string; totals: SummaryRates; baseline: SummaryRates; baseline_creatives: number; lifetime: LifetimeRates };
+export type CreativeSummary = { window_start: string; window_end: string; totals: SummaryRates; baseline: SummaryRates; baseline_creatives: number };
 // A graded account-wide main effect whose cell includes this creative's file. Evidence about
 // the account, shown beside the creative; it never measures the attribute within the file.
 export type CreativePattern = { has: boolean; idea: number; dimension: string; value: string; metric: 'hook_rate' | 'link_ctr' | 'thruplay_rate' | 'cpa' | 'purchases_per_1k'; grade: 'strong' | 'suggestive'; change: number; n_cell: number; n_complement: number; cell_value: number | null; comp_value: number | null; bin_edges: [number, number] | null; confounds: string[]; prescribable?: boolean; window_start?: string; window_end?: string };

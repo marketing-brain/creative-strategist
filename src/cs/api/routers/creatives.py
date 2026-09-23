@@ -362,11 +362,9 @@ async def creative_summary(
     over every other creative of the format in the account. Read from the same sums the
     diagnosis reads, so the header and the panel below it cannot disagree.
 
-    `lifetime` rides along with every response. 310 of this account's 758 delivered
-    creatives ran nothing in the last thirty days -- one stopped in June carrying $1,122 --
-    and a page whose only window is the trailing month shows them as blank rather than as
-    finished. It is also the window the account read cites, so a finding's exemplar and the
-    page it links to can be reconciled."""
+    The window ends on this ad's own last delivered day (see `_until`), so a creative that
+    stopped weeks ago reads on the same basis as one running today. That is what fixed the
+    blank pages; an all-time total beside it was a second basis to reconcile and is gone."""
     c = await repo.get_creative(db, auth.org_id, creative_id)
     if not c:
         raise HTTPException(404)
@@ -377,18 +375,12 @@ async def creative_summary(
     base = await repo.baseline_window_sums(
         db, auth.org_id, c["ad_account_id"], c["format"], ids, since, until
     )
-    ever = await repo.creative_lifetime_sums(db, auth.org_id, ids)
     return {
         "window_start": since.isoformat(),
         "window_end": until.isoformat(),
         "totals": _rates(mine),
         "baseline": _rates(base),
         "baseline_creatives": int(base["creatives"] or 0),
-        "lifetime": {
-            **_rates(ever),
-            "first_day": ever["first_day"].isoformat() if ever["first_day"] else None,
-            "last_day": ever["last_day"].isoformat() if ever["last_day"] else None,
-        },
     }
 
 

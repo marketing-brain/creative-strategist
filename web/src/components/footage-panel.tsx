@@ -28,12 +28,6 @@ const day = (iso: string) => new Date(`${iso.slice(0, 10)}T00:00:00Z`);
 const fmtDay = (iso: string | null) =>
   iso ? day(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '';
 
-/** "Jun 2–19" within a month, "May 21 – Jun 19" across one. */
-const fmtSpan = (from: string, to: string) =>
-  day(from).getUTCMonth() === day(to).getUTCMonth()
-    ? `${fmtDay(from)}–${day(to).getUTCDate()}`
-    : `${fmtDay(from)} – ${fmtDay(to)}`;
-
 function Covers({ footage, mine }: { footage: Footage; mine: FootageAd[] }) {
   // The toggle beside this says whether the numbers are pooled or scoped, and the table
   // below names every ad and campaign. All that is left to say is how many there are.
@@ -117,10 +111,6 @@ export function ScopePanel({
   const switchable = footage.creative_ids.length > 1;
   const pooled = scope === 'footage' || !switchable;
   const mine = pooled ? ads : ads.filter((a) => a.creative_id === creativeId);
-  // The window ends on this ad's last delivered day, not the account's, so a creative that
-  // stopped in June reads on the same basis as one running today: its last thirty delivered
-  // days. Lifetime rides along in the note for provenance, not as a second mode.
-  const life = summary.lifetime;
   const { totals: t, baseline: b } = summary;
   const seen = t.impressions >= IMPRESSION_FLOOR && b.impressions >= IMPRESSION_FLOOR;
   const clicked = seen && t.link_clicks >= CLICK_FLOOR && b.link_clicks >= CLICK_FLOOR;
@@ -132,25 +122,14 @@ export function ScopePanel({
   // Hold rate comes from the diagnosis, not the account pool: it is only fair against videos
   // of similar length, and the header must show the same comparison the retention layer does.
   const hold = diagnosis.tiers.find((tier) => tier.key === 'retention')?.metrics.find((m) => m.key === 'hold_rate');
-  // Every window on this page ends on the ad's own last delivered day, so the dates differ
-  // from one creative to the next and belong beside the numbers rather than in prose under
-  // them: one page means May, the next means September.
-  // Four facts, one line: which days, whether that is all of them, whether it still runs,
-  // and what it is measured against. Everything else about the window is inference the
-  // reader should not have to make.
-  const whole = life.first_day != null && life.first_day >= summary.window_start;
+  // One rule for the whole page, said once: the last thirty days this ad delivered. Dates
+  // and an all-time total were two more numbers to reconcile, and the rule they were trying
+  // to convey is shorter than they were. A stopped ad still says when, or June's numbers
+  // read as this week's.
   const running = ads.some((a) => a.status === 'ACTIVE');
-  // All-time is worth a word only when there is materially more of it than the window
-  // shows. An ad that spent $18 in its whole life does not need "$18 all time" beside a
-  // window that already covers nearly all of it.
-  const more = !whole && life.spend >= t.spend * 1.25;
-  const covers = [
-    fmtSpan(summary.window_start, summary.window_end),
-    more ? `${fmt.money(life.spend)} all time` : null,
-    running ? null : 'stopped',
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  const covers = running
+    ? 'Last 30 active days'
+    : `Last 30 active days, to ${fmtDay(summary.window_end)} · stopped`;
   const note = seen
     ? `vs ${summary.baseline_creatives} other ${isVideo ? 'videos' : 'creatives'}, same days`
     : `under ${IMPRESSION_FLOOR.toLocaleString('en-US')} impressions, too little to compare`;
@@ -187,10 +166,7 @@ export function ScopePanel({
           <Covers footage={footage} mine={mine} />
         </p>
         <span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-border" />
-        <p
-          className="min-w-0 tabular-nums"
-          title={whole ? 'every day this ad delivered' : 'its last 30 delivered days'}
-        >
+        <p className="min-w-0" title="the last 30 days this ad delivered, not the last 30 on the calendar">
           {covers}
         </p>
       </div>

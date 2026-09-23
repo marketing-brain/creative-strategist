@@ -187,7 +187,5 @@ async def test_windows_end_on_the_last_synced_day_not_today(client, db):
 
     # The window ends on the ad's own last delivered day, so an ad that stopped weeks ago
     # still reads: anchored on the account's, 310 of 758 delivered creatives showed blank.
-    life = s["lifetime"]
-    assert s["window_end"] == life["last_day"]
-    assert life["spend"] >= s["totals"]["spend"]
-    assert life["first_day"] is not None
+    last = await db.fetchval("SELECT max(day) FROM metric_daily WHERE creative_id = $1", target)
+    assert s["window_end"] == last.isoformat()
