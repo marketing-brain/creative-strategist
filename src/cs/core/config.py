@@ -61,7 +61,6 @@ class Settings(BaseSettings):
     # No cap on how many files the sweep queues: what is worth tagging is decided by the
     # gate above, and tagging is claimed only when no other job is waiting
     # (cs.core.queue.BACKGROUND_JOB_TYPES), so a long backlog delays nothing else.
-    insights_model: str = "google/gemini-2.5-flash-lite"
     # Open-vocabulary merge (spec 2026-09-16-vocab-merge-design.md): slug embeddings for
     # candidate recall. pgvector HNSW caps at 2000 dims; 1536 keeps the index option open.
     embedding_model: str = "google/gemini-embedding-2"
@@ -87,9 +86,13 @@ class Settings(BaseSettings):
     # decided by which shuffles came up; at 10,000 it is 0.0001, and since the shuffles are
     # now shared across a run it costs seconds rather than minutes.
     account_read_permutation_draws: int = 10_000
-    # The account read's writer. It reasons over a long brief of graded comparisons, so the
-    # stronger tier.
-    account_read_model: str = "google/gemini-3-flash"
+    # The account read's writer. Every other consequential job in this project runs on the
+    # full 2.5 flash tier -- the vocab judge moved there after flash-lite over-merged -- and
+    # the read was the one thing left on the 3 series for no recorded reason. Its drafts are
+    # machine-checked before they are stored (cs.insights.account_read.writer.check_read),
+    # so a weaker writer shows up as failed gates and extra attempts, not as a quiet drop in
+    # quality: switch back if the attempts per run rise.
+    account_read_model: str = "google/gemini-2.5-flash"
     # One draft can run for minutes on a 23k-token brief. The client waits this long and
     # never retries on its own; a dropped call may already have been billed.
     account_read_timeout_s: float = 900.0
