@@ -165,13 +165,15 @@ export function ScopePanel({
   // Hold rate comes from the diagnosis, not the account pool: it is only fair against videos
   // of similar length, and the header must show the same comparison the retention layer does.
   const hold = diagnosis.tiers.find((tier) => tier.key === 'retention')?.metrics.find((m) => m.key === 'hold_rate');
+  // Every window on this page ends on the ad's own last delivered day, so the dates differ
+  // from one creative to the next and belong beside the numbers rather than in prose under
+  // them: one page means May, the next means September.
   const span = `${fmtDay(summary.window_start)} – ${fmtDay(summary.window_end)}`;
   const whole = life.first_day != null && life.first_day >= summary.window_start;
-  const covers = whole ? `${span} · everything it ran` : `${span} · its last 30 delivered days`;
-  const account = seen
-    ? `account over the same days = ${summary.baseline_creatives} other ${isVideo ? 'videos' : 'creatives'}`
-    : `under ${IMPRESSION_FLOOR.toLocaleString('en-US')} impressions, too little to compare with the account`;
-  const note = whole ? `${covers} · ${account}` : `${covers} · ${fmt.money(life.spend)} over its whole run · ${account}`;
+  const running = ads.some((a) => a.status === 'ACTIVE');
+  const note = seen
+    ? `Compared with ${summary.baseline_creatives} other ${isVideo ? 'videos' : 'creatives'} over the same days`
+    : `Under ${IMPRESSION_FLOOR.toLocaleString('en-US')} impressions: too little to compare with the account`;
   // To a media buyer "creative" means the video, so the narrow reading is named by what it
   // actually narrows to: the ad, or ads, under this one Meta creative.
   const own = ads.filter((a) => a.creative_id === creativeId).length;
@@ -184,6 +186,15 @@ export function ScopePanel({
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-2.5">
         <p className="max-w-prose min-w-0 text-sm text-muted-foreground">
           <Covers footage={footage} mine={mine} pooled={pooled} />
+        </p>
+        <p className="flex shrink-0 items-baseline gap-2 text-sm">
+          {!running && <span className="font-medium text-muted-foreground">Stopped</span>}
+          <span className="font-mono tabular-nums" title={whole ? 'every day this ad delivered' : 'its last 30 delivered days'}>
+            {span}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {whole ? 'its whole run' : `30 days · ${fmt.money(life.spend)} over its whole run`}
+          </span>
         </p>
         {switchable && (
           <nav aria-label="Which ads the numbers cover" className="inline-flex shrink-0 rounded-lg border border-border bg-muted p-0.5 text-sm">
