@@ -199,9 +199,11 @@ function Finding({ v, index, citations, f }: { v: FindingView; index: number; ci
       {/* The ads sit beside the claim, not under it: a reader checking "which videos are
           these?" should not have to scroll past the evidence to find out. */}
       {(v.exemplars.length > 0 || v.exception?.unit) && (
-        <div className="md:w-[7.5rem]">
+        <div className="md:w-[14.5rem]">
           <Mark className="text-muted-foreground">Watch these</Mark>
-          <div className="-mx-1 mt-2 flex gap-3 overflow-x-auto px-1 pb-1 md:flex-col md:overflow-visible">
+          {/* Two across, wrapping to a second row: a column of three reads as a list to
+              scroll, a row of three reads as the set of ads this is about. */}
+          <div className="-mx-1 mt-2 flex flex-wrap gap-3 overflow-x-auto px-1 pb-1 md:overflow-visible">
             {v.exemplars.map((e) => (
               <FileCard key={e.name} name={e.name} unit={e.unit} f={f} />
             ))}
