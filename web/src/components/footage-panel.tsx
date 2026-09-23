@@ -163,18 +163,11 @@ export function ScopePanel({
   ];
   return (
     <section aria-label="What this page covers" id="ads" className="scroll-mt-16 overflow-hidden rounded-xl border border-border bg-card">
-      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-2.5">
-        <p className="max-w-prose min-w-0 text-sm text-muted-foreground">
-          <Covers footage={footage} mine={mine} />
-        </p>
-        <p
-          className="shrink-0 text-sm tabular-nums text-muted-foreground"
-          title={whole ? 'every day this ad delivered' : 'its last 30 delivered days'}
-        >
-          {covers}
-        </p>
+      {/* Toggle first, then what it covers: the control, then the consequence. The two
+          readings sit together with a hairline between them rather than pushed apart. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 text-sm text-muted-foreground">
         {switchable && (
-          <nav aria-label="Which ads the numbers cover" className="inline-flex shrink-0 rounded-lg border border-border bg-muted p-0.5 text-sm">
+          <nav aria-label="Which ads the numbers cover" className="inline-flex shrink-0 rounded-lg border border-border bg-muted p-0.5">
             {options.map(([value, label]) => (
               <Link
                 key={value}
@@ -190,6 +183,16 @@ export function ScopePanel({
             ))}
           </nav>
         )}
+        <p className="min-w-0">
+          <Covers footage={footage} mine={mine} />
+        </p>
+        <span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-border" />
+        <p
+          className="min-w-0 tabular-nums"
+          title={whole ? 'every day this ad delivered' : 'its last 30 delivered days'}
+        >
+          {covers}
+        </p>
       </div>
       {/* One row, always: the funnel reads left to right, every card an equal share. */}
       <div className="flex gap-px border-y border-border bg-border">
