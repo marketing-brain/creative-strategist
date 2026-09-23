@@ -43,10 +43,8 @@ class _Ledger:
         # against the same budget rather than starting over.
         self.key = f"{ad_account_id}:{date.today().isoformat()}"
 
-    async def claim(self) -> _Call:
-        c = await model_calls.claim(
-            self.db, self.org_id, PURPOSE, self.key, self.settings.account_read_model
-        )
+    async def claim(self, model: str) -> _Call:
+        c = await model_calls.claim(self.db, self.org_id, PURPOSE, self.key, model)
         return _Call(self.db, c.id)
 
 

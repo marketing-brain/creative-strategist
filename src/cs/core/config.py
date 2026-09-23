@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     # that have to match. It stays on the newer tier even though every other job runs on 2.5,
     # because consistency is not worth a worse read.
     account_read_model: str = "google/gemini-3-flash"
+    # Corrections run on a model that does not deliberate. Measured 2026-09-23 on the
+    # gateway: gemini-3-flash spends ~96% of its output on reasoning whatever it is told,
+    # so a correction cost 65,000 output tokens and five minutes to apply an edit the gates
+    # had already named; gemini-3.1-flash-lite returns the same little JSON with none.
+    account_read_fix_model: str = "google/gemini-3.1-flash-lite"
     # One draft can run for minutes on a 23k-token brief. The client waits this long and
     # never retries on its own; a dropped call may already have been billed.
     account_read_timeout_s: float = 900.0

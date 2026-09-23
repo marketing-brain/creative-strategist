@@ -7,12 +7,22 @@ class FakeAccountReadWriter:
     def __init__(self, texts: list[str]):
         self.texts = list(texts)
         self.calls: list[tuple[str, str]] = []
-        self.reasoning: list[dict | None] = []
+        self.kinds: list[str] = []
 
-    async def complete(
-        self, system: str, user: str, reasoning: dict | None = None
-    ) -> tuple[str, int, int]:
+    def model_for(self, call) -> str:
+        return "fake-fix" if call == self.correct else "fake-draft"
+
+    async def complete(self, system: str, user: str) -> tuple[str, int, int]:
+        return await self._answer(system, user, "complete")
+
+    async def draft(self, system: str, user: str) -> tuple[str, int, int]:
+        return await self._answer(system, user, "draft")
+
+    async def correct(self, system: str, user: str) -> tuple[str, int, int]:
+        return await self._answer(system, user, "correct")
+
+    async def _answer(self, system: str, user: str, kind: str) -> tuple[str, int, int]:
         self.calls.append((system, user))
-        self.reasoning.append(reasoning)
+        self.kinds.append(kind)
         text = self.texts.pop(0) if self.texts else "{}"
         return text, 10, 5

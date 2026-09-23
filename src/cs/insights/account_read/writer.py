@@ -29,7 +29,6 @@ MAX_ATTEMPTS = 4  # first draft plus three retries with the problems named
 # and attention, not a target: 22 surviving results on the 170-file panel were 11 ideas, and
 # a read that told four of their stories left seven unmentioned.
 MAX_FINDINGS = 12
-NO_REASONING = {"enabled": False}
 GRADE_ORDER = {"strong": 0, "suggestive": 1, "directional": 2}
 
 
@@ -552,9 +551,15 @@ def check_money(read: Read, tests: list[Test]) -> list[str]:
 
 
 class AccountReadWriter(Protocol):
-    async def complete(
-        self, system: str, user: str, reasoning: dict | None = None
-    ) -> tuple[str, int, int]: ...
+    """Two calls, because they are two jobs. The draft reads 23k tokens of graded
+    comparisons and decides what they mean; a correction applies edits that have already
+    been named and located. They are configured separately."""
+
+    async def draft(self, system: str, user: str) -> tuple[str, int, int]: ...
+    async def correct(self, system: str, user: str) -> tuple[str, int, int]: ...
+    def model_for(self, call) -> str:
+        """The model `call` will use, for the ledger to record before it runs."""
+        ...
 
 
 class PaidCall(Protocol):
@@ -563,7 +568,7 @@ class PaidCall(Protocol):
 
 
 class PaidCallLedger(Protocol):
-    async def claim(self) -> PaidCall: ...
+    async def claim(self, model: str) -> PaidCall: ...
 
 
 class GeminiGatewayAccountReadWriter:
@@ -584,14 +589,38 @@ class GeminiGatewayAccountReadWriter:
             timeout=settings.account_read_timeout_s,
         )
         self.model = settings.account_read_model
+        self.fix_model = settings.account_read_fix_model
 
-    async def complete(
-        self, system: str, user: str, reasoning: dict | None = None
-    ) -> tuple[str, int, int]:
-        """`reasoning` is the gateway's own field (mapped to Gemini's thinkingConfig);
-        leaving it None takes the model's default, which is to think."""
+    async def draft(self, system: str, user: str) -> tuple[str, int, int]:
+        """The read itself. Thinking is left at the model's default: its deliberation is
+        about seven thousand tokens and it is the part worth paying for."""
+        return await self._call(self.model, system, user)
+
+    async def correct(self, system: str, user: str) -> tuple[str, int, int]:
+        """A correction, on a model that does not deliberate.
+
+        Measured on 2026-09-23: gemini-3-flash spends ~96% of its output on reasoning and
+        ignores every attempt to stop -- `{"enabled": false}` and `{"effort": "none"}` both
+        left it thinking, and `{"effort": "low"}` made it fourteen times worse. That is why
+        a correction cost 65,000 output tokens to apply a named edit to a 1,800-token
+        answer, and why three runs died when the response outlasted the connection.
+
+        gemini-3.1-flash-lite does not think unless asked -- and asking is exactly what
+        sending the reasoning field does, so nothing is sent.
+        """
+        return await self._call(self.fix_model, system, user)
+
+    async def complete(self, system: str, user: str) -> tuple[str, int, int]:
+        """One call on the draft model, for callers with their own loop -- the ask box maps
+        a question, answers it, and retries once (cs.insights.account_read.ask)."""
+        return await self._call(self.model, system, user)
+
+    def model_for(self, call) -> str:
+        return self.fix_model if call == self.correct else self.model
+
+    async def _call(self, model: str, system: str, user: str) -> tuple[str, int, int]:
         stream = await self.client.chat.completions.create(
-            model=self.model,
+            model=model,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -600,7 +629,6 @@ class GeminiGatewayAccountReadWriter:
             temperature=0.3,
             stream=True,
             stream_options={"include_usage": True},
-            extra_body={"reasoning": reasoning} if reasoning else {},
         )
         parts: list[str] = []
         tokens_in = tokens_out = 0
@@ -648,12 +676,10 @@ async def write_read(
                 "and pattern ID exactly as it is, cite only numbers and headlines that appear "
                 "in the brief exactly as written, and return the full JSON object."
             )
-        claim = await ledger.claim() if ledger else None
+        call = writer.correct if feedback else writer.draft
+        claim = await ledger.claim(writer.model_for(call)) if ledger else None
         try:
-            # A correction applies edits the gates have already named and located; there is
-            # nothing left to work out. Thinking is what made these calls 65,000 output
-            # tokens against a 1,800-token answer, and five minutes against forty seconds.
-            text, ti, to = await writer.complete(SYSTEM, user, NO_REASONING if feedback else None)
+            text, ti, to = await call(SYSTEM, user)
         except Exception as exc:  # noqa: BLE001 - the call may have been billed either way
             if claim:
                 await claim.failed(f"{type(exc).__name__}: {exc}")

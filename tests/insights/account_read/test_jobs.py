@@ -72,7 +72,16 @@ async def test_job_stores_done_run_with_read(
     monkeypatch.setattr(settings, "account_read_permutation_draws", 50)
 
     class Adaptive(FakeAccountReadWriter):  # messenger splits 6/6, so P1 always exists
-        async def complete(self, system, user, reasoning=None):
+        def model_for(self, call):
+            return "m"
+
+        async def draft(self, system, user):
+            return await self.complete(system, user)
+
+        async def correct(self, system, user):
+            return await self.complete(system, user)
+
+        async def complete(self, system, user):
             return _good_read_for(heads), 10, 5
 
     monkeypatch.setattr(jobs, "WRITER_FACTORY", lambda s: Adaptive([]))
