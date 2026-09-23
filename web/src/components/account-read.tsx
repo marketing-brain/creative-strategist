@@ -142,7 +142,7 @@ function Finding({ v, index, citations, f }: { v: FindingView; index: number; ci
   const shown = v.attributes.slice(0, 2);
   const rest = v.attributes.slice(2);
   return (
-    <article id={`finding-${index + 1}`} className="grid scroll-mt-6 gap-x-8 gap-y-3 border-t border-border py-10 md:grid-cols-[5rem_minmax(0,1fr)]">
+    <article id={`finding-${index + 1}`} className="grid scroll-mt-6 gap-x-8 gap-y-3 border-t border-border py-10 md:grid-cols-[5rem_minmax(0,1fr)_auto]">
       <div className="flex items-baseline gap-3 md:flex-col md:items-start md:gap-1.5">
         <span className="font-mono text-2xl font-medium tabular-nums leading-none text-muted-foreground/50">{String(index + 1).padStart(2, '0')}</span>
         <Mark className="text-muted-foreground">{STAGE[v.layer] ?? v.layer}</Mark>
@@ -178,22 +178,13 @@ function Finding({ v, index, citations, f }: { v: FindingView; index: number; ci
           {v.mechanism}
         </p>
 
-        <div>
-          <Mark className="text-muted-foreground">Watch these</Mark>
-          <div className="-mx-1 mt-2 flex gap-3 overflow-x-auto px-1 pb-1">
-            {v.exemplars.map((e) => (
-              <FileCard key={e.name} name={e.name} unit={e.unit} f={f} />
-            ))}
-            {v.exception?.unit && <FileCard name={v.exception.name} unit={v.exception.unit} f={f} note="Exception" />}
-          </div>
-          {/* The writer gives the exception as a sentence more often than as a bare ad name. */}
-          {v.exception && !v.exception.unit && (
-            <p className="mt-3 max-w-[68ch] text-[14px] leading-6 text-muted-foreground">
-              <span className="font-medium text-foreground">Except </span>
-              {v.exception.name}
-            </p>
-          )}
-        </div>
+        {/* The writer gives the exception as a sentence more often than as a bare ad name. */}
+        {v.exception && !v.exception.unit && (
+          <p className="max-w-[68ch] text-[14px] leading-6 text-muted-foreground">
+            <span className="font-medium text-foreground">Except </span>
+            {v.exception.name}
+          </p>
+        )}
 
         <details className="group/why">
           <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
@@ -205,6 +196,19 @@ function Finding({ v, index, citations, f }: { v: FindingView; index: number; ci
           </p>
         </details>
       </div>
+      {/* The ads sit beside the claim, not under it: a reader checking "which videos are
+          these?" should not have to scroll past the evidence to find out. */}
+      {(v.exemplars.length > 0 || v.exception?.unit) && (
+        <div className="md:w-[7.5rem]">
+          <Mark className="text-muted-foreground">Watch these</Mark>
+          <div className="-mx-1 mt-2 flex gap-3 overflow-x-auto px-1 pb-1 md:flex-col md:overflow-visible">
+            {v.exemplars.map((e) => (
+              <FileCard key={e.name} name={e.name} unit={e.unit} f={f} />
+            ))}
+            {v.exception?.unit && <FileCard name={v.exception.name} unit={v.exception.unit} f={f} note="Exception" />}
+          </div>
+        </div>
+      )}
     </article>
   );
 }
