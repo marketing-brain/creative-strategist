@@ -53,6 +53,7 @@ async def account_read(
         # on the other funnel metrics. The full list stays in the database.
         "tests": page.get("tests", []),
         "sibling_tests": page.get("sibling_tests", []),
+        "families": page.get("families", []),
         "units": units,
         # This run's own files, both sides measured from today's data.
         "coverage": await account_read_repo.coverage(

@@ -22,6 +22,10 @@ from cs.tagging.taxonomy import load_taxonomy
 
 GRADE_RANK = {"strong": 0, "suggestive": 1, "directional": 2, "thin": 3}
 MIN_GROUP = 10
+# Two results over the same files are one idea, however many metrics measured it: on the
+# 170-file panel, 22 surviving results were 11 ideas, seven of them one format (a person
+# talking to camera, branded, ending on a CTA card) counted seven ways.
+SAME_FILES = 0.6
 SECOND_SEED = 8  # the run grades itself twice; a grade that moves between them is not one
 
 
@@ -247,6 +251,36 @@ def retention_by_reveal(units: list[Unit]) -> dict[str, dict]:
         ppk = pooled(grp, "purchases", "impressions")
         row["ppk"] = round(1000 * ppk, 2) if ppk else None
         out[b] = row
+    return out
+
+
+def _jaccard(a: list[str], b: list[str]) -> float:
+    x, y = set(a), set(b)
+    return len(x & y) / len(x | y) if x | y else 0.0
+
+
+def survivors(tests: list[Test]) -> list[Test]:
+    """Account-wide results that clear every bar this run applies: they pass the
+    false-discovery correction, carry no confound flag, and kept their grade when the run
+    graded itself a second time on different shuffles."""
+    return [
+        t
+        for t in tests
+        if t.group is None and t.grade == "strong" and not t.confounds and not t.grade_unstable
+    ]
+
+
+def ideas(tests: list[Test]) -> list[list[Test]]:
+    """The surviving results, grouped by the files they describe. Biggest effect first,
+    within a group and between them."""
+    out: list[list[Test]] = []
+    for t in sorted(survivors(tests), key=lambda t: -abs(t.change)):
+        for g in out:
+            if _jaccard(t.cell_shas, g[0].cell_shas) >= SAME_FILES:
+                g.append(t)
+                break
+        else:
+            out.append([t])
     return out
 
 

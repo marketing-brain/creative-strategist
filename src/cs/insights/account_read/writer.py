@@ -11,6 +11,7 @@ from typing import Protocol
 import openai
 
 from cs.core.config import Settings
+from cs.insights.account_read.patterns import ideas
 from cs.insights.account_read.types import Finding, Read, RunResult, Test
 
 METRIC_NAME = {
@@ -24,6 +25,10 @@ MAX_MAIN_UNFLAGGED, MAX_MAIN_FLAGGED, MAX_UNITS_LISTED = 60, 20, 60
 # Interactions are numerous; the brief carries the sharpest lines per group, strongest groups first.
 MAX_GROUPS, MAX_LINES_PER_GROUP = 20, 10
 MAX_ATTEMPTS = 4  # first draft plus three retries with the problems named
+# One finding per idea the run found, not a fixed three to six. The cap is a bound on cost
+# and attention, not a target: 22 surviving results on the 170-file panel were 11 ideas, and
+# a read that told four of their stories left seven unmentioned.
+MAX_FINDINGS = 12
 GRADE_ORDER = {"strong": 0, "suggestive": 1, "directional": 2}
 
 
@@ -181,6 +186,20 @@ def build_brief(run: RunResult) -> str:
         for x in run.stratified
     ]
 
+    # What the run found, grouped: one finding per idea, in this order.
+    idea_blocks = []
+    for n, group in enumerate(ideas(run.tests)[:MAX_FINDINGS], start=1):
+        lines = [f"  {pattern_line(ids[id(t)], t)}" for t in group]
+        files = sorted(
+            (by_sha[x] for x in group[0].cell_shas if x in by_sha), key=lambda u: -u.spend
+        )
+        examples = "; ".join(f'"{u.headline}"' for u in files[:3])
+        idea_blocks.append(
+            f"\nIDEA {n} ({len(group)} result{'s' if len(group) > 1 else ''}, "
+            f"{group[0].n_cell} files):\n" + "\n".join(lines) + f"\n    files: {examples}"
+        )
+    idea_text = "\n".join(idea_blocks) or "\n  none"
+
     ret = []
     for b, r in run.retention_by_reveal.items():
         pct = lambda v: f"{100 * (v or 0):.1f}%"  # noqa: E731
@@ -194,6 +213,7 @@ def build_brief(run: RunResult) -> str:
         )
 
     nl = "\n"
+    n_ideas = len(idea_blocks)
     return f"""ACCOUNT BRIEF
 
 Scope: one Meta ad account, video ads, lifetime metrics {s.get("first_day")} to {s.get("last_day")}.
@@ -202,6 +222,12 @@ Metrics: hook rate = 3-second views / impressions; thruplay rate = thruplays / p
 
 === THE ADS (top {len(top_units)} files by spend; what each one is) ===
 {nl.join(record)}
+
+=== THE IDEAS: what held up, grouped ({n_ideas}) ===
+Each is one idea: results over the same files, however many metrics measured it. Every one of
+these passed the correction across the whole run, carries no confound flag, and kept its grade
+when the run graded itself again on different shuffles. Write one finding per idea, in order.
+{idea_text}
 
 === GRADED PATTERNS, whole account (unflagged first) ===
 {nl.join(unflagged) or "  none"}
@@ -235,7 +261,7 @@ RULES
 - A finding's confidence is the grade of the weakest graded comparison it cites (lines showing no clear difference aside), or "mixed". One strong line does not make a finding strong.
 - Write only about what the brief measures: the ad, the view, the click, and purchases attributed to the ad. It holds nothing on the landing page, cart or checkout, so make no claim about them; ask for that data in data_needed instead.
 - Every finding must have: a mechanism (drawn from the qualitative record, in hypothesis language), two or three exemplar files named by their exact headline as written in the brief, an exception where one exists (a file in the cell that breaks the pattern or a file outside it that behaves like it), and why_non_obvious: one sentence on what the metric table alone could not show.
-- Rank findings by decision value for the next ad, not by p-value. Three to six findings. Fewer and sharper beats coverage.
+- THE IDEAS section lists what the run found, already grouped: results over the same files are one idea, however many metrics measured it. Write one finding per idea, in the order given, and do not merge two of them or split one. If an idea is too thin to say anything useful about, say that in one sentence rather than dropping it.
 - The overview answers, in prose and before any number: what does this account's creative actually do, and where is it wrong about itself?
 - "No signal" and "too few files" are different answers. Report both plainly.
 - Hypothesis language: "is consistent with", "one plausible explanation is". These are correlations from an optimizer-driven account, not a controlled test.
@@ -243,7 +269,7 @@ RULES
 
 OUTPUT (JSON)
 - overview: one paragraph.
-- findings: 3 to 6 objects, each with title (plain statement, under 12 words), layer (attention | retention | click | conversion | funnel), paragraph (3 to 6 sentences, evidence with exact numbers and file counts, then interpretation), mechanism (1 to 2 sentences), exemplars (2 to 3 exact headlines), exception (1 sentence, or "none found"), why_non_obvious (1 sentence), pattern_ids, confidence (strong | suggestive | directional | mixed).
+- findings: one object per idea in THE IDEAS, in that order, each with title (plain statement, under 12 words), layer (attention | retention | click | conversion | funnel), paragraph (3 to 6 sentences, evidence with exact numbers and file counts, then interpretation), mechanism (1 to 2 sentences), exemplars (2 to 3 exact headlines), exception (1 sentence, or "none found"), why_non_obvious (1 sentence), pattern_ids, confidence (strong | suggestive | directional | mixed).
 - entangled: one paragraph naming attributes that cannot be separated with this data and what that means for reading the findings.
 - no_evidence: one paragraph on what showed no difference and what could not be tested, naming attributes.
 - next_tests: 3 to 5 one-sentence tests that follow from the findings, each naming the attribute to vary and the metric expected to move. The only place recommendations belong.
