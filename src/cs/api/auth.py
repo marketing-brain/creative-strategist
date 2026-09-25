@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 from functools import lru_cache
 from uuid import UUID
 
@@ -28,6 +29,9 @@ def _jwks_client(url: str) -> jwt.PyJWKClient:
     return jwt.PyJWKClient(url)
 
 
+CLOCK_LEEWAY = timedelta(seconds=60)
+
+
 def _clerk_claims(request: Request, settings: Settings) -> tuple[str, str, str]:
     header = request.headers.get("authorization", "")
     if not header.lower().startswith("bearer "):
@@ -35,7 +39,18 @@ def _clerk_claims(request: Request, settings: Settings) -> tuple[str, str, str]:
     token = header.split(" ", 1)[1]
     try:
         key = _jwks_client(settings.clerk_jwks_url).get_signing_key_from_jwt(token).key
-        claims = jwt.decode(token, key, algorithms=["RS256"], issuer=settings.clerk_issuer or None)
+        # Clerk mints a token on its clock and this box validates on its own. A second of
+        # drift -- routine after a sleep/wake or a date rollover -- made every request fail
+        # with "The token is not yet valid (iat)" until the clocks converged, which looks to
+        # the user like the whole app is down. The tolerance is small enough that it changes
+        # nothing about expiry in practice.
+        claims = jwt.decode(
+            token,
+            key,
+            algorithms=["RS256"],
+            issuer=settings.clerk_issuer or None,
+            leeway=CLOCK_LEEWAY,
+        )
     except jwt.PyJWTError as exc:
         raise HTTPException(401, f"invalid token: {exc}") from exc
     except Exception as exc:  # noqa: BLE001 - JWKS fetch failures are not the caller's fault

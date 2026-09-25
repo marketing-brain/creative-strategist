@@ -98,7 +98,7 @@ export function BackToGrid() {
   useEffect(() => {
     try {
       const saved = sessionStorage.getItem(GRID_URL_KEY);
-      if (saved?.startsWith('/creatives')) setHref(saved);
+      if (saved && ['/creatives', '/campaigns'].some((p) => saved.startsWith(p))) setHref(saved);
     } catch {
       /* keep the default */
     }
@@ -109,7 +109,7 @@ export function BackToGrid() {
       className="inline-flex items-center gap-1.5 rounded-sm text-sm text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
     >
       <ArrowLeft className="size-4" aria-hidden="true" />
-      Creatives
+      {href.startsWith('/campaigns') ? 'Campaigns' : 'Creatives'}
     </Link>
   );
 }

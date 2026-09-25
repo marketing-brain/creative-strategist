@@ -16,7 +16,7 @@ export default async function Next() {
     <div className="space-y-8">
       <div className="max-w-5xl">
         <h1 className="text-2xl font-semibold tracking-tight">Next</h1>
-        <p className="text-sm text-muted-foreground">What to change, what to make, and what this account has never tried.</p>
+        <p className="text-sm text-muted-foreground">What to change this week, and where the budget should go.</p>
       </div>
       {active && plan?.status === 'done' ? (
         // Built on the server from a stored payload: the page ships as HTML with no client component.

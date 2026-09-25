@@ -198,8 +198,9 @@ function Finding({ v, index, citations, f }: { v: FindingView; index: number; ci
           {/* Three across, one row, on the width the removed rail gave back: big enough to
               recognise the ad from its first frame rather than only from its name. */}
           <div className="mt-2 grid grid-cols-3 gap-3">
-            {v.exemplars.map((e) => (
-              <FileCard key={e.name} name={e.name} unit={e.unit} f={f} />
+            {/* Headlines repeat ("(no copy)"), so the position is part of the key. */}
+            {v.exemplars.map((e, i) => (
+              <FileCard key={`${i}-${e.name}`} name={e.name} unit={e.unit} f={f} />
             ))}
             {v.exception?.unit && <FileCard name={v.exception.name} unit={v.exception.unit} f={f} note="Exception" />}
           </div>
@@ -262,9 +263,9 @@ export function AccountReadSection({ status, nUnits, view, stale = false, curren
             {view.findings.length} findings
           </a>
           {view.next_tests.length > 0 && (
-            <Link href="/next" className="underline decoration-border underline-offset-4 hover:decoration-foreground">
+            <a href="#tests" className="underline decoration-border underline-offset-4 hover:decoration-foreground">
               {view.next_tests.length} tests to run next
-            </Link>
+            </a>
           )}
         </nav>
         {stale && (
@@ -279,6 +280,33 @@ export function AccountReadSection({ status, nUnits, view, stale = false, curren
           <Finding key={i} v={v} index={i} citations={view.citations} f={f} />
         ))}
       </div>
+
+      {/* These live here, not on /next. The v1 ownership rule sent every recommendation to
+          /next, and it was the right rule applied to the wrong thing: these are the read's own
+          untested hypotheses, in prose, while /next's contract is that every row carries a
+          cited finding, a grade, a named ad and money. Rendered side by side, the prose looked
+          like the cards' equal and was not -- one of them contradicted a card outright, and
+          one prescribed a messenger's gender, which policy bars everywhere a card can reach.
+          As prose among prose they read as what they are: things to try. */}
+      {view.next_tests.length > 0 && (
+        <section id="tests" className="scroll-mt-16 space-y-3 border-t border-border pt-6">
+          <div className="max-w-[68ch] space-y-1">
+            <h2 className="text-xl font-semibold tracking-tight">Tests to run next</h2>
+            <p className="text-sm leading-6 text-pretty text-muted-foreground">
+              Suggested by this read, and untested. Nothing here is graded — treat them as
+              hypotheses, not findings.
+            </p>
+          </div>
+          <ol className="divide-y divide-border rounded-xl border border-border bg-card px-4">
+            {view.next_tests.map((t, i) => (
+              <li key={i} className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-x-2 py-3 text-sm leading-6">
+                <span className="text-muted-foreground tabular-nums">{i + 1}</span>
+                <span className="max-w-[68ch] text-pretty">{t}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
     </div>
   );
 }

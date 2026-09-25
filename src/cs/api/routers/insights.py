@@ -71,8 +71,8 @@ async def next_plan(
     blobs: BlobStore = Depends(get_blobs),
 ) -> dict:
     """The stored plan, whole. Unlike the account read there is no page slice: the payload is
-    bounded by MAX_PER_KIND, MAX_COMBOS and the explore list, so it is a few kilobytes, and the
-    job that wrote it did all the querying (see docs/next-surface.md §6)."""
+    bounded by MAX_PER_KIND and MAX_CARDS, so it is a few kilobytes, and the job that wrote it
+    did all the querying (see docs/next-surface.md §6)."""
     await _owned_account(db, auth.org_id, ad_account_id)
     row = await next_plan_repo.latest_run(db, auth.org_id, ad_account_id)
     if row is None:
@@ -92,7 +92,8 @@ async def _attach_posters(db: Database, blobs: BlobStore, org_id: UUID, plan: di
     references alike -- a row per query would be a dozen round trips for one page."""
     holders = [
         *(plan.get("allocate") or []),
-        *(r for b in (plan.get("make") or []) for r in (b.get("refs") or [])),
+        *(plan.get("recut") or []),
+        *(r for c in (plan.get("recut") or []) for r in (c.get("refs") or [])),
     ]
     # Set on every holder, including when nothing resolves: a row that omits the key entirely
     # makes the page tell "no poster" apart from "field absent", which is the same thing here.

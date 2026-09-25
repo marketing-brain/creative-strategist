@@ -266,6 +266,38 @@ async def _full_watch_creative_ids(db, schema: str) -> set[str] | None:
     return {str(r["creative_id"]) for r in rows if r["creative_id"] is not None}
 
 
+async def _campaign_names(db, schema: str) -> dict[str, str]:
+    """Each campaign's name as of its latest synced row."""
+    return {
+        pid: r["name"]
+        for r in await _latest_rows(db, schema, CAMPAIGN_HISTORY)
+        if r["name"] and (pid := _pid(r["id"]))
+    }
+
+
+async def _adset_names(db, schema: str, ad_rows: list[asyncpg.Record]) -> dict[str, str]:
+    """Each ad set's name from basic_ad, which carries adset_name on every row; adset_history
+    is not synced. Keyed by ad set through the ads' own ad_set_id, so an ad that never
+    delivered still gets its ad set's name from a sibling that did. The latest day wins, so a
+    renamed ad set shows its current name. Display only: a missing table or column gives
+    no names, never a failed sync."""
+    try:
+        rows = await db.fetch(
+            f"SELECT DISTINCT ON (ad_id) ad_id, adset_name, date FROM {_q(schema, BASIC_AD)} "
+            "WHERE adset_name IS NOT NULL ORDER BY ad_id, date DESC"
+        )
+    except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
+        log.warning("ad set names unavailable", extra={"table": BASIC_AD})
+        return {}
+    adset_of = {_pid(r["id"]): _pid(r["ad_set_id"]) for r in ad_rows}
+    latest: dict[str, tuple] = {}
+    for r in rows:
+        adset = adset_of.get(_pid(r["ad_id"]))
+        if adset and (adset not in latest or r["date"] > latest[adset][0]):
+            latest[adset] = (r["date"], r["adset_name"])
+    return {k: name for k, (_, name) in latest.items()}
+
+
 async def _discover_accounts(db, org_id: UUID, connection_id: UUID, schema: str) -> dict[str, UUID]:
     """Every distinct account_id seen in campaign_history becomes (or already is) an
     ad_account row, starting 'paused' until a human activates it -- same default the old
@@ -292,6 +324,8 @@ async def _sync_ads_and_creatives(
     creatives_by_platform_id: dict[str, asyncpg.Record] = {_pid(r["id"]): r for r in creative_rows}
 
     ad_rows = await _latest_rows(db, schema, AD_HISTORY)
+    campaign_names = await _campaign_names(db, schema)
+    adset_names = await _adset_names(db, schema, ad_rows)
 
     video_rows = await _latest_rows(db, schema, AD_VIDEO_HISTORY)
     videos_by_id: dict[str, str] = {
@@ -368,6 +402,9 @@ async def _sync_ads_and_creatives(
                 adset_id=_pid(ad_row["ad_set_id"]),
                 campaign_id=_pid(ad_row["campaign_id"]),
                 platform_creative_id=_pid(cr["id"]),
+                campaign_name=campaign_names.get(_pid(ad_row["campaign_id"])),
+                adset_name=adset_names.get(_pid(ad_row["ad_set_id"])),
+                effective_status=ad_row.get("effective_status"),
             )
             await repo.upsert_ad(db, org_id, acct_id, platform_ad, creative_id)
             synced_ads += 1

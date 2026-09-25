@@ -8,8 +8,10 @@ from cs.api.routers import (
     blobs,
     connections,
     creatives,
+    experiments,
     health,
     insights,
+    library,
     tags,
 )
 from cs.core.blobs import BlobStore
@@ -42,6 +44,8 @@ def create_app(settings: Settings, db: Database, blobs_store: BlobStore) -> Fast
     app.include_router(connections.router)
     app.include_router(accounts.router)
     app.include_router(creatives.router)
+    app.include_router(library.router)
+    app.include_router(experiments.router)
     app.include_router(tags.router)
     app.include_router(insights.router)
     return app

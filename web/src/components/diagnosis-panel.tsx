@@ -165,7 +165,12 @@ function FunnelChart({ steps, name }: { steps: DiagnosisStep[]; name: (key: stri
   for (const st of steps) {
     const prev = stages[stages.length - 1];
     if (!st.readable || st.rate == null) break;
-    stages.push({ label: name(st.key), share: prev.share * st.rate, peer: prev.peer != null && st.baseline_rate != null ? prev.peer * st.baseline_rate : null, step: st });
+    stages.push({
+      label: name(st.key),
+      share: prev.share * st.rate,
+      peer: prev.peer != null && st.baseline_rate != null ? prev.peer * st.baseline_rate : null,
+      step: st,
+    });
   }
   if (stages.length < 2) return null;
   const n = stages.length;
@@ -184,12 +189,23 @@ function FunnelChart({ steps, name }: { steps: DiagnosisStep[]; name: (key: stri
         const st = s.step as DiagnosisStep;
         return (
           <g key={s.label}>
-            <polygon points={`${x0},${mid - ha / 2} ${x1},${mid - hb / 2} ${x1},${mid + hb / 2} ${x0},${mid + ha / 2}`} fill="var(--chart-1)" fillOpacity={0.12}>
+            <polygon
+              points={`${x0},${mid - ha / 2} ${x1},${mid - hb / 2} ${x1},${mid + hb / 2} ${x0},${mid + ha / 2}`}
+              fill="var(--chart-1)"
+              fillOpacity={0.12}
+            >
               <title>{`${st.numerator.toLocaleString('en-US')} of ${st.denominator.toLocaleString('en-US')} ${a.label === 'click' ? 'clicks' : `at ${a.label}`} reached ${s.label}`}</title>
             </polygon>
             <text x={(x0 + x1) / 2} y={TOP - 8} textAnchor="middle" className="text-[13px] tabular-nums">
               {/* Coloured only when the step clears the diagnosis's 15% bar against the account. */}
-              <tspan className={cn('font-semibold', st.lift != null && st.lift >= 0.15 ? 'fill-success' : st.lift != null && st.lift <= -0.15 ? 'fill-destructive' : 'fill-foreground')}>{pct(st.rate as number)}</tspan>
+              <tspan
+                className={cn(
+                  'font-semibold',
+                  st.lift != null && st.lift >= 0.15 ? 'fill-success' : st.lift != null && st.lift <= -0.15 ? 'fill-destructive' : 'fill-foreground'
+                )}
+              >
+                {pct(st.rate as number)}
+              </tspan>
               {st.baseline_rate != null && <tspan className="fill-muted-foreground">{` (${pct(st.baseline_rate)})`}</tspan>}
             </text>
           </g>
@@ -204,7 +220,17 @@ function FunnelChart({ steps, name }: { steps: DiagnosisStep[]; name: (key: stri
             {s.peer != null &&
               i > 0 &&
               [mid - hOf(s.peer) / 2, mid + hOf(s.peer) / 2].map((yy, j) => (
-                <line key={j} x1={x(i) - 6} x2={x(i) + BAR + 6} y1={yy} y2={yy} stroke="var(--foreground)" strokeOpacity={0.55} strokeWidth={1.5} strokeDasharray="4 3" />
+                <line
+                  key={j}
+                  x1={x(i) - 6}
+                  x2={x(i) + BAR + 6}
+                  y1={yy}
+                  y2={yy}
+                  stroke="var(--foreground)"
+                  strokeOpacity={0.55}
+                  strokeWidth={1.5}
+                  strokeDasharray="4 3"
+                />
               ))}
             <text x={x(i) + BAR / 2} y={FH - 6} textAnchor="middle" className="fill-muted-foreground text-[13px]">
               {s.label}
@@ -272,16 +298,41 @@ function TierBody({ tier, broken, evidence, chart }: { tier: DiagnosisTier; brok
 // read yet, is one line: its name, its status and its headline number. After "fix attention,
 // keep the rest", a screen of proof per healthy layer is a screen between the reader and
 // the next thing to do; it stays one click away.
-function TierRow({ tier, broken, converting, evidence, chart }: { tier: DiagnosisTier; broken: boolean; converting: boolean; evidence?: React.ReactNode; chart?: LayerChart }) {
+function TierRow({
+  tier,
+  broken,
+  converting,
+  evidence,
+  chart,
+}: {
+  tier: DiagnosisTier;
+  broken: boolean;
+  converting: boolean;
+  evidence?: React.ReactNode;
+  chart?: LayerChart;
+}) {
   const open = tier.status === 'weak';
   const amber = broken && converting;
   const head = tier.metrics[0];
   return (
-    <details open={open} className={cn('group/tier border-b border-border', broken && (converting ? 'bg-chart-2/[0.05] shadow-[inset_3px_0_0_var(--chart-2)]' : 'bg-destructive/[0.03] shadow-[inset_3px_0_0_var(--destructive)]'))}>
+    <details
+      open={open}
+      className={cn(
+        'group/tier border-b border-border',
+        broken && (converting ? 'bg-chart-2/[0.05] shadow-[inset_3px_0_0_var(--chart-2)]' : 'bg-destructive/[0.03] shadow-[inset_3px_0_0_var(--destructive)]')
+      )}
+    >
       <summary className="flex cursor-pointer list-none items-center gap-3 px-6 py-3.5 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset [&::-webkit-details-marker]:hidden">
         {/* On an ad that converts cheaper than the account, the weak layer takes the verdict's
             amber rather than red, so the row does not contradict the verdict above it. */}
-        <div className={cn('flex size-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold tabular-nums', amber ? 'bg-chart-2 text-primary-foreground' : railClass[tier.status])}>{tier.tier}</div>
+        <div
+          className={cn(
+            'flex size-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold tabular-nums',
+            amber ? 'bg-chart-2 text-primary-foreground' : railClass[tier.status]
+          )}
+        >
+          {tier.tier}
+        </div>
         <span className={cn('w-24 shrink-0 text-base font-semibold', tier.status === 'not_measured' && 'text-muted-foreground')} title={tier.question}>
           {tier.name}
         </span>
@@ -293,7 +344,10 @@ function TierRow({ tier, broken, converting, evidence, chart }: { tier: Diagnosi
             {head.lift != null && <span className={cn('ml-1.5 font-semibold', liftClass(tier, head))}>{signed(shownChange(head))}</span>}
           </span>
         )}
-        <ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground transition-transform group-open/tier:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
+        <ChevronRight
+          className="ml-auto size-4 shrink-0 text-muted-foreground transition-transform group-open/tier:rotate-90 motion-reduce:transition-none"
+          aria-hidden="true"
+        />
       </summary>
       <div className="px-6 pt-1 pb-5 @2xl:pl-[4.25rem]">
         <TierBody tier={tier} broken={broken} evidence={evidence} chart={chart} />
@@ -312,8 +366,13 @@ export function DiagnosisPanel({
   afterVerdict,
   footnote,
   charts,
+  title = 'Diagnosis (last 30 days)',
+  compare,
 }: {
   diagnosis: Diagnosis;
+  // Both default to the creative page's wording; the ad set read names its own window and peers.
+  title?: string;
+  compare?: string;
   evidence?: Partial<Record<DiagnosisTier['key'], React.ReactNode>>;
   afterVerdict?: React.ReactNode;
   footnote?: React.ReactNode;
@@ -328,8 +387,10 @@ export function DiagnosisPanel({
   return (
     <section className="@container space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 className="text-sm font-semibold">Diagnosis (last 30 days)</h2>
-        <span className="text-sm text-muted-foreground">{`Compared with ${d.baseline_creatives} other ${d.format}${d.baseline_creatives === 1 ? '' : 's'} in this account`}</span>
+        <h2 className="text-sm font-semibold">{title}</h2>
+        <span className="text-sm text-muted-foreground">
+          {compare ?? `Compared with ${d.baseline_creatives} other ${d.format}${d.baseline_creatives === 1 ? '' : 's'} in this account`}
+        </span>
       </div>
       <div className="overflow-hidden rounded-xl border border-border bg-card">
         <div
@@ -350,9 +411,11 @@ export function DiagnosisPanel({
         {afterVerdict}
         {/* Placement fit (the API's context layer) is left off the page: under Advantage+ Meta
             picks the placements, and the verdict already leaves it out. */}
-        {d.tiers.filter((t) => t.key !== 'context').map((t) => (
-          <TierRow key={t.key} tier={t} broken={t.tier === d.broken_tier} converting={!!v.converting} evidence={evidence?.[t.key]} chart={charts?.[t.key]} />
-        ))}
+        {d.tiers
+          .filter((t) => t.key !== 'context')
+          .map((t) => (
+            <TierRow key={t.key} tier={t} broken={t.tier === d.broken_tier} converting={!!v.converting} evidence={evidence?.[t.key]} chart={charts?.[t.key]} />
+          ))}
         {/* Metric definitions live on the header's labels (hover), where the numbers are. */}
         {footnote && <p className="bg-sidebar px-6 py-3 text-sm text-muted-foreground">{footnote}</p>}
       </div>

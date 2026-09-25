@@ -8,7 +8,7 @@ import type { Creative, GridRates } from '@/lib/types';
 
 const FORMAT_LABEL = { video: 'Video', image: 'Image', carousel: 'Carousel', unresolved: 'Media unavailable' } as const;
 const formatIcon = { video: PlayCircle, carousel: Layers, image: null, unresolved: null } as const;
-const PEERS = { video: 'videos', image: 'images', carousel: 'carousels', unresolved: 'ads without media' } as const;
+export const PEERS = { video: 'videos', image: 'images', carousel: 'carousels', unresolved: 'ads without media' } as const;
 
 // The fourth number follows the sort, so a grid sorted by purchases shows purchases. Otherwise
 // it is the attention number for the format: hook rate for video, link CTR for the rest.
@@ -26,7 +26,7 @@ function cells(t: GridRates, b: GridRates, extra: CardExtra, fmt: Formatters, pe
   const money = (n: number | null) => (n == null ? '–' : fmt.money(n));
   const pct = (n: number | null) => fmt.pct(n, 1);
   const vs = (ok: boolean, mine: number | null, base: number | null, show: (n: number | null) => string, higherIsBetter: boolean) =>
-    ok && base != null && mine != null ? { delta: gap(mine, base), higherIsBetter, hint: `${show(base)} across the other ${peers} in this account` } : {};
+    ok && base != null && mine != null ? { delta: gap(mine, base), higherIsBetter, hint: `${show(base)} across the other ${peers}` } : {};
   const last: Record<CardExtra, Cell> = {
     hook_rate: { label: 'Hook rate', value: pct(t.hook_rate), ...vs(seen, t.hook_rate, b.hook_rate, pct, true) },
     link_ctr: { label: 'Link CTR', value: pct(t.link_ctr), ...vs(seen, t.link_ctr, b.link_ctr, pct, true) },
@@ -95,33 +95,40 @@ export function CreativeCard({ creative, fmt, extra, ungrouped = false, eager = 
           {creative.ad_name && creative.headline && <div className="mt-0.5 truncate text-xs text-muted-foreground">{creative.headline}</div>}
         </div>
         {delivered ? (
-          <dl className="mt-auto grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-border pt-2">
-            {cells(t, creative.baseline ?? t, extra, fmt, PEERS[creative.format]).map((c) => (
-              <div key={c.label} className="min-w-0" title={c.hint}>
-                <dt className="truncate text-[11px] text-muted-foreground">
-                  {/* A two-up phone card is too narrow for the long label. */}
-                  {c.short ? (
-                    <>
-                      <span className="sm:hidden" aria-hidden="true">
-                        {c.short}
-                      </span>
-                      <span className="sr-only sm:not-sr-only">{c.label}</span>
-                    </>
-                  ) : (
-                    c.label
-                  )}
-                </dt>
-                <dd className="flex flex-wrap items-baseline gap-x-1 text-sm font-semibold tabular-nums">
-                  {c.value}
-                  {c.delta != null && <span className={`text-[11px] font-semibold ${gapTone(c.delta, !!c.higherIsBetter)}`}>{gapText(c.delta)}</span>}
-                </dd>
-              </div>
-            ))}
-          </dl>
+          <CardMetrics totals={t} baseline={creative.baseline ?? t} extra={extra} fmt={fmt} peers={`${PEERS[creative.format]} in this account`} />
         ) : (
           <p className="mt-auto border-t border-border pt-2 text-xs text-muted-foreground">No delivery in the last 30 days</p>
         )}
       </div>
     </Link>
+  );
+}
+
+// The card's four numbers, each with its gap to `peers` (a phrase: "videos in this account").
+export function CardMetrics({ totals, baseline, extra, fmt, peers }: { totals: GridRates; baseline: GridRates; extra: CardExtra; fmt: Formatters; peers: string }) {
+  return (
+    <dl className="mt-auto grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-border pt-2">
+      {cells(totals, baseline, extra, fmt, peers).map((c) => (
+        <div key={c.label} className="min-w-0" title={c.hint}>
+          <dt className="truncate text-[11px] text-muted-foreground">
+            {/* A two-up phone card is too narrow for the long label. */}
+            {c.short ? (
+              <>
+                <span className="sm:hidden" aria-hidden="true">
+                  {c.short}
+                </span>
+                <span className="sr-only sm:not-sr-only">{c.label}</span>
+              </>
+            ) : (
+              c.label
+            )}
+          </dt>
+          <dd className="flex flex-wrap items-baseline gap-x-1 text-sm font-semibold tabular-nums">
+            {c.value}
+            {c.delta != null && <span className={`text-[11px] font-semibold ${gapTone(c.delta, !!c.higherIsBetter)}`}>{gapText(c.delta)}</span>}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }

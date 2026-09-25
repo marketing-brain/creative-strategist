@@ -16,6 +16,10 @@ class PlatformAd:
     adset_id: str | None
     campaign_id: str | None
     platform_creative_id: str
+    campaign_name: str | None = None
+    adset_name: str | None = None
+    # Meta's delivery state (ACTIVE, ADSET_PAUSED, CAMPAIGN_PAUSED, ...), not the ad's switch.
+    effective_status: str | None = None
 
 
 @dataclass

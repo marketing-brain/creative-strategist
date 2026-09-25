@@ -3,12 +3,11 @@
 Two different spends appear in a plan and they are not interchangeable, so each row carries
 its own window label rather than a bare number:
 
-- Pattern rows (make, and the graded side of a scale row) are priced in **window spend**: a
-  `Unit` pools every day `metric_daily` holds for the creative, so its spend is lifetime
-  within the read's window, not a trailing 30 days.
 - Allocation rows are priced in **30-day spend**, read from `creative_metric_30d`.
+- Recut cards are priced in recoverable media cost over the same 30 days, and carry their own
+  page-shaped payload (`recut.to_payload`) rather than a dataclass here.
 
-Ranking happens inside a block, never across two, for exactly that reason.
+Ranking happens inside a block, never across two, because the two answer different questions.
 """
 
 from __future__ import annotations
@@ -21,14 +20,8 @@ from cs.insights.account_read.types import to_json
 __all__ = [
     "AllocationRow",
     "Decline",
-    "Evidence",
-    "ExploreRow",
-    "MakeBrief",
     "Plan",
-    "Ref",
-    "Shape",
     "Stake",
-    "Watch",
     "item_key",
     "to_json",
 ]
@@ -49,71 +42,6 @@ class Stake:
     share: float  # of the same window's account spend
     window: str  # "window" | "30d"
     basis: str  # one clause naming whose spend this is
-
-
-@dataclass
-class Evidence:
-    """One graded comparison, cited as P<n> in the plan's own numbering."""
-
-    pattern_id: str
-    label: str
-    metric: str
-    metric_name: str
-    change: float
-    grade: str
-    n_cell: int
-    n_complement: int
-    cell_value: float
-    comp_value: float
-
-
-@dataclass
-class Ref:
-    """A carrier file: what to watch before writing the next one."""
-
-    sha256: str
-    headline: str
-    rep_creative_id: str | None
-    spend: float
-    shows: str  # which ingredient this file is here to demonstrate
-
-
-@dataclass
-class Shape:
-    duration_s: float | None
-    duration_range: tuple[float, float] | None
-    first_product_s: float | None
-    captions: str | None
-    n_carriers: int
-
-
-@dataclass
-class Watch:
-    """The one metric that decides the test, and the number it has to beat."""
-
-    metric: str
-    metric_name: str
-    account_value: float
-    account_label: str  # "median across 47 files" | "pooled across the account"
-    direction: str  # "above" | "below"
-
-
-@dataclass
-class MakeBrief:
-    key: str
-    title: str
-    attributes: list[list[str]]  # [[dimension, value], ...]
-    stake: Stake
-    binding: str
-    carriers: int  # files already carrying the whole combo (0 or 1 by construction)
-    evidence: list[Evidence]
-    downstream: str
-    hooks: list[str]
-    refs: list[Ref]
-    shape: Shape
-    hold: str
-    watch: Watch
-    caveat: str
 
 
 @dataclass
@@ -141,6 +69,9 @@ class AllocationRow:
     key: str
     kind: str  # "fix" | "replace" | "scale"
     creative_id: str
+    # The file this ad runs. The page folds a budget row into the creative card for the same
+    # file rather than showing one video twice under two names.
+    footage_id: str | None
     headline: str
     rep_creative_id: str | None
     stake: Stake
@@ -148,16 +79,6 @@ class AllocationRow:
     detail: str
     broken_layer: str | None
     decline: Decline | None
-
-
-@dataclass
-class ExploreRow:
-    key: str
-    dimension: str
-    group: str
-    value: str
-    n_units: int
-    status: str  # "never tried" | "too few files to test"
 
 
 @dataclass
@@ -173,11 +94,10 @@ class Plan:
     data_through: str | None = None
     allocate: list[AllocationRow] = field(default_factory=list)
     allocate_empty_reason: str | None = None
-    make: list[MakeBrief] = field(default_factory=list)
-    make_empty_reason: str | None = None
-    explore: list[ExploreRow] = field(default_factory=list)
-    explore_empty_reason: str | None = None
-    next_tests: list[str] = field(default_factory=list)
+    # Already page-shaped (`recut.to_payload`), because a card carries template wording, an
+    # optional written version and a ledger read-back, and the page picks between them.
+    recut: list[dict] = field(default_factory=list)
+    recut_empty_reason: str | None = None
 
     def to_dict(self) -> dict:
         return to_json(self)

@@ -197,6 +197,17 @@ BUCKET_EDGES += [(15, 20), (20, 25), (25, 30), (30, 40), (40, 50), (50, 60), (60
 CURVE_WINDOWS = {
     "lifetime": "TRUE",
     "first_7d": "cv.date BETWEEN m.first_day AND m.first_day + 6",
+    # Clause-identical to `WINDOWS["last_30d"]` on purpose: a recut weighs where a file loses
+    # viewers against the money currently flowing through it, so the curve and the spend have
+    # to describe the same days. `first_7d` cannot carry that comparison on a real account --
+    # org 3's spending files hold a median of 347 plays in their first week, and its largest
+    # 30-day spender has no first-week curve at all.
+    #
+    # Known issue, inherited from WINDOWS: both anchor on `current_date`, while the 30-day
+    # matviews anchor on each account's last day with delivery (migration 20260922000001)
+    # precisely because this slides off the data when syncs stop. Wrong together is still
+    # wrong; it is left consistent here and fixed for both windows in one change.
+    "last_30d": "cv.date > current_date - 30",
 }
 
 

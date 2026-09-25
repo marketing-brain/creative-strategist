@@ -13,10 +13,15 @@ async def upsert_ad(
     row = await db.fetchrow(
         """
         INSERT INTO ad (id, org_id, ad_account_id, platform_ad_id, creative_id, adset_id,
-                        campaign_id, name, status)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                        campaign_id, name, status, campaign_name, adset_name,
+                        effective_status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         ON CONFLICT (ad_account_id, platform_ad_id) DO UPDATE
           SET status = EXCLUDED.status, name = EXCLUDED.name, creative_id = EXCLUDED.creative_id,
+              -- A sync that could not read a name keeps the last one it did.
+              campaign_name = COALESCE(EXCLUDED.campaign_name, ad.campaign_name),
+              adset_name = COALESCE(EXCLUDED.adset_name, ad.adset_name),
+              effective_status = COALESCE(EXCLUDED.effective_status, ad.effective_status),
               last_seen_at = now()
         RETURNING id
         """,
@@ -29,5 +34,8 @@ async def upsert_ad(
         a.campaign_id,
         a.name,
         a.status,
+        a.campaign_name,
+        a.adset_name,
+        a.effective_status,
     )
     return row["id"]

@@ -39,8 +39,9 @@ WITH ad_spend AS (
                        nullif(g.primary_text, ''), '(no copy)'), 90) AS title
   FROM grouped g ORDER BY g.group_key, g.spend DESC, g.id
 )
-SELECT rep.id, rep.title, totals.spend
+SELECT rep.id, rep.title, totals.spend, fc.footage_id
 FROM totals JOIN rep ON rep.group_key = totals.group_key
+LEFT JOIN footage_creative fc ON fc.creative_id = rep.id
 WHERE totals.spend >= $4
 ORDER BY totals.spend DESC
 LIMIT $5

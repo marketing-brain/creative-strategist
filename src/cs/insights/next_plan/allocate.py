@@ -84,6 +84,10 @@ class DiagnosedAd:
     """What the job loads per footage group, ready for the pure rules below."""
 
     creative_id: str
+    # The file this ad runs, when it is known. The page needs it to recognise that a budget
+    # row and a creative card are the same video: on org 3 one file was appearing as both,
+    # under two different names and two different 30-day figures, and being counted twice.
+    footage_id: str | None
     headline: str
     rep_creative_id: str | None
     spend_30d: float
@@ -140,6 +144,7 @@ def build(
                     key=item_key("fix", [ad.creative_id]),
                     kind="fix",
                     creative_id=ad.creative_id,
+                    footage_id=ad.footage_id,
                     headline=ad.headline,
                     rep_creative_id=ad.rep_creative_id,
                     stake=_stake(ad, account_spend_30d, "spending through a broken layer"),
@@ -155,6 +160,7 @@ def build(
                     key=item_key("replace", [ad.creative_id]),
                     kind="replace",
                     creative_id=ad.creative_id,
+                    footage_id=ad.footage_id,
                     headline=ad.headline,
                     rep_creative_id=ad.rep_creative_id,
                     stake=_stake(ad, account_spend_30d, "spending on a declining return"),
@@ -173,6 +179,7 @@ def build(
                     key=item_key("scale", [ad.creative_id]),
                     kind="scale",
                     creative_id=ad.creative_id,
+                    footage_id=ad.footage_id,
                     headline=ad.headline,
                     rep_creative_id=ad.rep_creative_id,
                     stake=_stake(ad, account_spend_30d, "what it is getting now"),

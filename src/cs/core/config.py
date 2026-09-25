@@ -69,6 +69,15 @@ class Settings(BaseSettings):
     # dry run 1 (ingredient vs. branded form, falling asleep vs. sleep quality). A wrong
     # merge is destructive and only reversible by hand, so it runs on the full flash tier.
     judge_model: str = "google/gemini-2.5-flash"
+    # The `/next` recut card. The writer phrases what the statistics found and may not emit a
+    # number (narrate.render enforces it in code); the critic checks the card against the same
+    # facts and is the reason a card can be killed, so it is not the cheaper model.
+    # Measured 2026-09-23: gemini-3-flash spent ~6,900 output tokens deliberating over a
+    # 120-word card and ~7,100 on a pass/kill verdict. The card is phrasing, not reasoning --
+    # the statistics are already decided -- so both run on the lite model, the same choice
+    # `account_read_fix_model` made for the same reason.
+    recut_write_model: str = "google/gemini-3.1-flash-lite"
+    recut_critic_model: str = "google/gemini-3.1-flash-lite"
     # Account read (spec 2026-09-17). Grouping dimensions for bounded interaction tests;
     # a grouping value needs account_read_min_units units before it is used as a group.
     account_read_grouping_dims: str = (

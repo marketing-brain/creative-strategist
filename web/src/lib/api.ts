@@ -1,7 +1,12 @@
 import { authHeaders } from './auth-headers';
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 const base = () => (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
@@ -12,7 +17,11 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   const res = await fetch(`${base()}${path}`, { ...init, headers, cache: 'no-store' });
   if (!res.ok) {
     let msg = res.statusText;
-    try { msg = (await res.json()).detail ?? msg; } catch { /* keep statusText */ }
+    try {
+      msg = (await res.json()).detail ?? msg;
+    } catch {
+      /* keep statusText */
+    }
     throw new ApiError(res.status, msg);
   }
   if (res.status === 204) return undefined as T;
@@ -27,10 +36,25 @@ export const api = {
   syncNow: () => apiFetch<import('./types').SyncStatus>('/connections/meta/sync', { method: 'POST' }),
   fivetranStatus: () => apiFetch<import('./types').MetaConnection>('/connections/meta'),
   fivetranConnectStart: () => apiFetch<{ connect_card_url: string; connector_id: string }>('/connections/meta/start', { method: 'POST' }),
-  fivetranConnectFinalize: (connectorId: string) => apiFetch<{ ok: boolean }>('/connections/meta/finalize', { method: 'POST', body: JSON.stringify({ connector_id: connectorId }) }),
+  fivetranConnectFinalize: (connectorId: string) =>
+    apiFetch<{ ok: boolean }>('/connections/meta/finalize', { method: 'POST', body: JSON.stringify({ connector_id: connectorId }) }),
   fivetranDisconnect: () => apiFetch<{ ok: boolean }>('/connections/meta/disconnect', { method: 'POST' }),
-  creatives: (q: string) =>
-    apiFetch<import('./types').Paginated<import('./types').Creative>>(`/creatives${q}`),
+  libraryTree: (q: string) => apiFetch<import('./types').LibraryTree>(`/library/tree${q}`),
+  libraryAds: (q: string) => apiFetch<import('./types').LibraryAds>(`/library/ads${q}`),
+  experiments: () => apiFetch<import('./types').ExperimentSummary[]>('/experiments'),
+  experiment: (id: string) => apiFetch<import('./types').Experiment>(`/experiments/${id}`),
+  experimentAdsets: (id: string) => apiFetch<{ label: string; files: number }[]>(`/experiments/${id}/adsets`),
+  experimentAdsetRead: (id: string, label: string) => apiFetch<import('./types').AdSetRead>(`/experiments/${id}/adset-read?label=${encodeURIComponent(label)}`),
+  experimentPatterns: (id: string) => apiFetch<import('./types').PairedPatterns>(`/experiments/${id}/patterns`),
+  experimentThemes: (id: string, axis: string, minSpend = 0, window = 'first_7d') =>
+    apiFetch<import('./types').ThemeView>(`/experiments/${id}/themes?axis=${axis}&min_spend=${minSpend}&window=${window}`),
+  experimentClusterRead: (id: string, key: string, axis: string, minSpend = 0, window = 'last_30d') =>
+    apiFetch<import('./types').AdSetRead>(`/experiments/${id}/cluster-read?key=${encodeURIComponent(key)}&axis=${axis}&min_spend=${minSpend}&window=${window}`),
+  experimentClusterCompare: (id: string, axis: string, minSpend = 0, window = 'last_30d') =>
+    apiFetch<import('./types').ClusterCompare>(`/experiments/${id}/cluster-compare?axis=${axis}&min_spend=${minSpend}&window=${window}`),
+  experimentClusterInsights: (id: string, key: string) =>
+    apiFetch<import('./types').ClusterInsights>(`/experiments/${id}/cluster-insights?key=${encodeURIComponent(key)}`),
+  creatives: (q: string) => apiFetch<import('./types').Paginated<import('./types').Creative>>(`/creatives${q}`),
   creativeCoverage: (accountId: string, format = 'video') =>
     apiFetch<import('./types').Coverage>(`/creatives/coverage?ad_account_id=${accountId}&format=${format}`),
   creative: (id: string) => apiFetch<import('./types').Creative>(`/creatives/${id}`),
@@ -51,5 +75,8 @@ export const api = {
   accountRead: (accountId: string) => apiFetch<import('./types').AccountRead>(`/insights/account-read?ad_account_id=${accountId}`),
   nextPlan: (accountId: string) => apiFetch<import('./types').NextPlan>(`/insights/next?ad_account_id=${accountId}`),
   accountReadAsk: (accountId: string, question: string) =>
-    apiFetch<import('./types').AccountReadAnswer>('/insights/account-read/ask', { method: 'POST', body: JSON.stringify({ ad_account_id: accountId, question }) }),
+    apiFetch<import('./types').AccountReadAnswer>('/insights/account-read/ask', {
+      method: 'POST',
+      body: JSON.stringify({ ad_account_id: accountId, question }),
+    }),
 };

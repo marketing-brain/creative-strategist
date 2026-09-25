@@ -6,6 +6,8 @@ import { usePathname } from 'next/navigation';
 import { OrganizationSwitcher, UserButton } from '@clerk/nextjs';
 import {
   Compass,
+  FlaskConical,
+  FolderTree,
   LayoutGrid,
   MessageCircleQuestion,
   PanelLeftClose,
@@ -29,6 +31,10 @@ const groups: { label: string; items: NavItem[] }[] = [
       // and the order a reader should meet it in. Ask sits last because it answers against
       // the account read above it, and is only reachable once one exists.
       { href: '/creatives', label: 'Creatives', icon: LayoutGrid },
+      // The same ads as Meta structures them: campaign, ad set, ad.
+      { href: '/campaigns', label: 'Campaigns', icon: FolderTree },
+      // Questions tested step by step on a fixed set of files, watched as they run.
+      { href: '/experiments', label: 'Experiments', icon: FlaskConical },
       { href: '/insights', label: 'Insights', icon: TrendingUp },
       { href: '/next', label: 'Next', icon: Compass },
       { href: '/ask', label: 'Ask', icon: MessageCircleQuestion },

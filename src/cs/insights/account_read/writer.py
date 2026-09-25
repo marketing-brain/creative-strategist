@@ -650,6 +650,9 @@ async def write_read(
     run: RunResult,
     writer: AccountReadWriter,
     ledger: PaidCallLedger | None = None,
+    *,
+    brief: str | None = None,
+    system: str = SYSTEM,
 ) -> tuple[Read | None, list[str], int, int]:
     """One draft plus retries with the problems named; None when the last one still fails.
 
@@ -658,7 +661,9 @@ async def write_read(
     Without it a dropped connection reads as "nothing happened" and the same draft is paid
     for again (2026-09-22).
     """
-    brief = build_brief(run)
+    # `brief` and `system` default to the account read's; an experiment may pass its own
+    # (cs.experiments.within_read) and keep every gate and retry.
+    brief = brief if brief is not None else build_brief(run)
     collapses = entanglement_collapses(run)
     tokens_in = tokens_out = 0
     feedback: list[str] = []
@@ -684,7 +689,7 @@ async def write_read(
         call = writer.correct if feedback else writer.draft
         claim = await ledger.claim(writer.model_for(call)) if ledger else None
         try:
-            text, ti, to = await call(SYSTEM, user)
+            text, ti, to = await call(system, user)
         except Exception as exc:  # noqa: BLE001 - the call may have been billed either way
             if claim:
                 await claim.failed(f"{type(exc).__name__}: {exc}")
