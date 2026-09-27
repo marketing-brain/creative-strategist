@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { ArrowRight, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import { cn } from 'cn';
 import { Mark } from '@/components/account-read-evidence';
+import { CreatorScripts } from '@/components/creator-scripts';
 import { OpenFromHash } from '@/components/open-from-hash';
 import { api } from '@/lib/api';
 import { splitLede } from '@/lib/account-read-view';
@@ -390,6 +391,8 @@ export default async function WhatWorks() {
             <Notes title="What the videos of each kind share" choices={by('context')} />
             <Notes title="Stories about single videos" choices={by('story')} />
           </div>
+
+          <CreatorScripts rows={w?.creator_scripts ?? []} />
           <p className="text-[13px] text-muted-foreground">
             Every new brief is written with the rules and shared traits of its kind of video. Open a row to see the evidence and the videos to try it on.
           </p>

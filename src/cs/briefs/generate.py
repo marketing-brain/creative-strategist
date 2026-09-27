@@ -2,8 +2,9 @@
 
 Code measures (cs.briefs.facts) and code writes every number on the page: the parent's cost,
 the curve, the drop-off, the launch plan. The model's job is the creative part: split the
-video into slots, propose edits of the original file, new opening lines and a script for a
-new creator, and list what claims review should look at.
+video into slots, propose edits of the original file and new opening lines, and list what
+claims review should look at. A script for a new creator belongs to the cluster, not to one
+video, so briefs no longer write one.
 
 Checks drop, never repair:
 - a quote said to come from the video must be in its transcript;
@@ -53,11 +54,9 @@ Rules:
    sentences, e.g. moving [9] to the front of an 11-sentence video is [{"from":9,"to":9},{"from":0,"to":8},{"from":10,"to":10}].
    Code cuts at the pauses between sentences, so never split a sentence.
    `quotes`: the sentences moved or removed, copied exactly; empty for the others.
-3. Script: a new script for a different creator that keeps the parent's structure. 20-35 seconds, lines with m:ss times,
-   stage directions separate from spoken words. No new health claims beyond what the parent says.
-4. Claims: list what a claims reviewer should check: profanity, named retailers or competitors, numeric or health claims, offers.
-5. Never write a number about performance (cost, ROAS, percentages of viewers). Code adds those.
-6. `title`: a 2-5 word name for the parent's idea, e.g. "Not a sleep aid"."""
+3. Claims: list what a claims reviewer should check: profanity, named retailers or competitors, numeric or health claims, offers.
+4. Never write a number about performance (cost, ROAS, percentages of viewers). Code adds those.
+5. `title`: a 2-5 word name for the parent's idea, e.g. "Not a sleep aid"."""
 
 SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -103,30 +102,9 @@ SCHEMA: dict[str, Any] = {
                 "required": ["kind", "slug", "change", "text", "quotes", "keep"],
             },
         },
-        "script": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "note": {"type": "string"},
-                "lines": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "t": {"type": "string"},
-                            "direction": {"type": "string"},
-                            "text": {"type": "string"},
-                        },
-                        "required": ["t", "direction", "text"],
-                    },
-                },
-            },
-            "required": ["note", "lines"],
-        },
         "claims": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["title", "slots", "variants", "script", "claims"],
+    "required": ["title", "slots", "variants", "claims"],
 }
 
 
@@ -233,7 +211,7 @@ def prompt(facts: dict, focus: dict | None = None, rails: list[dict] | None = No
     if rails:
         lines += [
             "",
-            "WHAT ALREADY HOLDS FOR THIS KIND OF VIDEO (keep these true in every variant and the script):",
+            "WHAT ALREADY HOLDS FOR THIS KIND OF VIDEO (keep these true in every variant):",
         ]
         lines += [f"  - {r['title']}: {r['body']}" for r in rails]
     if focus:
@@ -243,8 +221,7 @@ def prompt(facts: dict, focus: dict | None = None, rails: list[dict] | None = No
             "from comparing videos of the same kind as this one:",
             f"  {focus['title']}. {focus['body']}",
             "At least two variants must apply this finding to this video: add or strengthen what it says works, or cut "
-            "what it says hurts. Say in each such variant's `change` how it applies the finding, and name its slug after it. "
-            "The script for a new creator must apply it too.",
+            "what it says hurts. Say in each such variant's `change` how it applies the finding, and name its slug after it.",
         ]
     return "\n".join(lines)
 
@@ -280,15 +257,7 @@ def check(out: dict, facts: dict) -> tuple[dict, list[str]]:
             dropped.append(f"{label}: figures not in the evidence ({', '.join(bad)})")
             continue
         variants.append(v)
-    script = out.get("script") or {"note": "", "lines": []}
-    bad = _invented_figures(" ".join(x["text"] for x in script["lines"]), ev)
-    if bad:
-        dropped.append(
-            f"script: figures not in the evidence ({', '.join(bad)}), replaced with [current offer]"
-        )
-        for line in script["lines"]:
-            line["text"] = _FIGURE.sub("[current offer]", line["text"])
-    return {**out, "slots": slots, "variants": variants, "script": script}, dropped
+    return {**out, "slots": slots, "variants": variants}, dropped
 
 
 def _prefix(name: str | None) -> str:
@@ -343,14 +312,14 @@ def compose(out: dict, facts: dict, dropped: list[str]) -> dict:
             if st.get("cpa_7d")
             else "."
         ),
-        "Whatever clears its bar becomes the new parent. Batch 2 and the new-creator script go on top of it.",
+        "Whatever clears its bar becomes the new parent. Batch 2 goes on top of it.",
     ]
     return {
         "title": out.get("title") or facts.get("name") or "Variant brief",
         "slots": out["slots"],
         "findings": findings,
         "batches": [{"title": k, "variants": v} for k, v in batches.items()],
-        "script": {"name": f"{prefix}-S1_NewCreator", **out["script"]},
+        "script": {"name": "", "note": "", "lines": []},
         "launch": launch,
         "claims": out.get("claims", []),
         "offer": "[Current offer]",

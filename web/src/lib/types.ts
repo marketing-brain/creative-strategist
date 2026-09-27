@@ -1045,4 +1045,46 @@ export type WhatWorks = {
   min_spend: number;
   clusters: WorksCluster[];
   playbook: { created_at: string; choices: PlayChoice[]; kinds: string[]; grid: PlayGridRow[] } | null;
+  creator_scripts?: CreatorScriptRow[];
+};
+export type CreatorScript = {
+  cluster: string;
+  title: string;
+  note: string;
+  lines: { t: string; direction: string; text: string }[];
+  follows: { id: string; how: string; title: string }[];
+  missed: { id: string; title: string }[];
+  claims: string[];
+  dropped: string[];
+  from_videos: { footage_id: string; name: string | null; cpa: number | null; watched?: boolean }[];
+  rules: number;
+  closest?: { footage_id: string; name: string | null; ratio: number } | null;
+  too_close?: boolean;
+  compared_with?: number;
+  created_at: string | null;
+};
+export type ScriptVideo = {
+  id: string;
+  status: 'queued' | 'running' | 'confirm' | 'blocked' | 'done' | 'failed';
+  stage: string | null;
+  error: string | null;
+  url: string | null;
+  checks: { videos: number; compared_with_frames: number; too_alike: boolean; shots: { shot: number; closest_bits: number; too_alike: boolean }[] } | null;
+  estimated_cost_usd: number | null;
+  clip_cost_usd: number | null;
+  clip_plan: { shots: number; seconds: number; usd: number; video_seconds: number } | null;
+  shots: { prompt: string; product: boolean; lines: number[] }[];
+  voice_url: string | null;
+  product_url: string | null;
+  created_at: string;
+};
+export type CreatorScriptRow = {
+  cluster: string;
+  name: string;
+  files: number;
+  spend: number;
+  script: CreatorScript | null;
+  makeable?: boolean;
+  estimate?: { seconds: number; prep_usd: number } | null;
+  video?: ScriptVideo | null;
 };

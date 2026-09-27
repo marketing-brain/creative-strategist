@@ -12,15 +12,25 @@ from __future__ import annotations
 import copy
 import re
 import time
+from uuid import UUID
 
+import openai
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from cs.api.auth import AuthContext, current_auth
-from cs.api.deps import get_blobs, get_db
+from cs.api.deps import get_blobs, get_db, get_settings_dep
 from cs.api.routers import experiments as ex
 from cs.briefs import findings as findings_mod
+from cs.core import queue
 from cs.core.blobs import BlobStore
+from cs.core.config import Settings
 from cs.core.db import Database
+from cs.core.ids import new_id
+from cs.experiments import creator_script
+from cs.experiments import tag_clusters as tc
+from cs.make import script_video as sv
+from cs.make.reconcile import reconcile
 
 router = APIRouter(prefix="/what-works")
 SLUG = "tag-clusters"
@@ -147,7 +157,170 @@ async def what_works(
             f["progress"] = progress.get(f["id"], [])
             f["status"] = _status(f["progress"])
     body["playbook"] = await _playbook(db, eid, out)
+    body["creator_scripts"] = await _creator_scripts(db, eid, out, blobs, auth.org_id)
     return body
+
+
+async def _creator_scripts(db: Database, eid, clusters: list[dict], blobs: BlobStore, org_id) -> list[dict]:
+    """One row per kind of video (Other is a mixed bag and gets none), with its script if written
+    and the latest video made from it."""
+    await reconcile(db, org_id)
+    have = await creator_script.stored(db, eid)
+    videos = {
+        r["cluster"]: r
+        for r in await db.fetch(
+            "SELECT DISTINCT ON (cluster) id, cluster, status, stage, error, path, checks, estimated_cost_usd,"
+            " clip_cost_usd, plan, voice, product, created_at"
+            " FROM script_video WHERE org_id=$1 ORDER BY cluster, created_at DESC",
+            org_id,
+        )
+    }
+    out = []
+    for c in clusters:
+        if c["key"] == tc.OTHER or not c.get("read_at"):
+            continue
+        script = have.get(c["key"])
+        v = videos.get(c["key"])
+        out.append(
+            {
+                "cluster": c["key"],
+                "name": c["name"],
+                "files": c["files"],
+                "spend": c["spend"],
+                "script": script,
+                "makeable": sv.makeable(c["key"]),
+                "estimate": sv.estimate(script, c["key"]) if script and sv.makeable(c["key"]) else None,
+                "video": {
+                    "id": str(v["id"]),
+                    "status": v["status"],
+                    "stage": v["stage"],
+                    "error": v["error"],
+                    "url": await blobs.url_for(v["path"]) if v["path"] and v["status"] == "done" else None,
+                    "checks": v["checks"],
+                    "estimated_cost_usd": float(v["estimated_cost_usd"]) if v["estimated_cost_usd"] is not None else None,
+                    "clip_cost_usd": float(v["clip_cost_usd"]) if v["clip_cost_usd"] is not None else None,
+                    "clip_plan": sv.clip_cost(v["plan"], v["voice"]) if v["plan"] and v["voice"] else None,
+                    "shots": [{"prompt": x["prompt"], "product": x["product"], "lines": x["lines"]} for x in (v["plan"] or {}).get("shots", [])],
+                    "voice_url": await blobs.url_for(v["voice"]["path"]) if (v["voice"] or {}).get("path") else None,
+                    "product_url": await blobs.url_for(v["product"]["path"]) if (v["product"] or {}).get("path") else None,
+                    "created_at": v["created_at"].isoformat(),
+                }
+                if v
+                else None,
+            }
+        )
+    return out
+
+
+@router.post("/script-video/{video_id}/approve")
+async def approve_script_video(
+    video_id: UUID,
+    auth: AuthContext = Depends(current_auth),
+    db: Database = Depends(get_db),
+) -> dict:
+    """Approve the clip spend shown on the page and generate the clips."""
+    r = await db.fetchrow(
+        "UPDATE script_video SET approved_at=now(), status='queued', error=NULL, updated_at=now()"
+        " WHERE id=$1 AND org_id=$2 AND status IN ('confirm','blocked') RETURNING id",
+        video_id,
+        auth.org_id,
+    )
+    if r is None:
+        raise HTTPException(409, "This video is not waiting for approval.")
+    await queue.enqueue(
+        db, auth.org_id, sv.JOB, {"script_video_id": str(video_id)}, dedup_key=f"script_video:{video_id}:clips", max_attempts=1
+    )
+    return {"id": str(video_id), "status": "queued"}
+
+
+class MakeBody(BaseModel):
+    cluster: str
+
+
+@router.post("/script-video")
+async def make_script_video(
+    body: MakeBody,
+    auth: AuthContext = Depends(current_auth),
+    db: Database = Depends(get_db),
+) -> dict:
+    """Start a video from the kind's stored script: plan the shots, voice the lines and find the
+    product (a few cents), then stop at 'confirm' with the exact clip cost. A blocked video (not
+    enough gateway credit) is picked up again where it stopped."""
+    eid = await creator_script.experiment_id(db, auth.org_id)
+    if eid is None:
+        raise HTTPException(404, "no clusters for this account yet")
+    if not sv.makeable(body.cluster):
+        raise HTTPException(400, "This kind needs a real person on camera; a generated one would be an AI video.")
+    script = (await creator_script.stored(db, eid)).get(body.cluster)
+    if not script:
+        raise HTTPException(400, "Write this kind's script first.")
+    if script.get("too_close"):
+        raise HTTPException(400, "The script is too close to a video that already ran. Write it again first.")
+    acc = await db.fetchval(
+        "SELECT ad_account_id FROM footage WHERE id=$1", UUID(script["from_videos"][0]["footage_id"])
+    )
+    live = await db.fetchrow(
+        "SELECT id, status FROM script_video WHERE org_id=$1 AND cluster=$2 AND status IN ('queued','running','confirm','blocked')"
+        " ORDER BY created_at DESC LIMIT 1",
+        auth.org_id,
+        body.cluster,
+    )
+    if live and live["status"] in ("queued", "running", "confirm"):
+        return {"id": str(live["id"]), "status": live["status"]}
+    if live:  # blocked on credit: pick it up again where it stopped
+        vid = live["id"]
+        await db.execute("UPDATE script_video SET status='queued', error=NULL, updated_at=now() WHERE id=$1", vid)
+    else:
+        vid = new_id()
+        est = sv.estimate(script, body.cluster)
+        await db.execute(
+            "INSERT INTO script_video (id, org_id, ad_account_id, cluster, script, video_model, status, estimated_cost_usd)"
+            " VALUES ($1,$2,$3,$4,$5,$6,'queued',$7)",
+            vid,
+            auth.org_id,
+            acc,
+            body.cluster,
+            script,
+            sv.VIDEO_MODEL,
+            est["prep_usd"],
+        )
+    await queue.enqueue(
+        db, auth.org_id, sv.JOB, {"script_video_id": str(vid)}, dedup_key=f"script_video:{vid}", max_attempts=1
+    )
+    return {"id": str(vid), "status": "queued"}
+
+
+class ScriptBody(BaseModel):
+    cluster: str
+
+
+@router.post("/creator-script")
+async def write_creator_script(
+    body: ScriptBody,
+    auth: AuthContext = Depends(current_auth),
+    db: Database = Depends(get_db),
+    settings: Settings = Depends(get_settings_dep),
+    blobs: BlobStore = Depends(get_blobs),
+) -> dict:
+    """Write (or write again) the new-creator script for one kind of video: watching its two
+    best videos (about a cent each, once per video) and one call for the script (under a cent).
+    The page asks before calling it."""
+    eid = await creator_script.experiment_id(db, auth.org_id)
+    if eid is None:
+        raise HTTPException(404, "no clusters for this account yet")
+    if body.cluster == tc.OTHER:
+        raise HTTPException(400, "Other is a mix of kinds; it gets no script")
+    client = openai.AsyncOpenAI(
+        api_key=settings.ai_gateway_api_key,
+        base_url=f"{settings.ai_gateway_base_url}/v1",
+        max_retries=0,
+        timeout=300,
+    )
+    try:
+        out = await creator_script.write(db, client, settings, blobs, auth.org_id, eid, body.cluster)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {**out, "created_at": None}
 
 
 async def _playbook(db: Database, eid, clusters: list[dict]) -> dict | None:

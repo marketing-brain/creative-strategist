@@ -185,7 +185,6 @@ export function Workspace({ v }: { v: MakeVideo }) {
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [copied, setCopied] = useState(false);
   const set = (patch: Partial<BriefContent>) => c && setC({ ...c, ...patch });
 
   const save = async () => {
@@ -350,10 +349,10 @@ export function Workspace({ v }: { v: MakeVideo }) {
         </section>
 
 
-        {brief && c && (
+        {brief && c && shoot.length > 0 && (
           <section className="space-y-4" aria-label="To shoot">
             <GroupHeader title="To shoot" cost="Needs a shoot" tone="shoot">
-              New lines for the same creator, and a script that tests whether the idea works with someone else.
+              New lines for the same creator to record at the next shoot.
             </GroupHeader>
             {shoot.length > 0 && (
               <div className="grid gap-4 sm:grid-cols-2">
@@ -362,62 +361,6 @@ export function Workspace({ v }: { v: MakeVideo }) {
                 ))}
               </div>
             )}
-            <article className="space-y-3 rounded-xl border border-border bg-card p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-base font-semibold">Script for a new creator</p>
-                {!editing && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={async () => {
-                      const text = c.script.lines.map((l) => `${l.t}  ${l.direction ? `[${l.direction}] ` : ''}${l.text}`).join('\n');
-                      try {
-                        await navigator.clipboard.writeText(text);
-                        setCopied(true);
-                        setTimeout(() => setCopied(false), 1400);
-                      } catch {
-                        setError('Your browser blocked copying. Select the script and copy it by hand.');
-                      }
-                    }}
-                  >
-                    {copied ? <Check /> : <Copy />} {copied ? 'Copied' : 'Copy script'}
-                  </Button>
-                )}
-              </div>
-              {editing ? (
-                <Textarea value={c.script.note} aria-label="Script note" onChange={(e) => set({ script: { ...c.script, note: e.target.value } })} />
-              ) : (
-                c.script.note && <p className="max-w-prose text-sm text-muted-foreground">{c.script.note}</p>
-              )}
-              <div className="space-y-2.5">
-                {c.script.lines.map((l, i) => {
-                  const upd = (p: Partial<typeof l>) => set({ script: { ...c.script, lines: c.script.lines.map((x, j) => (j === i ? { ...x, ...p } : x)) } });
-                  return editing ? (
-                    <div key={i} className="grid gap-2 sm:grid-cols-[4rem_minmax(0,1fr)_auto]">
-                      <Input value={l.t} aria-label="Time" onChange={(e) => upd({ t: e.target.value })} />
-                      <div className="space-y-1">
-                        <Input value={l.direction} placeholder="Stage direction" aria-label="Stage direction" onChange={(e) => upd({ direction: e.target.value })} />
-                        <Textarea value={l.text} aria-label="Spoken line" onChange={(e) => upd({ text: e.target.value })} />
-                      </div>
-                      <Button variant="ghost" size="icon" aria-label="Remove line" onClick={() => set({ script: { ...c.script, lines: c.script.lines.filter((_, j) => j !== i) } })}><Trash2 /></Button>
-                    </div>
-                  ) : (
-                    <div key={i} className="grid grid-cols-[3rem_minmax(0,1fr)] gap-3 text-sm">
-                      <span className="font-mono text-muted-foreground tabular-nums">{l.t}</span>
-                      <span>
-                        {l.direction && <span className="text-muted-foreground italic">{l.direction} </span>}
-                        {l.text}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-              {editing && (
-                <Button variant="outline" size="sm" onClick={() => set({ script: { ...c.script, lines: [...c.script.lines, { t: '', direction: '', text: '' }] } })}>
-                  <Plus /> Add line
-                </Button>
-              )}
-            </article>
           </section>
         )}
 

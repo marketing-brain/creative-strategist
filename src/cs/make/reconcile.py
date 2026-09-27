@@ -13,11 +13,14 @@ from uuid import UUID
 
 from cs.core.db import Database
 
-# (table, job type, dedup key prefix) for each kind of work a person starts from Make.
+# (table, job type, dedup key prefix) for each kind of work a person starts from Make or What
+# works. A row can have more than one job (a script video's clips run as a second job), so the
+# key matches by prefix.
 WORK = (
     ("creative_brief", "briefs.generate", "brief:", "updated_at = now()"),
     ("brief_render", "briefs.render", "render:", "finished_at = coalesce(t.finished_at, now())"),
     ("generation", "generate.opening_edit", "gen:", "finished_at = coalesce(t.finished_at, now())"),
+    ("script_video", "make.script_video", "script_video:", "updated_at = now()"),
 )
 
 
@@ -33,7 +36,7 @@ async def reconcile(db: Database, org_id: UUID) -> int:
                    {stamp}
             FROM job j
             WHERE t.org_id = $1 AND t.status IN ('queued', 'running')
-              AND j.org_id = t.org_id AND j.job_type = $2 AND j.dedup_key = $3 || t.id::text AND j.status = 'dead'
+              AND j.org_id = t.org_id AND j.job_type = $2 AND j.dedup_key LIKE $3 || t.id::text || '%' AND j.status = 'dead'
             RETURNING t.id
             """,
             org_id,

@@ -1,10 +1,10 @@
 """A video's ideas as one list, and the batch picked from them.
 
-Re-edits, generated openings, lines to shoot and the new-creator script are all variants of the
+Re-edits, generated openings and lines to shoot are all variants of the
 same video; the page used to show them as three products. Here each is an idea with one shape:
 what it is, what it costs, how far along it is, what would stop it launching, and whether it is
-in the batch. Only ideas that are finished video files can be launched; lines to shoot and the
-script are listed for the shoot, not for the batch.
+in the batch. Only ideas that are finished video files can be launched; lines to shoot are
+listed for the shoot, not for the batch. New-creator scripts belong to a cluster, not a video.
 """
 
 from __future__ import annotations
@@ -99,30 +99,7 @@ def ideas(brief: dict | None, generations: list[dict], decisions: dict[str, str]
                         f"No clear pause at {_sec(t)}. Listen there before launching."
                     )
                 out.append(idea)
-        if c.get("script", {}).get("lines"):
-            out.append(
-                {
-                    "ref": f"brief:{brief['id']}:script",
-                    "kind": "script",
-                    "code": "S1",
-                    "title": "Script for a new creator",
-                    "name": c["script"].get("name"),
-                    "change": c["script"].get("note"),
-                    "read_on": None,
-                    "finding": focus,
-                    "cost_label": "Needs a shoot",
-                    "cost_usd": None,
-                    "decision": None,
-                    "state": "shoot",
-                    "blockers": [],
-                    "warnings": [],
-                    "media_url": None,
-                    "media_path": None,
-                    "edit": None,
-                    "lines": c["script"]["lines"],
-                    "brief_id": brief["id"],
-                }
-            )
+        # New-creator scripts belong to the cluster, not to one video: not listed here.
     for g in generations:
         ref = f"gen:{g['id']}"
         state = {"queued": "working", "running": "working", "failed": "failed"}.get(

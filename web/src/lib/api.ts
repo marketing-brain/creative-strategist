@@ -44,6 +44,12 @@ export const api = {
   experiments: (kind?: 'test' | 'research') =>
     apiFetch<import('./types').ExperimentSummary[]>(`/experiments${kind ? `?kind=${kind}` : ''}`),
   whatWorks: () => apiFetch<import('./types').WhatWorks>('/what-works'),
+  writeCreatorScript: (cluster: string) =>
+    apiFetch<import('./types').CreatorScript>('/what-works/creator-script', { method: 'POST', body: JSON.stringify({ cluster }) }),
+  makeScriptVideo: (cluster: string) =>
+    apiFetch<{ id: string; status: string }>('/what-works/script-video', { method: 'POST', body: JSON.stringify({ cluster }) }),
+  approveScriptVideo: (id: string) =>
+    apiFetch<{ id: string; status: string }>(`/what-works/script-video/${id}/approve`, { method: 'POST' }),
   finding: (id: string) => apiFetch<import('./types').FocusFinding>(`/what-works/findings/${id}`),
   experiment: (id: string) => apiFetch<import('./types').Experiment>(`/experiments/${id}`),
   experimentAdsets: (id: string) => apiFetch<{ label: string; files: number }[]>(`/experiments/${id}/adsets`),
