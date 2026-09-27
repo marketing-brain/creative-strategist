@@ -6,13 +6,17 @@ from fastapi.responses import JSONResponse
 from cs.api.routers import (
     accounts,
     blobs,
+    briefs,
     connections,
     creatives,
     experiments,
+    generate,
     health,
     insights,
     library,
+    make,
     tags,
+    what_works,
 )
 from cs.core.blobs import BlobStore
 from cs.core.config import Settings
@@ -46,6 +50,10 @@ def create_app(settings: Settings, db: Database, blobs_store: BlobStore) -> Fast
     app.include_router(creatives.router)
     app.include_router(library.router)
     app.include_router(experiments.router)
+    app.include_router(briefs.router)
+    app.include_router(generate.router)
+    app.include_router(make.router)
+    app.include_router(what_works.router)
     app.include_router(tags.router)
     app.include_router(insights.router)
     return app

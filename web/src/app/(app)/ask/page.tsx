@@ -1,11 +1,13 @@
 import { AccountReadAsk } from '@/components/account-read-ask';
 import { api } from '@/lib/api';
+import { requireAdmin } from '@/lib/require-admin.server';
 import { requireAuth } from '@/lib/require-auth.server';
 
 export const metadata = { title: 'Ask' };
 
 export default async function Ask() {
   await requireAuth();
+  await requireAdmin();
   const accounts = await api.accounts();
   const active = accounts.find((a) => a.status === 'active') ?? accounts[0];
   // Questions are answered against a stored account read, so /insights and this page

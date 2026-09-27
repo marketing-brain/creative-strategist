@@ -1,3 +1,4 @@
+import { AdsViews } from '@/components/ads-views';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { ChevronDown, ChevronRight, SearchX } from 'lucide-react';
@@ -12,7 +13,7 @@ import { adsetName, campaignName } from '@/lib/campaigns';
 import { requireAuth } from '@/lib/require-auth.server';
 import type { GridRates, LibraryCounts, LibraryDelivery } from '@/lib/types';
 
-export const metadata = { title: 'Campaigns' };
+export const metadata = { title: 'Ads by campaign' };
 
 const PAGE_SIZE = 60;
 
@@ -120,7 +121,10 @@ export default async function Library({ searchParams }: { searchParams: Promise<
     <div className="space-y-4">
       <RememberGridUrl />
       <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-        <h1 className="text-2xl font-semibold tracking-tight">Campaigns</h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight">Ads</h1>
+          <AdsViews current="/campaigns" />
+        </div>
         <p className="shrink-0 text-sm text-muted-foreground sm:pt-1.5">
           {tree.window && <span className="mr-2 font-medium text-foreground">30d</span>}
           <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums">{span}</span>

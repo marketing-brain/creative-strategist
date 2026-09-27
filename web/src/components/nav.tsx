@@ -5,10 +5,11 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { OrganizationSwitcher, UserButton } from '@clerk/nextjs';
 import {
-  Compass,
+  Clapperboard,
   FlaskConical,
-  FolderTree,
   LayoutGrid,
+  Microscope,
+  Globe,
   MessageCircleQuestion,
   PanelLeftClose,
   PanelLeftOpen,
@@ -21,28 +22,25 @@ import { cn } from 'cn';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/theme-toggle';
 
-type NavItem = { href: string; label: string; icon: LucideIcon };
+type NavItem = { href: string; label: string; icon: LucideIcon; also?: string[] };
 
-const groups: { label: string; items: NavItem[] }[] = [
-  {
-    label: 'Workspace',
-    items: [
-      // Evidence, then interpretation, then recommendation: the order the data is built in
-      // and the order a reader should meet it in. Ask sits last because it answers against
-      // the account read above it, and is only reachable once one exists.
-      { href: '/creatives', label: 'Creatives', icon: LayoutGrid },
-      // The same ads as Meta structures them: campaign, ad set, ad.
-      { href: '/campaigns', label: 'Campaigns', icon: FolderTree },
-      // Questions tested step by step on a fixed set of files, watched as they run.
-      { href: '/experiments', label: 'Experiments', icon: FlaskConical },
-      { href: '/insights', label: 'Insights', icon: TrendingUp },
-      { href: '/next', label: 'Next', icon: Compass },
-      { href: '/ask', label: 'Ask', icon: MessageCircleQuestion },
-    ],
-  },
+// The site follows the loop an in-house marketer runs (2026-09-26 rework): look at the ads,
+// understand what works, make new versions, test them.
+// Each page ends by pointing at the next one. Research that explains how the analysis works
+// lives in the Lab, visible to admins only.
+const journey: NavItem[] = [
+  { href: '/creatives', label: 'Ads', icon: LayoutGrid, also: ['/campaigns', '/clusters'] },
+  { href: '/what-works', label: 'What works', icon: TrendingUp },
+  { href: '/make', label: 'Make', icon: Clapperboard, also: ['/briefs', '/generate'] },
+  { href: '/tests', label: 'Tests', icon: FlaskConical },
 ];
-
-const allItems = groups.flatMap((g) => g.items);
+const lab: NavItem[] = [
+  // Account-wide reads compare across kinds of video, which confuses format with content.
+  // Kept for reference only; What works shows findings from inside a cluster.
+  { href: '/insights', label: 'Account-wide read', icon: Globe },
+  { href: '/ask', label: 'Ask', icon: MessageCircleQuestion },
+  { href: '/experiments', label: 'Research', icon: Microscope },
+];
 
 function linkClasses(active: boolean) {
   return cn(
@@ -51,9 +49,18 @@ function linkClasses(active: boolean) {
   );
 }
 
-export function Nav() {
+export function Nav({ isAdmin = false }: { isAdmin?: boolean }) {
   const pathname = usePathname();
-  const isActive = (href: string) => pathname === href || pathname?.startsWith(`${href}/`);
+  const under = (href: string) => pathname === href || !!pathname?.startsWith(`${href}/`);
+  const isActive = (href: string) => {
+    const item = [...journey, ...lab].find((i) => i.href === href);
+    return under(href) || !!item?.also?.some(under);
+  };
+  const groups = [
+    { label: null as string | null, items: journey },
+    ...(isAdmin ? [{ label: 'Lab', items: lab }] : []),
+  ];
+  const allItems = groups.flatMap((g) => g.items);
 
   // The rail's *appearance* comes entirely from the `sidebar-collapsed` class the init
   // script puts on <html>, so it is correct on the first paint. This state only drives
@@ -104,8 +111,10 @@ export function Nav() {
         </div>
         <nav className="flex flex-1 flex-col gap-5" aria-label="Primary">
           {groups.map((group) => (
-            <div key={group.label} className="flex flex-col gap-1">
-              <span className="px-2.5 text-[11px] font-medium tracking-wide text-sidebar-foreground/50 uppercase rail:hidden">{group.label}</span>
+            <div key={group.label ?? "main"} className="flex flex-col gap-1">
+              {group.label && (
+                <span className="px-2.5 pt-2 text-sm font-medium text-sidebar-foreground/60 rail:hidden">{group.label}</span>
+              )}
               {group.items.map((item) => (
                 <Link
                   key={item.href}

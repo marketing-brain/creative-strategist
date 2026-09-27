@@ -2,9 +2,10 @@ import Link from 'next/link';
 import { ChevronRight, FlaskConical } from 'lucide-react';
 import { cn } from 'cn';
 import { api } from '@/lib/api';
+import { requireAdmin } from '@/lib/require-admin.server';
 import { requireAuth } from '@/lib/require-auth.server';
 
-export const metadata = { title: 'Experiments' };
+export const metadata = { title: 'Research' };
 
 const CURRENT: Record<string, string> = {
   waiting: 'text-amber-700 dark:text-amber-400',
@@ -15,13 +16,14 @@ const CURRENT: Record<string, string> = {
 
 export default async function Experiments() {
   await requireAuth();
-  const list = await api.experiments();
+  await requireAdmin();
+  const list = await api.experiments('research');
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Experiments</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Research</h1>
         <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-          Questions tested one step at a time on a fixed set of files. Each step shows what it did, what it cost and what it is waiting for.
+          Lab: how the analysis itself works, tested one step at a time on a fixed set of files. Visible to admins only.
         </p>
       </div>
       {list.length === 0 ? (

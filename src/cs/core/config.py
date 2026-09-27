@@ -100,6 +100,10 @@ class Settings(BaseSettings):
     # that have to match. It stays on the newer tier even though every other job runs on 2.5,
     # because consistency is not worth a worse read.
     account_read_model: str = "google/gemini-3-flash"
+    # Variant briefs (/briefs): one call per brief writes slots, edits, pickups and a script.
+    brief_model: str = "google/gemini-3-flash"
+    # Generate tab: video edits run on WaveSpeed (Seedance 2.5 edit is not on the AI Gateway).
+    wavespeed_api_key: str = ""
     # Corrections run on a model that does not deliberate. Measured 2026-09-23 on the
     # gateway: gemini-3-flash spends ~96% of its output on reasoning whatever it is told,
     # so a correction cost 65,000 output tokens and five minutes to apply an edit the gates

@@ -25,6 +25,7 @@ export function ThemesView({
   window = 'first_7d',
   defaultWindow = 'first_7d',
   fixed = false,
+  reads = true,
 }: {
   data: ThemeView;
   fmt: Formatters;
@@ -35,6 +36,8 @@ export function ThemesView({
   defaultWindow?: string;
   // Window and spend fixed by the experiment's rules: no toggles, a label instead.
   fixed?: boolean;
+  // The Clusters tab shows the clusters only, with no link into a cluster's read.
+  reads?: boolean;
 }) {
   const link = (over: { axis?: string; min?: number; window?: string; cluster?: string }) => {
     const q = new URLSearchParams({ axis: over.axis ?? axis });
@@ -109,7 +112,7 @@ export function ThemesView({
       </p>
       <div className="space-y-8">
         {big.map((g) => (
-          <Group key={g.key} g={g} fmt={fmt} readHref={link({ cluster: g.key })} />
+          <Group key={g.key} g={g} fmt={fmt} readHref={reads ? link({ cluster: g.key }) : null} />
         ))}
         {small.length > 0 && (
           <details className="group/small rounded-xl border border-border">
@@ -120,7 +123,7 @@ export function ThemesView({
             </summary>
             <div className="space-y-8 border-t border-border px-4 py-5">
               {small.map((g) => (
-                <Group key={g.key} g={g} fmt={fmt} readHref={link({ cluster: g.key })} />
+                <Group key={g.key} g={g} fmt={fmt} readHref={reads ? link({ cluster: g.key }) : null} />
               ))}
             </div>
           </details>
@@ -130,16 +133,18 @@ export function ThemesView({
   );
 }
 
-function Group({ g, fmt, readHref }: { g: ThemeGroup; fmt: Formatters; readHref: string }) {
+function Group({ g, fmt, readHref }: { g: ThemeGroup; fmt: Formatters; readHref: string | null }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
         <h3 className="text-base font-semibold">
           {g.name} <span className="text-sm font-normal text-muted-foreground tabular-nums">{g.totals.files}</span>
         </h3>
-        <Link href={readHref} className="text-sm font-medium text-primary hover:underline">
-          Read this cluster →
-        </Link>
+        {readHref && (
+          <Link href={readHref} className="text-sm font-medium text-primary hover:underline">
+            See insights →
+          </Link>
+        )}
         <p className="text-sm text-muted-foreground tabular-nums">
           {g.totals.median_duration_s != null && `typical ${Math.round(g.totals.median_duration_s)}s · `}
           {fmt.money(g.totals.spend)} spent · hook {pct(g.totals.hook_rate)} · link CTR {pct(g.totals.link_ctr)} ·{' '}

@@ -41,7 +41,10 @@ export const api = {
   fivetranDisconnect: () => apiFetch<{ ok: boolean }>('/connections/meta/disconnect', { method: 'POST' }),
   libraryTree: (q: string) => apiFetch<import('./types').LibraryTree>(`/library/tree${q}`),
   libraryAds: (q: string) => apiFetch<import('./types').LibraryAds>(`/library/ads${q}`),
-  experiments: () => apiFetch<import('./types').ExperimentSummary[]>('/experiments'),
+  experiments: (kind?: 'test' | 'research') =>
+    apiFetch<import('./types').ExperimentSummary[]>(`/experiments${kind ? `?kind=${kind}` : ''}`),
+  whatWorks: () => apiFetch<import('./types').WhatWorks>('/what-works'),
+  finding: (id: string) => apiFetch<import('./types').FocusFinding>(`/what-works/findings/${id}`),
   experiment: (id: string) => apiFetch<import('./types').Experiment>(`/experiments/${id}`),
   experimentAdsets: (id: string) => apiFetch<{ label: string; files: number }[]>(`/experiments/${id}/adsets`),
   experimentAdsetRead: (id: string, label: string) => apiFetch<import('./types').AdSetRead>(`/experiments/${id}/adset-read?label=${encodeURIComponent(label)}`),
@@ -52,6 +55,10 @@ export const api = {
     apiFetch<import('./types').AdSetRead>(`/experiments/${id}/cluster-read?key=${encodeURIComponent(key)}&axis=${axis}&min_spend=${minSpend}&window=${window}`),
   experimentClusterCompare: (id: string, axis: string, minSpend = 0, window = 'last_30d') =>
     apiFetch<import('./types').ClusterCompare>(`/experiments/${id}/cluster-compare?axis=${axis}&min_spend=${minSpend}&window=${window}`),
+  experimentProfileRead: (id: string, key: string) =>
+    apiFetch<import('./types').ProfileRead>(`/experiments/${id}/profile-read?key=${encodeURIComponent(key)}`),
+  experimentClusterLeads: (id: string, key: string) =>
+    apiFetch<import('./types').ClusterLeads>(`/experiments/${id}/cluster-leads?key=${encodeURIComponent(key)}`),
   experimentClusterInsights: (id: string, key: string) =>
     apiFetch<import('./types').ClusterInsights>(`/experiments/${id}/cluster-insights?key=${encodeURIComponent(key)}`),
   creatives: (q: string) => apiFetch<import('./types').Paginated<import('./types').Creative>>(`/creatives${q}`),
@@ -79,4 +86,44 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ ad_account_id: accountId, question }),
     }),
+  briefs: (accountId: string) => apiFetch<import('./types').BriefSummary[]>(`/briefs?ad_account_id=${accountId}`),
+  briefCandidates: (accountId: string) =>
+    apiFetch<import('./types').BriefCandidates>(`/briefs/candidates?ad_account_id=${accountId}`),
+  brief: (id: string) => apiFetch<import('./types').Brief>(`/briefs/${id}`),
+  createBrief: (accountId: string, footageId: string, findingId?: string | null) =>
+    apiFetch<{ id: string }>('/briefs', {
+      method: 'POST',
+      body: JSON.stringify({ ad_account_id: accountId, footage_id: footageId, finding_id: findingId ?? null }),
+    }),
+  saveBrief: (id: string, version: number, title: string, content: import('./types').BriefContent) =>
+    apiFetch<{ version: number }>(`/briefs/${id}`, { method: 'PUT', body: JSON.stringify({ version, title, content }) }),
+  deleteBrief: (id: string) => apiFetch<void>(`/briefs/${id}`, { method: 'DELETE' }),
+  renderBriefVariant: (id: string, code: string) =>
+    apiFetch<{ id: string }>(`/briefs/${id}/render`, { method: 'POST', body: JSON.stringify({ code }) }),
+  uploadBriefOriginal: (id: string, file: File) =>
+    apiFetch<{ duration_s: number }>(`/briefs/${id}/original`, {
+      method: 'POST',
+      body: file,
+      headers: { 'Content-Type': file.type || 'video/mp4' },
+    }),
+  generations: (accountId: string) => apiFetch<import('./types').Generation[]>(`/generate?ad_account_id=${accountId}`),
+  generateCandidates: (accountId: string) =>
+    apiFetch<import('./types').GenerateCandidates>(`/generate/candidates?ad_account_id=${accountId}`),
+  generatePlan: (footageId: string) => apiFetch<import('./types').GeneratePlan>(`/generate/plan?footage_id=${footageId}`),
+  generation: (id: string) => apiFetch<import('./types').Generation>(`/generate/${id}`),
+  createGeneration: (accountId: string, footageId: string, prompt: string, resolution: string) =>
+    apiFetch<{ id: string }>('/generate', {
+      method: 'POST',
+      body: JSON.stringify({ ad_account_id: accountId, footage_id: footageId, prompt, resolution }),
+    }),
+  deleteGeneration: (id: string) => apiFetch<void>(`/generate/${id}`, { method: 'DELETE' }),
+  makeOverview: (accountId: string) => apiFetch<import('./types').MakeOverview>(`/make?ad_account_id=${accountId}`),
+  makeFromCreative: (creativeId: string) => apiFetch<{ footage_id: string }>(`/make/from-creative/${creativeId}`),
+  makeVideo: (footageId: string, findingId?: string) =>
+    apiFetch<import('./types').MakeVideo>(`/make/${footageId}${findingId ? `?finding=${encodeURIComponent(findingId)}` : ''}`),
+  makeFindingEdit: (footageId: string, findingId: string) =>
+    apiFetch<{ brief_id: string; code: string; cut: string[] }>(`/make/${footageId}/finding-edit`, { method: 'POST', body: JSON.stringify({ finding_id: findingId }) }),
+  makeDecide: (footageId: string, ref: string, decision: 'in' | 'skipped' | 'none') =>
+    apiFetch<{ ok: boolean }>(`/make/${footageId}/decide`, { method: 'POST', body: JSON.stringify({ ref, decision }) }),
+  makeLaunch: (footageId: string) => apiFetch<{ experiment_id: string }>(`/make/${footageId}/launch`, { method: 'POST' }),
 };

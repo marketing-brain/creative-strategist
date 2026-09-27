@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Copy, ImageOff, Layers, PlayCircle } from 'lucide-react';
+import { Clapperboard, Copy, ImageOff, Layers, PlayCircle } from 'lucide-react';
 import { CardMedia } from '@/components/creative-card-media';
 import { blobUrl } from '@/lib/blob-url';
 import { CLICK_FLOOR, gap, gapText, gapTone, IMPRESSION_FLOOR } from '@/lib/compare';
@@ -55,9 +55,10 @@ export function CreativeCard({ creative, fmt, extra, ungrouped = false, eager = 
   const t = creative.totals;
   const delivered = !!t && t.impressions > 0;
   return (
+    <div className="group/card relative flex">
     <Link
       href={`/creatives/${creative.id}${ungrouped ? '?scope=creative' : ''}`}
-      className="group flex flex-col overflow-hidden rounded-xl border border-border bg-card transition-shadow hover:shadow-md focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+      className="group flex w-full min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-card transition-shadow hover:shadow-md focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
     >
       <div className="relative aspect-[4/5] overflow-hidden bg-muted">
         {poster || media ? (
@@ -101,6 +102,16 @@ export function CreativeCard({ creative, fmt, extra, ungrouped = false, eager = 
         )}
       </div>
     </Link>
+    {/* A sibling of the card's link, not inside it: links cannot nest. Shown on hover or focus. */}
+    {isVideo && (
+      <Link
+        href={`/make/from/${creative.id}`}
+        className="absolute top-2 right-10 inline-flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] font-medium text-white opacity-0 transition-opacity group-hover/card:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      >
+        <Clapperboard className="size-3" aria-hidden="true" /> Make versions
+      </Link>
+    )}
+    </div>
   );
 }
 

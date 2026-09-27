@@ -3,10 +3,11 @@ import Link from 'next/link';
 import { AccountReadSection } from '@/components/account-read';
 import { buildAccountReadView } from '@/lib/account-read-view';
 import { api } from '@/lib/api';
+import { requireAdmin } from '@/lib/require-admin.server';
 import { requireAuth } from '@/lib/require-auth.server';
 import type { AccountRead } from '@/lib/types';
 
-export const metadata = { title: 'Insights' };
+export const metadata = { title: 'Account-wide read' };
 
 const FORMATS = [
   { value: 'video', label: 'Video', href: '/insights' },
@@ -15,11 +16,11 @@ const FORMATS = [
 
 export default async function Insights({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   await requireAuth();
+  await requireAdmin();
   const format = (await searchParams).format === 'image' ? 'image' : 'video';
   const accounts = await api.accounts();
   const active = accounts.find((a) => a.status === 'active') ?? accounts[0];
   // Meta accounts synced without a display name carry their numeric id as the name.
-  const accountLabel = active && !/^\d+$/.test(active.name.trim()) ? active.name : 'this account';
   // The account read covers video only; the image read is not built yet.
   const accountRead: AccountRead | null =
     active && format === 'video' ? await api.accountRead(active.id).catch(() => ({ status: 'none' as const })) : null;
@@ -28,9 +29,9 @@ export default async function Insights({ searchParams }: { searchParams: Promise
     <div className="space-y-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Insights</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Account-wide read</h1>
           <p className="text-sm text-muted-foreground">
-            What {accountLabel}&apos;s {format} ads do, what works, and how sure that is.
+            Lab reference: every {format} ad compared with every other, across kinds of video. What works shows findings from inside a cluster.
           </p>
         </div>
         <nav aria-label="Ad format" className="inline-flex h-8 items-center rounded-lg bg-muted p-[3px] text-sm font-medium">

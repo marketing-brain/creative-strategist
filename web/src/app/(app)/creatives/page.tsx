@@ -1,3 +1,4 @@
+import { AdsViews } from '@/components/ads-views';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { SearchX } from 'lucide-react';
@@ -10,7 +11,7 @@ import { untaggedNote } from '@/lib/coverage';
 import { formatters, type Formatters } from '@/lib/format';
 import { requireAuth } from '@/lib/require-auth.server';
 
-export const metadata = { title: 'Creatives' };
+export const metadata = { title: 'Ads' };
 
 const PAGE_SIZE = 50;
 
@@ -99,7 +100,10 @@ export default async function Creatives({ searchParams }: { searchParams: Promis
     <div className="space-y-4">
       <RememberGridUrl />
       <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-        <h1 className="text-2xl font-semibold tracking-tight">Creatives</h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight">Ads</h1>
+          <AdsViews current="/creatives" />
+        </div>
         {/* The one place the window is named: every number below covers these days. */}
         <p className="shrink-0 text-sm text-muted-foreground sm:pt-1.5">
           {list.window && <span className="mr-2 font-medium text-foreground">30d</span>}

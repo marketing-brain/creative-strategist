@@ -44,6 +44,47 @@ function value(m: ClusterMetric, v: number, fmt: Formatters) {
 // Colour only when the result holds up; a result that could be chance stays plain.
 const tone = (m: ClusterMetric) => (!HOLDS.has(m.grade) ? 'text-foreground' : m.better ? 'text-success' : 'text-destructive');
 
+const BADGE = {
+  holds: { label: 'Checked', cls: 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200' },
+  lead: { label: 'Lead', cls: 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200' },
+  context: { label: 'Context', cls: 'bg-muted text-muted-foreground' },
+} as const;
+
+// A cluster whose content has been read: its findings, in place of the generic funnel card.
+function ContentCard({ c, name, readHref }: { c: ClusterCard; name: string; readHref: string }) {
+  return (
+    <article className="grid gap-x-6 gap-y-3 border-t border-border py-6 first:border-t-0 first:pt-0 sm:grid-cols-[minmax(0,1fr)_auto]">
+      <div className="min-w-0 space-y-3">
+        <div className="flex items-start gap-2.5">
+          <span className="mt-1 shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-semibold text-primary">Content read</span>
+          <h3 className="text-lg leading-snug font-semibold tracking-tight text-balance">{name}</h3>
+        </div>
+        <ul className="space-y-2">
+          {(c.content ?? []).map((x, i) => (
+            <li key={i} className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[15px] leading-6">
+              <span className={cn('shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em]', BADGE[x.strength].cls)}>
+                {BADGE[x.strength].label}
+              </span>
+              <span className="min-w-0">{x.title}</span>
+              <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
+                {x.p != null ? (x.p < 0.001 ? 'p < 0.001' : `p = ${x.p.toFixed(3)}`) : 'no test'}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <Link href={readHref} className="inline-block text-sm font-medium text-primary hover:underline">
+          Read this cluster →
+        </Link>
+      </div>
+      <div className="grid w-full grid-cols-3 gap-2 sm:w-56">
+        {c.thumbs.map((t) => (
+          <Thumb key={t.id} row={t} />
+        ))}
+      </div>
+    </article>
+  );
+}
+
 function Card({ c, fmt, readHref }: { c: ClusterCard; fmt: Formatters; readHref: string }) {
   const k = KIND[c.kind];
   return (
@@ -108,9 +149,13 @@ export function ClusterCompare({ data, fmt, readHref }: { data: Data; fmt: Forma
       </div>
       {data.cards.length ? (
         <div>
-          {data.cards.map((c) => (
-            <Card key={c.key} c={c} fmt={fmt} readHref={readHref(c.key)} />
-          ))}
+          {data.cards.map((c) =>
+            c.content?.length ? (
+              <ContentCard key={c.key} c={c} name={c.key} readHref={readHref(c.key)} />
+            ) : (
+              <Card key={c.key} c={c} fmt={fmt} readHref={readHref(c.key)} />
+            ),
+          )}
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">No cluster differs from the others by more than chance would give.</p>

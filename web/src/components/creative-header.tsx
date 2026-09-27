@@ -1,3 +1,5 @@
+import Link from 'next/link';
+import { Clapperboard } from 'lucide-react';
 import { BackToGrid } from '@/components/creative-detail-client';
 import { Badge } from '@/components/ui/badge';
 import type { Creative, Footage } from '@/lib/types';
@@ -14,7 +16,17 @@ export function CreativeHeader({ creative, footage }: { creative: Creative; foot
   return (
     <header className="space-y-3">
       <BackToGrid />
-      <h1 className="text-2xl font-semibold tracking-tight text-balance break-words">{creativeTitle(creative)}</h1>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <h1 className="min-w-0 text-2xl font-semibold tracking-tight text-balance break-words">{creativeTitle(creative)}</h1>
+        {creative.format === 'video' && (
+          <Link
+            href={`/make/from/${creative.id}`}
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+          >
+            <Clapperboard className="size-4" aria-hidden="true" /> Make new versions
+          </Link>
+        )}
+      </div>
       <div className="flex flex-wrap items-center gap-1.5">
         <Badge variant="outline" className="capitalize">
           {creative.format}

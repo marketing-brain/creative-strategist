@@ -64,11 +64,12 @@ def score(pairs: list[tuple[str, str]]) -> dict:
 
 @router.get("")
 async def list_experiments(
-    auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)
+    kind: str | None = None, auth: AuthContext = Depends(current_auth), db: Database = Depends(get_db)
 ) -> list[dict]:
+    """All experiments, or only tests / only research when `kind` is given."""
     rows = await db.fetch(
         """
-        SELECT e.id, e.slug, e.title, e.question, e.status, e.created_at,
+        SELECT e.id, e.slug, e.title, e.question, e.status, e.created_at, e.kind,
                (SELECT count(DISTINCT i.footage_id) FROM experiment_item i WHERE i.experiment_id = e.id) AS files,
                (SELECT count(*) FILTER (WHERE s.status = 'done') FROM experiment_step s
                  WHERE s.experiment_id = e.id) AS steps_done,
@@ -76,10 +77,13 @@ async def list_experiments(
                (SELECT s.title FROM experiment_step s WHERE s.experiment_id = e.id
                   AND s.status <> 'done' ORDER BY s.ordinal LIMIT 1) AS current_step,
                (SELECT s.status FROM experiment_step s WHERE s.experiment_id = e.id
-                  AND s.status <> 'done' ORDER BY s.ordinal LIMIT 1) AS current_status
-        FROM experiment e WHERE e.org_id = $1 ORDER BY e.created_at DESC
+                  AND s.status <> 'done' ORDER BY s.ordinal LIMIT 1) AS current_status,
+               (SELECT s.waiting_on FROM experiment_step s WHERE s.experiment_id = e.id
+                  AND s.status <> 'done' ORDER BY s.ordinal LIMIT 1) AS waiting_on
+        FROM experiment e WHERE e.org_id = $1 AND ($2::text IS NULL OR e.kind = $2) ORDER BY e.created_at DESC
         """,
         auth.org_id,
+        kind,
     )
     return [
         {
@@ -94,6 +98,8 @@ async def list_experiments(
             "steps_done": int(r["steps_done"]),
             "current_step": r["current_step"],
             "current_status": r["current_status"],
+            "kind": r["kind"],
+            "waiting_on": r["waiting_on"],
         }
         for r in rows
     ]
@@ -168,9 +174,21 @@ async def get_experiment(
         )
     # One pair per (file, ad set): a file in two ad sets is judged against each of them.
     pairs = [(i["label"], i["group_id"]) for i in out_items if i["group_id"]]
+    # Videos an experiment produced (e.g. a generated edit and its side-by-side), stored as
+    # experiment_result key 'media' so any experiment can show what it made.
+    media_row = await db.fetchval(
+        "SELECT payload FROM experiment_result WHERE experiment_id=$1 AND key='media'", experiment_id
+    )
+    media = [
+        {**m, "url": await blobs.url_for(m["path"])}
+        for m in ((media_row or {}).get("videos") or [])
+        if str(m.get("path", "")).startswith(f"{auth.org_id}/")
+    ]
     return {
+        "media": media,
         "id": str(e["id"]),
         "title": e["title"],
+        "kind": e["kind"],
         "question": e["question"],
         "method": e["method"],
         "rules": e["rules"],
@@ -521,8 +539,20 @@ async def experiment_cluster_compare(
         for g in view["groups"]
     }
     read = cc.cards(vs_rest, acct)
+    # A cluster whose content has been read shows those findings instead of the generic funnel
+    # comparison (the user, 2026-09-26: "replace the old, generic insights").
+    content = {
+        r["key"].split(":", 1)[1]: r["payload"].get("reviewed") or []
+        for r in await db.fetch(
+            "SELECT key, payload FROM experiment_result WHERE experiment_id=$1 AND key LIKE 'profile_read:%'",
+            experiment_id,
+        )
+    }
     for c in read["cards"]:
         c["thumbs"] = thumbs.get(c["key"], [])
+        c["content"] = [
+            {"title": x["title"], "strength": x["strength"], "p": x.get("p")} for x in content.get(c["key"], [])
+        ]
     return {
         **read,
         "account": acct,
@@ -596,3 +626,109 @@ async def experiment_cluster_insights(
     the cluster has more suggestive results than chance, else its counts ('chance'), or
     'insufficient' under 10 videos."""
     return await _stored_read(db, blobs, auth.org_id, experiment_id, f"cluster_read:{key}")
+
+
+@router.get("/{experiment_id}/cluster-leads")
+async def experiment_cluster_leads(
+    experiment_id: UUID,
+    key: str = Query(..., max_length=300),
+    auth: AuthContext = Depends(current_auth),
+    db: Database = Depends(get_db),
+    blobs: BlobStore = Depends(get_blobs),
+) -> dict:
+    """Leads from watching the videos (scripts/cluster_side_by_side.py): the 3 best and 3 worst
+    videos of one cluster by cost per purchase, their first 30 seconds read side by side by a
+    model. Not graded; each point names timestamps a person can check."""
+    if not await db.fetchval(
+        "SELECT 1 FROM experiment WHERE id=$1 AND org_id=$2", experiment_id, auth.org_id
+    ):
+        raise HTTPException(404)
+    row = await db.fetchrow(
+        "SELECT payload, created_at FROM experiment_result WHERE experiment_id=$1 AND key=$2",
+        experiment_id, f"side_by_side:{key}",
+    )
+    if not row:
+        return {"status": "none"}
+    p = row["payload"]
+    ids = [UUID(v["footage_id"]) for v in p["videos"]]
+    extra = {
+        r["id"]: r
+        for r in await db.fetch(
+            """
+            SELECT f.id, f.rep_creative_id,
+                   (SELECT t.path FROM asset t WHERE t.creative_id = f.rep_creative_id
+                     AND t.kind = 'thumbnail' ORDER BY t.seq LIMIT 1) AS poster
+            FROM footage f WHERE f.id = ANY($1::uuid[])
+            """,
+            ids,
+        )
+    }
+    videos = []
+    for v in p["videos"]:
+        e = extra.get(UUID(v["footage_id"]))
+        spend = re.search(r"spend \$([\d,]+)", v.get("card", ""))
+        videos.append({
+            "label": v["label"],
+            "name": _COPY_SUFFIX.sub("", v["name"]) if v.get("name") else v["label"],
+            "cpa": v["cpa"],
+            "spend": float(spend.group(1).replace(",", "")) if spend else None,
+            "rep_creative_id": str(e["rep_creative_id"]) if e and e["rep_creative_id"] else None,
+            "poster_url": await blobs.url_for(e["poster"]) if e and e["poster"] else None,
+        })
+    return {"status": "done", "created_at": row["created_at"].isoformat(), "model": p.get("model"),
+            "videos": videos, "answer": p["answer"]}
+
+
+@router.get("/{experiment_id}/profile-read")
+async def experiment_profile_read(
+    experiment_id: UUID,
+    key: str = Query(..., max_length=300),
+    auth: AuthContext = Depends(current_auth),
+    db: Database = Depends(get_db),
+    blobs: BlobStore = Depends(get_blobs),
+) -> dict:
+    """What separates a cluster's best videos from its worst, from blind profiles
+    (scripts/write_profile_read.py): the insights checked against the data
+    (scripts/review_profile_read.py) and the model's own read, each finding with the counts
+    code computed and what those counts contradict."""
+    if not await db.fetchval(
+        "SELECT 1 FROM experiment WHERE id=$1 AND org_id=$2", experiment_id, auth.org_id
+    ):
+        raise HTTPException(404)
+    row = await db.fetchrow(
+        "SELECT payload, created_at FROM experiment_result WHERE experiment_id=$1 AND key=$2",
+        experiment_id, f"profile_read:{key}",
+    )
+    if not row:
+        return {"status": "none"}
+    p = row["payload"]
+    ids = [UUID(v["id"]) for v in p["videos"].values()]
+    extra = {
+        r["id"]: r
+        for r in await db.fetch(
+            """
+            SELECT f.id, f.rep_creative_id,
+                   (SELECT t.path FROM asset t WHERE t.creative_id = f.rep_creative_id
+                     AND t.kind = 'thumbnail' ORDER BY t.seq LIMIT 1) AS poster
+            FROM footage f WHERE f.id = ANY($1::uuid[])
+            """,
+            ids,
+        )
+    }
+    videos = {}
+    for code, v in p["videos"].items():
+        e = extra.get(UUID(v["id"]))
+        videos[code] = {
+            "code": code,
+            "name": _COPY_SUFFIX.sub("", v["name"]) if v.get("name") else code,
+            "side": v["side"], "cpa": v["cpa"], "spend": v["spend"],
+            "rep_creative_id": str(e["rep_creative_id"]) if e and e["rep_creative_id"] else None,
+            "poster_url": await blobs.url_for(e["poster"]) if e and e["poster"] else None,
+        }
+    a = p.get("answer")
+    return {
+        "status": "done", "created_at": row["created_at"].isoformat(), "model": p.get("model"),
+        "videos": videos, "reviewed": p.get("reviewed", []),
+        "model_read": {"read": a["read"], "findings": a["findings"], "unexplained": a["unexplained"], "caveats": a["caveats"],
+                       "errors": p.get("model_read_errors", [])} if a else None,
+    }

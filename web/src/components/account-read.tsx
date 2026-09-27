@@ -104,7 +104,7 @@ function FunnelStrip({ row, f }: { row: AttributeRow; f: Formatters }) {
   );
 }
 
-function FileCard({ name, unit, f, note }: { name: string; unit: AccountReadUnit | null; f: Formatters; note?: string }) {
+export function FileCard({ name, unit, f, note }: { name: string; unit: AccountReadUnit | null; f: Formatters; note?: string }) {
   const cpa = unit && unit.purchases > 0 ? unit.spend / unit.purchases : null;
   const body = (
     <>

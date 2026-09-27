@@ -9,15 +9,14 @@ import { PairedPatternsView } from '@/components/paired-patterns';
 import { THEME_AXES, ThemesView } from '@/components/themes-view';
 import { ClusterCompare } from '@/components/cluster-compare';
 import { ScopeLabel } from '@/components/scope-label';
-import { AccountReadSection } from '@/components/account-read';
-import { buildAccountReadView } from '@/lib/account-read-view';
+import { ProfileRead } from '@/components/profile-read';
 import { ExperimentStep } from '@/components/experiment-step';
 import { LiveRefresh } from '@/components/live-refresh';
 import { api } from '@/lib/api';
 import { blobUrl } from '@/lib/blob-url';
 import { formatters } from '@/lib/format';
 import { requireAuth } from '@/lib/require-auth.server';
-import type { AccountRead, Experiment, ExperimentItem } from '@/lib/types';
+import type { Experiment, ExperimentItem } from '@/lib/types';
 
 export const metadata = { title: 'Experiment' };
 
@@ -188,14 +187,14 @@ export default async function ExperimentPage({
   const themeWindow = !fixedScope && (sp.window === 'first_7d' || sp.window === 'last_30d') ? sp.window : defaultWindow;
   // Clusters against each other: the tag-cluster experiment only, and not while one cluster is open.
   const comparesClusters = defaultAxis === 'cluster' && !sp.cluster;
-  const [themeView, clusterRead, clusterCompare, clusterInsights] = sortsThemes
+  const [themeView, clusterRead, clusterCompare, profileRead] = sortsThemes
     ? await Promise.all([
         // One cluster open: its read stands alone, "← All clusters" goes back to the list.
         sp.cluster ? Promise.resolve(null) : api.experimentThemes(exp.id, themeAxis, minSpend, themeWindow).catch(() => null),
         sp.cluster ? api.experimentClusterRead(exp.id, sp.cluster, themeAxis, minSpend, themeWindow).catch(() => null) : Promise.resolve(null),
         comparesClusters ? api.experimentClusterCompare(exp.id, themeAxis, minSpend, themeWindow).catch(() => null) : Promise.resolve(null),
         sp.cluster && defaultAxis === 'cluster' && themeAxis === 'cluster'
-          ? api.experimentClusterInsights(exp.id, sp.cluster).catch(() => null)
+          ? api.experimentProfileRead(exp.id, sp.cluster).catch(() => null)
           : Promise.resolve(null),
       ])
     : [null, null, null, null];
@@ -240,9 +239,9 @@ export default async function ExperimentPage({
     <div className="space-y-8">
       <LiveRefresh active={running} />
       <div className="space-y-2">
-        <Link href="/experiments" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+        <Link href={exp.kind === 'test' ? '/tests' : '/experiments'} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="size-4" aria-hidden="true" />
-          Experiments
+          {exp.kind === 'test' ? 'Tests' : 'Research'}
         </Link>
         <h1 className="text-2xl font-semibold tracking-tight text-balance">{exp.title}</h1>
         <p className="max-w-prose">{exp.question}</p>
@@ -261,33 +260,28 @@ export default async function ExperimentPage({
                   ← All clusters
                 </Link>
               </div>
-              {clusterInsights && (clusterInsights.status === 'done' || clusterInsights.status === 'rejected') && (
-                // The Insights tab's read on this cluster's own videos, bar lowered to suggestive. Shown
-                // only for a cluster with more suggestive results than chance.
-                <div className="space-y-4 border-b border-border pb-6">
+              {profileRead?.status === 'done' && (profileRead.reviewed?.length ?? 0) > 0 ? (
+                <div className="space-y-3">
                   <div className="max-w-[68ch] space-y-1">
                     <h3 className="flex flex-wrap items-center gap-2 text-base font-semibold">
-                      Insights within this cluster <ScopeLabel>Lifetime · all {clusterInsights.n_units} videos of this kind</ScopeLabel>
+                      What separates the best from the worst <ScopeLabel>Last 30 days · every video watched</ScopeLabel>
                     </h3>
-                    {clusterInsights.stats && (
-                      <p className="text-sm leading-6 text-muted-foreground">
-                        {clusterInsights.stats.suggestive} of {clusterInsights.stats.clean} clean comparisons came out suggestive, where chance gives about{' '}
-                        {clusterInsights.stats.chance}. Every finding is a lead, not evidence.
-                      </p>
-                    )}
+                    <p className="text-sm leading-6 text-muted-foreground">
+                      Every video in the cluster was watched and described without its numbers, then compared on its content: the offer,
+                      the argument, who vouches for it, the tone. Each card shows its test&apos;s p-value; leads did not clear the bar.
+                    </p>
                   </div>
-                  <AccountReadSection
-                    status={clusterInsights.status}
-                    nUnits={clusterInsights.n_units}
-                    view={buildAccountReadView(clusterInsights as AccountRead)}
-                    currency={accounts.find((a) => a.status === 'active')?.currency}
-                  />
+                  <ProfileRead data={profileRead} f={fmt} />
                 </div>
+              ) : (
+                <p className="max-w-[68ch] text-sm leading-6 text-muted-foreground">
+                  Content not read yet. This cluster&apos;s videos have not been watched and compared on what they say and show.
+                </p>
               )}
-              <h3 className="flex flex-wrap items-center gap-2 text-base font-semibold">
-                Ad by ad <ScopeLabel>Last 30 days · $200+ spent</ScopeLabel>
-              </h3>
-              <AdSetReadView read={clusterRead} fmt={fmt} tableOnly />
+              {/* The per-video table folds itself under "Every number behind these". */}
+              <div className="border-t border-border pt-4">
+                <AdSetReadView read={clusterRead} fmt={fmt} tableOnly />
+              </div>
             </section>
           )}
           {clusterCompare && <ClusterCompare data={clusterCompare} fmt={fmt} readHref={(key) => `${clustersHref}&cluster=${encodeURIComponent(key)}`} />}
@@ -442,6 +436,27 @@ export default async function ExperimentPage({
               ))}
             </ol>
           </section>
+          {exp.media && exp.media.length > 0 && (
+            <section className="space-y-3" aria-labelledby="media-title">
+              <h2 id="media-title" className="text-lg font-semibold">
+                What it made
+              </h2>
+              <div className="grid gap-6 sm:grid-cols-2">
+                {exp.media.map((m) => (
+                  <figure key={m.path} className="space-y-2">
+                    <video src={m.url} controls preload="metadata" className="max-h-[70vh] w-full rounded-lg bg-black" />
+                    <figcaption className="space-y-1">
+                      <p className="text-base font-semibold">{m.title}</p>
+                      {m.note && <p className="text-sm text-muted-foreground">{m.note}</p>}
+                      <a href={m.url} download className="text-sm font-medium text-primary hover:underline">
+                        Download
+                      </a>
+                    </figcaption>
+                  </figure>
+                ))}
+              </div>
+            </section>
+          )}
           {patterns && <PairedPatternsView data={patterns} fmt={fmt} />}
           <ExperimentRules rules={exp.rules} />
 

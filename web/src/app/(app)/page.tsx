@@ -5,9 +5,6 @@ import { requireAuth } from '@/lib/require-auth.server';
 export default async function Home() {
   await requireAuth();
   const accounts = await api.accounts();
-  // The library is the front door, and `/next` is a destination you arrive at: the nav reads
-  // creatives -> insights -> next, evidence before interpretation before recommendation, and
-  // a menu that argues one shape while the app lands you somewhere else is lying about the
-  // product. Landing here also costs one fewer API call than probing for a plan first.
+  // Ads is the front door: the first step of the loop (This week was removed 2026-09-26).
   redirect(accounts.some((a) => a.status === 'active') ? '/creatives' : '/onboarding');
 }

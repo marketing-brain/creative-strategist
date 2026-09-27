@@ -19,6 +19,8 @@ export type Action = {
   adName: string;
   posterUrl?: string | null;
   creativeId: string | null;
+  /** The video, so an action can open its Make page. */
+  footageId: string | null;
   /** 30-day spend. The same quantity for both sources, which is what makes one list honest. */
   money: number;
   /** One line of why, already written. */
@@ -70,6 +72,7 @@ function fromCard(c: NextCard): Action {
     adName: c.title,
     posterUrl: c.poster_url,
     creativeId: c.rep_creative_id,
+    footageId: c.footage_id ?? null,
     money: c.spend_30d,
     detail: c.written?.job ?? c.lines.job,
     cite: `${c.pid} · ${c.grade}`,
@@ -87,6 +90,7 @@ function fromRow(r: NextAllocationRow): Action {
     adName: r.headline,
     posterUrl: r.poster_url,
     creativeId: r.rep_creative_id,
+    footageId: r.footage_id ?? null,
     money: r.stake.amount,
     detail: r.verdict,
     cite: null,
