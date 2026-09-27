@@ -8,8 +8,6 @@ import {
   Clapperboard,
   FlaskConical,
   LayoutGrid,
-  Microscope,
-  Globe,
   MessageCircleQuestion,
   PanelLeftClose,
   PanelLeftOpen,
@@ -35,11 +33,10 @@ const journey: NavItem[] = [
   { href: '/tests', label: 'Tests', icon: FlaskConical },
 ];
 const lab: NavItem[] = [
-  // Account-wide reads compare across kinds of video, which confuses format with content.
-  // Kept for reference only; What works shows findings from inside a cluster.
-  { href: '/insights', label: 'Account-wide read', icon: Globe },
+  // Account-wide read (/insights) and Research (/experiments) are hidden from the sidebar
+  // (2026-09-27): account-wide reads confuse format with content, and What works shows findings
+  // from inside a cluster. Both pages still open by direct link.
   { href: '/ask', label: 'Ask', icon: MessageCircleQuestion },
-  { href: '/experiments', label: 'Research', icon: Microscope },
 ];
 
 function linkClasses(active: boolean) {
@@ -56,10 +53,8 @@ export function Nav({ isAdmin = false }: { isAdmin?: boolean }) {
     const item = [...journey, ...lab].find((i) => i.href === href);
     return under(href) || !!item?.also?.some(under);
   };
-  const groups = [
-    { label: null as string | null, items: journey },
-    ...(isAdmin ? [{ label: 'Lab', items: lab }] : []),
-  ];
+  // Ask sits right under Tests, no subheader; still admins only.
+  const groups = [{ label: null as string | null, items: isAdmin ? [...journey, ...lab] : journey }];
   const allItems = groups.flatMap((g) => g.items);
 
   // The rail's *appearance* comes entirely from the `sidebar-collapsed` class the init
