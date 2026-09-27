@@ -430,7 +430,7 @@ export default async function WhatWorks() {
             Every new brief is written with the rules and shared traits of its kind of video. Open a row to see the evidence and the videos to try it on.
           </p>
           <Link
-            href="/make?view=new"
+            href="/new-video"
             className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
           >
             Make a brand-new video of one of these kinds <ArrowRight className="size-4" aria-hidden="true" />

@@ -31,7 +31,7 @@ type NavItem = { href: string; label: string; icon: LucideIcon; also?: string[] 
 const journey: NavItem[] = [
   { href: '/creatives', label: 'Ads', icon: LayoutGrid, also: ['/campaigns', '/clusters'] },
   { href: '/what-works', label: 'What works', icon: TrendingUp },
-  { href: '/make', label: 'Make', icon: Clapperboard, also: ['/briefs', '/generate'] },
+  { href: '/make', label: 'Make', icon: Clapperboard, also: ['/new-video', '/briefs', '/generate'] },
   { href: '/tests', label: 'Tests', icon: FlaskConical },
 ];
 const lab: NavItem[] = [
