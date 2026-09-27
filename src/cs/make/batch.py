@@ -39,6 +39,7 @@ def ideas(brief: dict | None, generations: list[dict], decisions: dict[str, str]
         c = brief["content"]
         renders = brief.get("renders") or {}
         focus = (brief.get("focus") or {}).get("title")
+        focus_id = (brief.get("focus") or {}).get("id")
         has_original = bool(brief.get("has_original"))
         placeholder_offer = not (c.get("offer") or "").strip() or "[" in (c.get("offer") or "")
         for batch in c.get("batches") or []:
@@ -54,6 +55,7 @@ def ideas(brief: dict | None, generations: list[dict], decisions: dict[str, str]
                     "change": v.get("change"),
                     "read_on": v.get("read_on"),
                     "finding": focus,
+                    "finding_id": focus_id if focus else None,
                     "cost_label": "Free re-edit" if edit else "Needs a shoot",
                     "cost_usd": 0 if edit else None,
                     "decision": decisions.get(ref),
@@ -101,6 +103,49 @@ def ideas(brief: dict | None, generations: list[dict], decisions: dict[str, str]
                 out.append(idea)
         # New-creator scripts belong to the cluster, not to one video: not listed here.
     for g in generations:
+        if g.get("kind") == "fix":
+            if g["status"] == "confirm":
+                continue  # planned but not approved: shown on its fix row, not as a version
+            fx = g["fix"] or {}
+            ref = f"gen:{g['id']}"
+            state = {"queued": "working", "running": "working", "failed": "failed"}.get(g["status"], "ready")
+            idea = {
+                "ref": ref,
+                "kind": "fix",
+                "code": "S",
+                "title": (
+                    f"On-screen line over {_sec(fx.get('start', 0))} to {_sec(fx.get('end', 0))}"
+                    if fx.get("kind") == "line"
+                    else f"Seedance shot over {_sec(fx.get('start', 0))} to {_sec(fx.get('end', 0))}"
+                ),
+                "name": None,
+                "change": (
+                    f"On screen over {_sec(fx.get('start', 0))}–{_sec(fx.get('end', 0))}: “{g.get('prompt')}”"
+                    if fx.get("kind") == "line"
+                    else f"A new shot over {_sec(fx.get('start', 0))}–{_sec(fx.get('end', 0))} while the voice plays on: {fx.get('trait', '')}"
+                ),
+                "read_on": fx.get("read_on"),
+                "finding": fx.get("finding") or ("An untested idea" if fx.get("untested") else None),
+                "finding_id": fx.get("finding_id"),
+                "cost_label": "Free" if fx.get("kind") == "line" else f"Paid, ${g['estimated_cost_usd']:.2f}" if g.get("estimated_cost_usd") else "Paid",
+                "cost_usd": g.get("estimated_cost_usd"),
+                "decision": decisions.get(ref),
+                "state": state,
+                "blockers": [],
+                "warnings": list(g.get("notes") or []),
+                "media_url": g.get("compare_url"),
+                "result_url": g.get("result_url"),
+                "media_path": g.get("result_path"),
+                "edit": None,
+                "generation_id": g["id"],
+                "stage": g.get("stage"),
+                "part": fx.get("part"),
+                "fix_start": fx.get("start"),
+            }
+            if state == "failed":
+                idea["warnings"].append(f"Did not finish: {g.get('error')}")
+            out.append(idea)
+            continue
         ref = f"gen:{g['id']}"
         state = {"queued": "working", "running": "working", "failed": "failed"}.get(
             g["status"], "ready"
@@ -134,12 +179,15 @@ def ideas(brief: dict | None, generations: list[dict], decisions: dict[str, str]
         if state == "ready" and g.get("resolution") == "480p":
             idea["blockers"].append("A 480p look test. Generate it again at 720p to launch it.")
         out.append(idea)
-    # Number the generated openings so they read as G1, G2 in order of creation.
-    n = 0
+    # Number the generated openings and shots so they read as G1, G2 and S1, S2 in order of creation.
+    n = m = 0
     for i in reversed(out):
         if i["kind"] == "opening":
             n += 1
             i["code"] = f"G{n}"
+        elif i["kind"] == "fix":
+            m += 1
+            i["code"] = f"S{m}"
     return out
 
 
@@ -230,6 +278,9 @@ def changes(idea: dict, duration: float) -> dict | None:
     """The source range an idea changes, the part of the video that is, and where the change
     shows in the new version (for the before/after)."""
     kind, edit = idea["kind"], idea.get("edit")
+    if kind == "fix" and idea.get("fix_start") is not None:
+        a = float(idea["fix_start"])
+        return {"start": a, "end": a + 1, "part": idea.get("part") or part_at(a, duration), "output_at": a, "how": "covers"}
     if kind in ("pickup", "opening"):
         return {"start": 0.0, "end": min(OPENING_S, duration), "part": "opening", "output_at": 0.0, "how": "replaces"}
     if kind == "script" or not edit:

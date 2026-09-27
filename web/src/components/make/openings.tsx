@@ -10,8 +10,10 @@ import { api, ApiError } from '@/lib/api';
 import type { GeneratePlan } from '@/lib/types';
 import { money2 } from './shared';
 
-const TEMPLATE =
-  'Keep the person, their face, mouth movements, hands, the product and all on-screen text exactly as they are. Change only the background: ';
+// What to change, only: the server wraps it in ByteDance's edit structure (keep the person, lip sync,
+// hands, product, on-screen text and timing; process only the background). Setting and lighting
+// swaps are what edit models do well.
+const TEMPLATE = '';
 
 // One press is one paid call, so the price is on the button and a second press confirms it.
 export function Composer({ accountId, footageId, onClose }: { accountId: string; footageId: string; onClose: () => void }) {
@@ -37,7 +39,7 @@ export function Composer({ accountId, footageId, onClose }: { accountId: string;
       live = false;
     };
   }, [footageId]);
-  const tooShort = prompt.trim().length < TEMPLATE.length + 5;
+  const tooShort = prompt.trim().length < 15;
   const go = async () => {
     setBusy(true);
     setError(null);
@@ -75,8 +77,17 @@ export function Composer({ accountId, footageId, onClose }: { accountId: string;
             The original sound runs under the whole ad.
           </p>
           <div className="space-y-2">
-            <label htmlFor="gen-prompt" className="text-sm font-medium">What should the opening become?</label>
-            <Textarea id="gen-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={4} />
+            <label htmlFor="gen-prompt" className="text-sm font-medium">New setting and lighting for the opening</label>
+            <Textarea
+              id="gen-prompt"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              rows={3}
+              placeholder="e.g. a dark bedroom at 3am, lit only by a bedside lamp, a phone glowing on the nightstand"
+            />
+            <p className="text-[12px] text-muted-foreground">
+              Only the background changes. The person, what they say, their hands, the product and any on-screen text stay exactly as they are.
+            </p>
             <p className="text-sm text-muted-foreground">Edits that leave the person and product alone hold up best. Changing someone&apos;s face or words needs their consent.</p>
           </div>
           <fieldset className="space-y-2">
@@ -108,7 +119,7 @@ export function Composer({ accountId, footageId, onClose }: { accountId: string;
                   <Wand2 /> {busy ? 'Starting' : `Spend ${money2(plan.cost[resolution])}`}
                 </Button>
                 <Button variant="ghost" onClick={() => setConfirming(false)} disabled={busy}>Cancel</Button>
-                <span className="text-sm text-muted-foreground">One paid call on WaveSpeed, not retried if it fails.</span>
+                <span className="text-sm text-muted-foreground">One paid call to Seedance 2.5 on AI Gateway, not retried if it fails.</span>
               </>
             ) : (
               <Button onClick={() => setConfirming(true)} disabled={tooShort}>

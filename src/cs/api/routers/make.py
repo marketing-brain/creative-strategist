@@ -17,18 +17,20 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from cs.api.auth import AuthContext, current_auth
+from cs.api.auth import AuthContext, current_auth, require_admin
 from cs.api.deps import get_blobs, get_db, get_settings_dep
 from cs.api.routers import briefs as briefs_router
 from cs.api.routers import generate as generate_router
 from cs.briefs import facts
 from cs.briefs import findings as findings_mod
-from cs.core import ids
+from cs.core import ids, queue
 from cs.core.blobs import BlobStore
 from cs.core.config import Settings
 from cs.core.db import Database
 from cs.experiments import tag_clusters as tc
 from cs.make import batch as batch_mod
+from cs.make import fixes as fixes_mod
+from cs.make import seedance as sd_mod
 from cs.make import verdict as verdict_mod
 from cs.make.reconcile import reconcile
 
@@ -194,7 +196,7 @@ async def overview(
     for r in batch_rows:
         fid = str(r["footage_id"])
         if r["drafting_in"]:
-            v = await video(r["footage_id"], auth, db, blobs)
+            v = await video(r["footage_id"], auth=auth, db=db, blobs=blobs)
             stages[fid] = "ready" if v["batch"]["can_launch"] else "drafting"
         elif r["launched"]:
             stages[fid] = "launched"
@@ -397,10 +399,13 @@ async def video(
             "close": [duration * batch_mod.CLOSE_FRACTION, duration],
         },
     }
+    drop = facts.steepest_drop([(t, v) for t, v in curve]) if curve else None
+    fixes = await _fixes(db, auth.org_id, footage_id, verdict, timeline, drop, (focus or {}).get("id"), gens)
     return {
         "verdict": verdict,
         "timeline": timeline,
         "focus": focus,
+        "fixes": fixes,
         "ideas": idea_list,
         "batch": batch_mod.batch_view(idea_list, draft, cpa),
         "launched": [
@@ -421,10 +426,89 @@ async def video(
         "account_hook_rate": hooks["account_hook_rate"],
         "account_cpa": hooks["account_cpa"],
         "curve": curve,
-        "steepest_drop": facts.steepest_drop([(t, v) for t, v in curve]) if curve else None,
+        "steepest_drop": drop,
         "brief": brief,
         "generations": gens,
     }
+
+
+async def _fixes(db: Database, org_id: UUID, footage_id: UUID, verdict: dict, timeline: dict, drop, focus_id, gens: list[dict]) -> list[dict]:
+    """The fixes What works supports for this ad, each with where it stands (latest attempt)."""
+    out = await fixes_mod.candidates(db, org_id, footage_id, verdict, timeline, drop, focus_id)
+    latest: dict[str, dict] = {}
+    for g in gens:  # newest first
+        if g.get("kind") == "fix" and g.get("fix"):
+            latest.setdefault(g["fix"].get("key"), g)
+    for f in out:
+        g = latest.get(f["key"])
+        f["attempt"] = (
+            {
+                "id": g["id"],
+                "status": g["status"],
+                "stage": g.get("stage"),
+                "error": g.get("error"),
+                "cost_usd": g.get("estimated_cost_usd"),
+                "prompt": g.get("plan_prompt"),
+            }
+            if g
+            else None
+        )
+    return out
+
+
+def _words_between(timeline: dict, a: float, b: float) -> str:
+    return " ".join(x["text"] for x in timeline.get("sentences") or [] if x["end"] > a and x["start"] < b)
+
+
+@router.post("/{footage_id}/fixes/{key}/plan")
+async def plan_fix(
+    footage_id: UUID,
+    key: str,
+    auth: AuthContext = Depends(require_admin),
+    db: Database = Depends(get_db),
+    blobs: BlobStore = Depends(get_blobs),
+    settings: Settings = Depends(get_settings_dep),
+) -> dict:
+    """Plan one fix: a small call writes the shot, code writes the prompt. Stops at 'confirm' with
+    the exact cost; nothing is generated until it is approved."""
+    v = await video(footage_id, auth=auth, db=db, blobs=blobs)
+    fix = next((f for f in v["fixes"] if f["key"] == key), None)
+    if fix is None:
+        raise HTTPException(404, "No such fix for this video.")
+    if fix["attempt"] and fix["attempt"]["status"] in ("confirm", "queued", "running"):
+        return {"id": fix["attempt"]["id"]}
+    fx = {k: fix[k] for k in fix if k != "attempt"}
+    words = _words_between(v["timeline"], fix["start"], fix["end"])
+    try:
+        if fx["kind"] == "line":  # free: write the line and render it now
+            gid = await fixes_mod.create_line(db, settings, auth.org_id, UUID(v["ad_account_id"]), footage_id, fx, words, auth.user_id)
+            await queue.enqueue(db, auth.org_id, fixes_mod.JOB, {"generation_id": str(gid)}, dedup_key=f"fix:{gid}", max_attempts=1)
+        else:
+            gid = await fixes_mod.create_plan(db, settings, auth.org_id, UUID(v["ad_account_id"]), footage_id, fx, words, auth.user_id)
+    except sd_mod.PlanError as exc:
+        raise HTTPException(422, f"The plan broke a rule, so nothing was made: {exc}") from exc
+    return {"id": str(gid)}
+
+
+@router.post("/fixes/{generation_id}/approve")
+async def approve_fix(
+    generation_id: UUID,
+    auth: AuthContext = Depends(require_admin),
+    db: Database = Depends(get_db),
+) -> dict:
+    """Approve the planned cost and generate the fix."""
+    r = await db.fetchrow(
+        "UPDATE generation SET status='queued', approved_at=now(), stage='Waiting to start', error=NULL"
+        " WHERE id=$1 AND org_id=$2 AND kind='fix' AND status='confirm' RETURNING id",
+        generation_id,
+        auth.org_id,
+    )
+    if r is None:
+        raise HTTPException(409, "This fix is not waiting for approval.")
+    await queue.enqueue(
+        db, auth.org_id, fixes_mod.JOB, {"generation_id": str(generation_id)}, dedup_key=f"fix:{generation_id}", max_attempts=1
+    )
+    return {"id": str(generation_id), "status": "queued"}
 
 
 class DecideBody(BaseModel):
@@ -502,7 +586,7 @@ async def launch(
 ) -> dict:
     """The person has uploaded the batch to Meta: record it as a test under Tests, with the
     original as control and every variant file attached."""
-    v = await video(footage_id, auth, db, blobs)
+    v = await video(footage_id, auth=auth, db=db, blobs=blobs)
     b = v["batch"]
     if not b["id"] or not b["can_launch"]:
         raise HTTPException(
@@ -512,7 +596,7 @@ async def launch(
     chosen = [i for i in v["ideas"] if i["ref"] in b["chosen"]]
     paths: dict[str, str | None] = {}
     for i in chosen:
-        if i["kind"] == "opening":
+        if i["kind"] in ("opening", "fix"):
             paths[i["ref"]] = await db.fetchval(
                 "SELECT result_path FROM generation WHERE id=$1::uuid", i["generation_id"]
             )
@@ -574,6 +658,9 @@ async def launch(
                     "effect": i["read_on"] or "",
                     "dropped": [],
                     "decided_by": "you",
+                    # What the test reads back: the finding it tests and the ad it runs as.
+                    "finding_id": i.get("finding_id"),
+                    "ad_name": i.get("name") or f"{v['name']}-{i['code']}",
                 }
                 for i in chosen
             ],

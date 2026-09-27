@@ -2,7 +2,6 @@ import Link from 'next/link';
 import { ArrowRight, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import { cn } from 'cn';
 import { Mark } from '@/components/account-read-evidence';
-import { CreatorScripts } from '@/components/creator-scripts';
 import { OpenFromHash } from '@/components/open-from-hash';
 import { api } from '@/lib/api';
 import { splitLede } from '@/lib/account-read-view';
@@ -34,6 +33,14 @@ const STATUS: Record<FindingStatus, { label: string; cls: string }> = {
   briefed: { label: 'Brief written', cls: 'border-foreground/30 text-foreground' },
   made: { label: 'Versions made', cls: 'border-success/40 text-success' },
 };
+const TEST_STATE: Record<string, { label: string; cls: string }> = {
+  confirmed: { label: 'Confirmed by a test', cls: 'border-success/40 bg-success/10 text-success' },
+  failed: { label: 'Failed its test', cls: 'border-destructive/40 bg-destructive/10 text-destructive' },
+  mixed: { label: 'Tests disagree', cls: 'border-chart-2/50 text-chart-2' },
+  testing: { label: 'In a test', cls: 'border-primary/40 text-primary' },
+};
+const MEASURE: Record<string, string> = { stop: 'share still watching at 3s', click: 'click rate', buy: 'purchase rate' };
+const pctOf = (x: number | null | undefined) => (x == null ? '–' : `${(x * 100).toFixed(1)}%`);
 const FOCUS = 'focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none';
 const dayFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 const day = (iso: string) => dayFmt.format(new Date(`${iso.slice(0, 10)}T00:00:00Z`));
@@ -173,6 +180,27 @@ function Evidence({ f, fmt }: { f: PlayFinding; fmt: Formatters }) {
   return (
     <div className="grid gap-5 border-t border-border py-5 first:border-t-0 md:grid-cols-[minmax(0,1fr)_17rem]">
       <div className="min-w-0 space-y-4">
+        {(f.tests ?? []).length > 0 && (
+          <ul className="space-y-1 rounded-lg border border-border bg-muted/30 p-3 text-[13px]">
+            {f.tests!.map((t, k) => (
+              <li key={k}>
+                <span className={cn('font-medium', t.verdict === 'won' ? 'text-success' : t.verdict === 'lost' ? 'text-destructive' : 'text-foreground')}>
+                  Test {t.verdict === 'won' ? 'won' : t.verdict === 'lost' ? 'lost' : t.verdict === 'no difference' ? 'showed no difference' : t.verdict === 'not found' ? 'ads not found yet' : 'still running'}
+                </span>{' '}
+                on {MEASURE[t.measure]}
+                {t.version?.rate != null && t.original?.rate != null && `: ${pctOf(t.version.rate)} against the original's ${pctOf(t.original.rate)}`}
+                {t.experiment_id && (
+                  <>
+                    {' '}
+                    <Link href={`/experiments/${t.experiment_id}`} className="text-primary hover:underline">
+                      {t.test ?? 'the test'}
+                    </Link>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="space-y-1">
           <p className="text-[13px] text-muted-foreground">
             In <span className="font-medium text-foreground">{kindShort(f.cluster)}</span> it{' '}
@@ -241,6 +269,8 @@ function ChoiceRow({ c, fmt }: { c: PlayChoice; fmt: Formatters }) {
   const t = c.headline && head ? tone(c.headline.label, head.main, head.vs) : null;
   const thumbs = c.findings.filter((f) => f.tier === 'rule' || f.tier === 'test').flatMap((f) => f.targets).slice(0, 3);
   const conf = c.confidence;
+  const states = c.findings.map((f) => f.test?.state).filter(Boolean) as string[];
+  const tested = ['failed', 'mixed', 'confirmed', 'testing'].find((x) => states.includes(x)) ?? null;
   return (
     <li id={anchor(c.key)} className="scroll-mt-6">
       <details className="group">
@@ -284,6 +314,11 @@ function ChoiceRow({ c, fmt }: { c: PlayChoice; fmt: Formatters }) {
             )}
             <div className="flex items-center gap-1.5">
               {thumbs.map((v) => <Thumb key={v.footage_id} url={v.poster_url} className="w-7" size={28} />)}
+              {tested && (
+                <span className={cn('ml-1 flex w-fit items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[12px] leading-none font-medium whitespace-nowrap', TEST_STATE[tested].cls)}>
+                  {TEST_STATE[tested].label}
+                </span>
+              )}
               <span className={cn('ml-1 flex w-fit items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[12px] leading-none font-medium whitespace-nowrap', st.cls)}>
                 {status === 'writing' && <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />}
                 {st.label}
@@ -391,11 +426,15 @@ export default async function WhatWorks() {
             <Notes title="What the videos of each kind share" choices={by('context')} />
             <Notes title="Stories about single videos" choices={by('story')} />
           </div>
-
-          <CreatorScripts rows={w?.creator_scripts ?? []} />
           <p className="text-[13px] text-muted-foreground">
             Every new brief is written with the rules and shared traits of its kind of video. Open a row to see the evidence and the videos to try it on.
           </p>
+          <Link
+            href="/make?view=new"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+          >
+            Make a brand-new video of one of these kinds <ArrowRight className="size-4" aria-hidden="true" />
+          </Link>
         </>
       )}
     </div>

@@ -30,6 +30,8 @@ from cs.core.ids import new_id
 from cs.experiments import creator_script
 from cs.experiments import tag_clusters as tc
 from cs.make import script_video as sv
+from cs.make import seedance as sd_mod
+from cs.make import test_read
 from cs.make.reconcile import reconcile
 
 router = APIRouter(prefix="/what-works")
@@ -152,10 +154,17 @@ async def what_works(
         _CACHE[auth.org_id] = (time.monotonic(), copy.deepcopy(body))
     out = body["clusters"]
     progress = await _progress(db, auth.org_id)
+    tested = await test_read.by_finding(db, auth.org_id)
     for c in out:
         for f in c["findings"]:
             f["progress"] = progress.get(f["id"], [])
             f["status"] = _status(f["progress"])
+            # What tests of this finding found once launched (Make → Tests → back here).
+            f["tests"] = [
+                {k: t.get(k) for k in ("experiment_id", "test", "title", "verdict", "measure", "p", "version", "original")}
+                for t in tested.get(f["id"], [])
+            ]
+            f["test"] = test_read.summary(tested.get(f["id"], []))
     body["playbook"] = await _playbook(db, eid, out)
     body["creator_scripts"] = await _creator_scripts(db, eid, out, blobs, auth.org_id)
     return body
@@ -170,7 +179,7 @@ async def _creator_scripts(db: Database, eid, clusters: list[dict], blobs: BlobS
         r["cluster"]: r
         for r in await db.fetch(
             "SELECT DISTINCT ON (cluster) id, cluster, status, stage, error, path, checks, estimated_cost_usd,"
-            " clip_cost_usd, plan, voice, product, created_at"
+            " clip_cost_usd, plan, voice, product, created_at, experiment_id"
             " FROM script_video WHERE org_id=$1 ORDER BY cluster, created_at DESC",
             org_id,
         )
@@ -187,6 +196,7 @@ async def _creator_scripts(db: Database, eid, clusters: list[dict], blobs: BlobS
                 "name": c["name"],
                 "files": c["files"],
                 "spend": c["spend"],
+                "cpa": c.get("cpa"),
                 "script": script,
                 "makeable": sv.makeable(c["key"]),
                 "estimate": sv.estimate(script, c["key"]) if script and sv.makeable(c["key"]) else None,
@@ -199,11 +209,14 @@ async def _creator_scripts(db: Database, eid, clusters: list[dict], blobs: BlobS
                     "checks": v["checks"],
                     "estimated_cost_usd": float(v["estimated_cost_usd"]) if v["estimated_cost_usd"] is not None else None,
                     "clip_cost_usd": float(v["clip_cost_usd"]) if v["clip_cost_usd"] is not None else None,
-                    "clip_plan": sv.clip_cost(v["plan"], v["voice"]) if v["plan"] and v["voice"] else None,
-                    "shots": [{"prompt": x["prompt"], "product": x["product"], "lines": x["lines"]} for x in (v["plan"] or {}).get("shots", [])],
+                    "clip_plan": _clip_plan(v),
+                    "shots": _shots(v["plan"]),
+                    "prompt_text": (v["plan"] or {}).get("prompt"),
+                    "mode": sv.mode(v["cluster"]),
                     "voice_url": await blobs.url_for(v["voice"]["path"]) if (v["voice"] or {}).get("path") else None,
                     "product_url": await blobs.url_for(v["product"]["path"]) if (v["product"] or {}).get("path") else None,
                     "created_at": v["created_at"].isoformat(),
+                    "experiment_id": str(v["experiment_id"]) if v["experiment_id"] else None,
                 }
                 if v
                 else None,
@@ -233,6 +246,117 @@ async def approve_script_video(
     return {"id": str(video_id), "status": "queued"}
 
 
+def _ad_name(cluster: str, title: str | None) -> str:
+    """The name the page shows next to Download (new-video.tsx builds the same one)."""
+    kind = re.sub(r"[^A-Za-z0-9]+", "", re.sub(r"\s*\(.*?\)\s*", "", cluster))
+    t = re.sub(r"[^A-Za-z0-9]+", "", title or "Script")
+    return f"{'AIGEN_' if sv.makeable(cluster) else ''}NEW_{kind}_{t}"
+
+
+@router.post("/script-video/{video_id}/launch")
+async def launch_script_video(
+    video_id: UUID,
+    auth: AuthContext = Depends(current_auth),
+    db: Database = Depends(get_db),
+) -> dict:
+    """The person has put the new video live in Meta: record it as a test under Tests, judged
+    against the other videos of its kind."""
+    v = await db.fetchrow("SELECT * FROM script_video WHERE id=$1 AND org_id=$2", video_id, auth.org_id)
+    if v is None:
+        raise HTTPException(404)
+    if v["experiment_id"]:
+        return {"experiment_id": str(v["experiment_id"])}
+    if v["status"] != "done" or not v["path"]:
+        raise HTTPException(409, "The video is not finished yet.")
+    if (v["checks"] or {}).get("too_alike"):
+        raise HTTPException(409, "A shot looks like a video that already ran. Make another before launching.")
+    script = v["script"]
+    eid = new_id()
+    title = f"New video, {v['cluster']}: {script.get('title') or 'from the script'}"
+    steps = [
+        ("launch", "Launch", "Put the new video live in a TESTING ad set alongside the kind's current videos.", "done", "Marked launched from Make."),
+        ("read-openings", "Read the opening", "After a few thousand impressions, compare the share still watching at 3s with its kind's.", "pending", None),
+        ("read-purchases", "Read cost per purchase", "Once it has about 20 purchases, compare cost per purchase with its kind's.", "pending", None),
+    ]
+    async with db.transaction() as tx:
+        await tx.execute(
+            "INSERT INTO experiment (id, org_id, slug, title, question, method, rules, kind)"
+            " VALUES ($1, $2, $3, $4, $5, $6, $7, 'test')",
+            eid,
+            auth.org_id,
+            f"new-{str(video_id)[:8]}",
+            title,
+            "Does a new video made from this kind's script hold up against the kind's current videos?",
+            "The new video runs in a TESTING ad set; it is judged against the other videos of its kind on the opening and on cost per purchase.",
+            [
+                {
+                    "title": script.get("title") or "New video",
+                    "rule": script.get("note") or "",
+                    "why": "; ".join(f["title"] for f in script.get("follows") or []) or "The kind's script.",
+                    "effect": "cost per purchase",
+                    "dropped": [],
+                    "decided_by": "you",
+                    # The same ad name the page tells the person to use, and the finding it tests.
+                    "ad_name": _ad_name(v["cluster"], script.get("title")),
+                    "finding_id": next((f["id"] for f in script.get("follows") or []), None),
+                }
+            ],
+        )
+        for n, (key, st_title, detail, status, note) in enumerate(steps, 1):
+            await tx.execute(
+                "INSERT INTO experiment_step (experiment_id, ordinal, key, title, detail, status, waiting_on, result_note,"
+                " progress_done, progress_total, cost_usd, finished_at)"
+                " VALUES ($1,$2,$3,$4,$5,$6,NULL,$7,$8,$8,0, CASE WHEN $6='done' THEN now() END)",
+                eid,
+                n,
+                key,
+                st_title,
+                detail,
+                status,
+                note,
+                1 if status == "done" else 0,
+            )
+        for fv in script.get("from_videos") or []:
+            await tx.execute(
+                "INSERT INTO experiment_item (experiment_id, footage_id, label, label_source) VALUES ($1, $2, 'parent', 'you')"
+                " ON CONFLICT DO NOTHING",
+                eid,
+                UUID(fv["footage_id"]),
+            )
+        await tx.execute(
+            "INSERT INTO experiment_result (experiment_id, key, payload) VALUES ($1, 'media', $2)",
+            eid,
+            {"videos": [{"title": script.get("title") or "New video", "note": script.get("note") or "", "path": v["path"]}]},
+        )
+        await tx.execute(
+            "UPDATE script_video SET experiment_id=$2, launched_at=now(), updated_at=now() WHERE id=$1", video_id, eid
+        )
+    return {"experiment_id": str(eid)}
+
+
+def _clip_plan(v) -> dict | None:
+    p = v["plan"]
+    if not p:
+        return None
+    return sd_mod.cost(p) if "beats" in p else None  # plans from the earlier clip pipeline are planned again
+
+
+def _shots(p: dict | None) -> list[dict]:
+    """What the page lists before approval: each timed beat, what happens and its words."""
+    if not p:
+        return []
+    if "beats" in p:
+        return [
+            {
+                "prompt": f"{b['start']}-{b['end']} s · {b['action']}" + (f" “{b['line']}”" if b["line"].strip() else " (silent)"),
+                "product": False,
+                "lines": [],
+            }
+            for b in p["beats"]
+        ]
+    return []
+
+
 class MakeBody(BaseModel):
     cluster: str
 
@@ -254,6 +378,8 @@ async def make_script_video(
     script = (await creator_script.stored(db, eid)).get(body.cluster)
     if not script:
         raise HTTPException(400, "Write this kind's script first.")
+    if script.get("blockers"):
+        raise HTTPException(400, "The script breaks a rule for this kind of video: " + "; ".join(script["blockers"]) + ". Write it again first.")
     if script.get("too_close"):
         raise HTTPException(400, "The script is too close to a video that already ran. Write it again first.")
     acc = await db.fetchval(

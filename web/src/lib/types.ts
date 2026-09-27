@@ -460,6 +460,7 @@ export type Experiment = {
   run: string | null;
   groups: { id: string; name: string; definition: string | null }[];
   score: ExperimentScore | null;
+  test_read?: { since?: string; arms: TestArm[] } | null;
 };
 // One ad set read three ways (cs.experiments.adset_read). A rate carries a 95% range and
 // whether it clears the floor to be read at all.
@@ -900,7 +901,7 @@ export type MakeInProgress = MakeCard & { briefs: number; generations: number; r
 export type MakeIdeaState = 'idea' | 'working' | 'ready' | 'stale' | 'failed' | 'shoot';
 export type MakeIdea = {
   ref: string;
-  kind: 'reedit' | 'opening' | 'pickup' | 'script';
+  kind: 'reedit' | 'opening' | 'pickup' | 'script' | 'fix';
   code: string;
   title: string;
   name: string | null;
@@ -941,6 +942,22 @@ export type MakeVerdict = {
   other?: MakeVerdict | null;
   cluster?: string | null;
 };
+export type MakeFix = {
+  key: string;
+  part: MakePart;
+  kind: 'hook' | 'cutaway' | 'end' | 'line';
+  start: number;
+  end: number;
+  finding_id: string | null;
+  finding: string | null;
+  tier: 'rule' | 'test' | 'context' | null;
+  trait: string;
+  untested: boolean;
+  read_on: string;
+  weak: boolean;
+  cost_usd: number;
+  attempt: { id: string; status: 'confirm' | 'queued' | 'running' | 'done' | 'failed'; stage: string | null; error: string | null; cost_usd: number | null; prompt: string | null } | null;
+};
 export type MakeTimeline = { duration: number; sentences: { start: number; end: number; text: string }[]; parts: Record<MakePart, [number, number]> };
 export type MakeFocus = FocusFinding & { trait: string | null; direction: 'do' | 'avoid' | null; tier: string | null; found: { start: number; end: number; text: string }[] | null; applied: boolean };
 export type MakeBatch = {
@@ -963,6 +980,7 @@ export type MakeOverview = {
 export type MakeVideo = {
   verdict: MakeVerdict;
   timeline: MakeTimeline;
+  fixes?: MakeFix[];
   focus: MakeFocus | null;
   ideas: MakeIdea[];
   batch: MakeBatch;
@@ -1000,6 +1018,22 @@ export type WorksFinding = {
   basis: string | null;
   numbers: { label: string; value: string }[];
   examples: { code: string; name: string; poster_url: string | null; rep_creative_id: string | null; spend: number | null; cpa: number | null; side: string | null }[];
+  tests?: TestArm[];
+  test?: { state: 'confirmed' | 'failed' | 'mixed' | 'testing'; won: number; lost: number; tests: number } | null;
+};
+export type TestArm = {
+  experiment_id?: string;
+  test?: string;
+  title: string | null;
+  ad_name?: string | null;
+  finding?: string | null;
+  verdict: 'won' | 'lost' | 'no difference' | 'waiting' | 'not found';
+  measure: 'stop' | 'click' | 'buy';
+  p?: number | null;
+  ads?: number;
+  why?: string;
+  version?: { x: number; n: number; rate: number | null };
+  original?: { x: number; n: number; rate: number | null };
 };
 export type WorksCluster = {
   key: string;
@@ -1059,6 +1093,8 @@ export type CreatorScript = {
   from_videos: { footage_id: string; name: string | null; cpa: number | null; watched?: boolean }[];
   rules: number;
   closest?: { footage_id: string; name: string | null; ratio: number } | null;
+  presenter?: boolean;
+  blockers?: string[];
   too_close?: boolean;
   compared_with?: number;
   created_at: string | null;
@@ -1069,22 +1105,36 @@ export type ScriptVideo = {
   stage: string | null;
   error: string | null;
   url: string | null;
-  checks: { videos: number; compared_with_frames: number; too_alike: boolean; shots: { shot: number; closest_bits: number; too_alike: boolean }[] } | null;
+  checks: {
+    videos: number;
+    compared_with_frames: number;
+    too_alike: boolean;
+    shots: { shot: number; closest_bits: number; too_alike: boolean }[];
+    mirrored?: boolean;
+    label_readable?: boolean;
+    heard?: string;
+    meant?: string;
+    said_right?: number | null;
+  } | null;
   estimated_cost_usd: number | null;
   clip_cost_usd: number | null;
   clip_plan: { shots: number; seconds: number; usd: number; video_seconds: number } | null;
   shots: { prompt: string; product: boolean; lines: number[] }[];
   voice_url: string | null;
   product_url: string | null;
+  prompt_text?: string | null;
+  mode?: 'talking_head' | 'voiceover' | 'text_only' | null;
   created_at: string;
+  experiment_id: string | null;
 };
 export type CreatorScriptRow = {
   cluster: string;
   name: string;
   files: number;
   spend: number;
+  cpa?: number | null;
   script: CreatorScript | null;
   makeable?: boolean;
-  estimate?: { seconds: number; prep_usd: number } | null;
+  estimate?: { seconds: number; prep_usd: number; mode?: 'talking_head' | 'voiceover' | 'text_only' | null } | null;
   video?: ScriptVideo | null;
 };

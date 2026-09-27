@@ -436,6 +436,49 @@ export default async function ExperimentPage({
               ))}
             </ol>
           </section>
+          {exp.kind === 'test' && exp.test_read && exp.test_read.arms.length > 0 && (
+            <section className="space-y-3" aria-labelledby="results-title">
+              <div className="space-y-1">
+                <h2 id="results-title" className="text-lg font-semibold">Results so far</h2>
+                <p className="text-sm text-muted-foreground">
+                  Each version against the original in the same ad sets{exp.test_read.since ? ` since ${exp.test_read.since}` : ''}, on the measure it was made to move.
+                  Verdicts feed back to What works.
+                </p>
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <table className="w-full min-w-[560px] text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-muted-foreground">
+                      <th className="px-3 py-2 font-medium">Version</th>
+                      <th className="px-3 py-2 font-medium">Judged on</th>
+                      <th className="px-3 py-2 font-medium">Version</th>
+                      <th className="px-3 py-2 font-medium">Original</th>
+                      <th className="px-3 py-2 font-medium">Verdict</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {exp.test_read.arms.map((a, k) => (
+                      <tr key={k} className="border-b border-border last:border-0 align-top">
+                        <td className="px-3 py-2">
+                          <span className="font-medium">{a.title}</span>
+                          {a.ad_name && <span className="block text-[12px] text-muted-foreground">{a.ad_name}</span>}
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">{{ stop: 'Share still watching at 3s', click: 'Click rate', buy: 'Purchase rate' }[a.measure]}</td>
+                        <td className="px-3 py-2 tabular-nums">{a.version?.rate != null ? `${(a.version.rate * 100).toFixed(1)}%` : '–'}</td>
+                        <td className="px-3 py-2 tabular-nums">{a.original?.rate != null ? `${(a.original.rate * 100).toFixed(1)}%` : '–'}</td>
+                        <td className="px-3 py-2">
+                          <span className={a.verdict === 'won' ? 'font-medium text-success' : a.verdict === 'lost' ? 'font-medium text-destructive' : 'text-muted-foreground'}>
+                            {{ won: 'Won', lost: 'Lost', 'no difference': 'No clear difference', waiting: 'Waiting for more delivery', 'not found': 'No ad with this name yet' }[a.verdict]}
+                          </span>
+                          {a.p != null && <span className="block text-[12px] text-muted-foreground">p = {a.p.toFixed(3)}</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
           {exp.media && exp.media.length > 0 && (
             <section className="space-y-3" aria-labelledby="media-title">
               <h2 id="media-title" className="text-lg font-semibold">

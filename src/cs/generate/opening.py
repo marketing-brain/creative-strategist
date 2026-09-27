@@ -25,9 +25,11 @@ FPS = 24
 MIN_WINDOW, MAX_WINDOW = 4.0, 12.0
 FALLBACK_WINDOW = 5.0
 SYNC_TOLERANCE_S = 1.5 / FPS
-# WaveSpeed Seedance 2.5 video-edit: per second of input plus output, minimum per run.
-RATE = {"480p": 0.11, "720p": 0.22, "1080p": 0.55}
-MIN_CHARGE = 0.99
+# Seedance 2.5 edit on AI Gateway, per second of the clip: tokens for the input and the output
+# (width x height x 24 fps / 1024 each), billed at the with-video-input rate ($6.40 a million at
+# 480p/720p, $7.00 at 1080p). Estimates; the first real run gives the measured figure.
+RATE = {"480p": 0.124, "720p": 0.277, "1080p": 0.68}
+MIN_CHARGE = 0.0
 _W, _H = 30, 53
 
 
@@ -104,7 +106,7 @@ def plan_window(cuts: list[float], total: float) -> tuple[float, float | None]:
 
 
 def estimate_cost(window: float, resolution: str) -> float:
-    return round(max(MIN_CHARGE, 2 * window * RATE[resolution]), 2)
+    return round(max(MIN_CHARGE, window * RATE[resolution]), 2)
 
 
 def cut_clip(src: Path, out: Path, seconds: float) -> None:
@@ -118,6 +120,11 @@ def cut_clip(src: Path, out: Path, seconds: float) -> None:
             str(src),
             "-t",
             f"{seconds:.3f}",
+            # Constant 30 fps: phone footage is often variable frame rate, which edit models resample.
+            "-r",
+            "30",
+            "-fps_mode",
+            "cfr",
             "-c:v",
             "libx264",
             "-crf",

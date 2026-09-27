@@ -18,9 +18,8 @@ from cs.core.blobs import BlobStore
 from cs.core.config import Settings
 from cs.core.db import Database
 from cs.core.ids import new_id
-from cs.generate import opening
+from cs.generate import gateway_edit, opening
 from cs.generate.jobs import JOB
-from cs.generate.wavespeed import EDIT_MODEL
 
 router = APIRouter(prefix="/generate")
 WEAK_HOOK = 0.8  # hook rate at or below 80% of the account's counts as a weak opening
@@ -144,11 +143,8 @@ async def create(
     """Queue one paid edit. The price is fixed here from the measured window."""
     if body.resolution not in opening.RATE:
         raise HTTPException(422, "resolution must be 480p, 720p or 1080p")
-    if not settings.wavespeed_api_key:
-        raise HTTPException(
-            503,
-            "Video generation is not set up: add WAVESPEED_API_KEY to the server's environment.",
-        )
+    if not settings.ai_gateway_api_key:
+        raise HTTPException(503, "Video generation is not set up: add AI_GATEWAY_API_KEY to the server's environment.")
     await _owned_account(db, auth.org_id, body.ad_account_id)
     p = await _plan(db, blobs, auth.org_id, body.footage_id)
     gid = new_id()
@@ -160,7 +156,7 @@ async def create(
         body.ad_account_id,
         body.footage_id,
         body.prompt.strip(),
-        f"wavespeed/{EDIT_MODEL}",
+        gateway_edit.MODEL,
         body.resolution,
         p["window_s"],
         p["cost"][body.resolution],
@@ -203,6 +199,9 @@ async def _out(r, blobs: BlobStore, full: bool) -> dict:
         "created_at": r["created_at"].isoformat(),
         "finished_at": r["finished_at"].isoformat() if r["finished_at"] else None,
         "compare_url": await url(r["compare_path"]),
+        "kind": r["kind"],
+        "fix": r["fix"],
+        "plan_prompt": (r["plan"] or {}).get("prompt") if r["plan"] else None,
     }
     if full:
         out.update(

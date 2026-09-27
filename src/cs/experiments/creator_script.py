@@ -37,6 +37,8 @@ from cs.core import model_calls
 from cs.core.db import Database
 from cs.core.ids import new_id
 from cs.experiments.describe import video_evidence
+from cs.make import compliance
+from cs.make import seedance as sd
 
 PURPOSE = "experiments.creator_script"
 VERSION = "creator-script-v1"
@@ -45,14 +47,18 @@ KEY = "creator_script:"
 BEST_VIDEOS = 2
 EVIDENCE_CHARS = 5000  # per video: transcript, on-screen text, scenes
 WATCH_PURPOSE = "experiments.watch_video"
-WATCH_VERSION = "watch-v1"
+WATCH_VERSION = "watch-v1"  # the prompt was refined 2026-09-27; stored watches stay valid
 WATCH_KEY = "watch:"
+MAX_WORDS = 66  # 30 s at 2.2 words a second
 TOO_CLOSE = 0.5  # spoken-text similarity to any video in the cluster that blocks the script
+# Google's video guidance: the video part first, the instruction after it; times as MM:SS; keep
+# what is said apart from what is seen, so a transcript is not passed off as a description.
 WATCH_PROMPT = (
-    "Watch this ad. List its shots in order with m:ss start times: what is on screen, what the person does with "
-    "their hands and the product, where they are, how they talk to camera, and any on-screen text. Then give, in "
-    "one line each: when the product first appears; the pace of the edit; what the opening seconds do to stop the "
-    "scroll. Only describe what you can see and hear."
+    "You are watching a short vertical video ad. List its shots in order. For each shot give its start time as MM:SS, "
+    "then VISUAL: what is on screen, where the person is, what they do with their hands and the product, framing and "
+    "camera movement; then SPOKEN: the words said during the shot; then TEXT: any on-screen text. After the list, give "
+    "one line each for: when the product first appears (MM:SS); the pace of the edit (cuts per 10 seconds); what the "
+    "first 3 seconds do to stop the scroll. Describe only what you can see and hear; if unsure, say so."
 )
 
 SYSTEM = """You write a script for a NEW creator to film, for a brand's video ads.
@@ -67,12 +73,15 @@ product shows, what the opening does), never their lines, props or setting.
 Write:
 - title: 2-5 words.
 - note: one or two plain sentences for the creator: what this video is and what to keep.
-- lines: 20-45 seconds in all. Each line has `t` (m:ss start), `direction` (what we see or the creator does; empty if
+- lines: 15-30 seconds in all when read aloud (about 2 words per second, so at most 55 spoken words). Each line has `t` (m:ss start), `direction` (what we see or the creator does; empty if
   nothing), `text` (the spoken words only; for a kind with no one speaking, the on-screen text or voiceover).
 - follows: for each rule, shared trait or lead the script applies, its id and one short line on where and how.
 - claims: what a claims reviewer should check (health or numeric claims, offers, named retailers or competitors).
 Never invent a health claim, number, price or offer that the best videos do not make. Write [current offer] for any
-offer. Never write performance numbers (cost, ROAS, rates)."""
+offer. Never write performance numbers (cost, ROAS, rates).
+Never say the product cures, treats or prevents anything, never name a disease, and never ask the viewer about a
+condition ("Struggling with sleep?"): supplement ads may only describe how the product supports the body.
+Use only the facts in the evidence you are given; if something is not in it, leave it out."""
 
 SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -148,8 +157,8 @@ async def watch(db: Database, settings, org_id: UUID, eid: UUID, footage_id: UUI
                         {
                             "role": "user",
                             "content": [
-                                {"type": "input_text", "text": WATCH_PROMPT},
                                 {"type": "input_video", "video_url": video_url},
+                                {"type": "input_text", "text": WATCH_PROMPT},
                             ],
                         }
                     ],
@@ -285,7 +294,21 @@ def prompt(x: dict) -> str:
     return "\n".join(lines)
 
 
-def check(out: dict, x: dict, transcripts: list[dict] | None = None) -> dict:
+PRESENTER = f"""
+
+THIS KIND IS MADE BY A VIDEO MODEL, so the script is exactly what will be said (by a presenter on camera or a
+narrator) or, for text-only, shown on screen:
+- The words explain the product. Never first-person experience or results ("I took", "I switched", "my sleep",
+  "I'm waking up rested"): nobody in the video is a real customer, and testimonials from people who do not exist are
+  not allowed.
+- At most {sd.MAX_S - sd.END_SILENCE_S} seconds spoken: {int((sd.MAX_S - sd.END_SILENCE_S) * 2)} words in all at most, lines of 6-14 words.
+- Never reuse a sentence or hook from the best videos; say the same argument in new words.
+- direction: for a presenter, one simple action with the product in one hand; otherwise what the shot shows.
+- No placeholders like [current offer]: every word is spoken aloud. End with a plain call to action with no price or
+  offer (e.g. "Tap the link to try it tonight.")."""
+
+
+def check(out: dict, x: dict, transcripts: list[dict] | None = None, presenter: bool = False) -> dict:
     evidence = " ".join(v["evidence"] for v in x["videos"])
     dropped: list[str] = []
     for line in out["lines"]:
@@ -303,7 +326,30 @@ def check(out: dict, x: dict, transcripts: list[dict] | None = None) -> dict:
     leads = [f for f in follows if f["id"] in {g["id"] for g in x["test"]}]
     if len(leads) > 1:
         dropped.append("applied more than one unproven lead")
-    near = closest(" ".join(line["text"] for line in out["lines"]), transcripts or [])
+    spoken = " ".join(line["text"] for line in out["lines"])
+    if len(re.findall(r"[A-Za-z0-9'-]+", spoken)) > MAX_WORDS:
+        dropped.append(f"runs long: about {round(len(spoken.split()) / 2.2)} seconds read aloud; the limit is 30")
+    near = closest(spoken, transcripts or [])
+    # A presenter script is what will be said, so the video's rules apply to it here; a script
+    # that breaks one cannot be made (the page says why and offers to write it again).
+    blockers: list[str] = []
+    for line in out["lines"]:
+        for msg in compliance.problems(line["text"]):
+            blockers.append(f"{msg}: “{line['text']}”")
+    if presenter:
+        n = len(re.findall(r"[A-Za-z0-9'-]+", spoken))
+        limit = int((sd.MAX_S - sd.END_SILENCE_S) * 2)
+        if n > limit:
+            blockers.append(f"{n} words; a 30-second video holds at most {limit}")
+        said = [t["transcript"] for t in transcripts or []]
+        for line in out["lines"]:
+            if "[" in line["text"] or "]" in line["text"]:
+                blockers.append(f"has a placeholder that would be read out loud: “{line['text']}”")
+            if sd.TESTIMONIAL.search(line["text"]):
+                blockers.append(f"reads as a personal testimonial: “{line['text']}”")
+            hit = sd.copied_line(line["text"], said)
+            if hit:
+                blockers.append(f"repeats a line from a video of this kind ({round(hit[0] * 100)}% alike): “{hit[1]}”")
     applied = {f["id"] for f in follows}
     missed = [{"id": f["id"], "title": f["title"]} for f in x["rule"] if f["id"] not in applied]
     return {
@@ -321,6 +367,8 @@ def check(out: dict, x: dict, transcripts: list[dict] | None = None) -> dict:
         ],
         "closest": near,
         "too_close": bool(near and near["ratio"] >= TOO_CLOSE),
+        "presenter": presenter,
+        "blockers": blockers,
         "compared_with": len(transcripts or []),
         "rules": len(x["rule"]),
     }
@@ -330,6 +378,7 @@ async def write(db: Database, client, settings, blobs, org_id: UUID, eid: UUID, 
     """Watch the best videos (cached per video), then one paid call for the script; stores and
     returns the checked script."""
     model = settings.brief_model
+    presenter = sd.makeable(cluster)
     x = await inputs(db, org_id, eid, cluster, settings, blobs)
     if not x["videos"]:
         raise ValueError("this kind of video has no ranked best videos to learn its voice from")
@@ -339,7 +388,7 @@ async def write(db: Database, client, settings, blobs, org_id: UUID, eid: UUID, 
         resp = await client.chat.completions.create(
             model=model,
             max_tokens=8000,
-            messages=[{"role": "system", "content": SYSTEM}, {"role": "user", "content": prompt(x)}],
+            messages=[{"role": "system", "content": SYSTEM + (PRESENTER if presenter else "")}, {"role": "user", "content": prompt(x)}],
             response_format={
                 "type": "json_schema",
                 "json_schema": {"name": "creator_script", "schema": SCHEMA, "strict": True},
@@ -351,7 +400,7 @@ async def write(db: Database, client, settings, blobs, org_id: UUID, eid: UUID, 
         raise
     u = resp.usage
     await model_calls.finish(db, claim.id, input_tokens=u.prompt_tokens, output_tokens=u.completion_tokens)
-    payload = {**check(out, x, await cluster_transcripts(db, org_id, cluster)), "model": model}
+    payload = {**check(out, x, await cluster_transcripts(db, org_id, cluster), presenter), "model": model}
     await db.execute(
         "INSERT INTO experiment_result (experiment_id, key, payload) VALUES ($1,$2,$3)"
         " ON CONFLICT (experiment_id, key) DO UPDATE SET payload=$3, created_at=now()",

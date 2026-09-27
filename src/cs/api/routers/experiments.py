@@ -14,6 +14,7 @@ from cs.core.blobs import BlobStore
 from cs.core.db import Database
 from cs.core.repo import rollups
 from cs.experiments import adset_read, paired
+from cs.make import test_read
 
 router = APIRouter(prefix="/experiments")
 _COPY_SUFFIX = re.compile(r"(\s*[–-]\s*Copy(\s*\d+)?)+\s*$", re.IGNORECASE)
@@ -184,8 +185,11 @@ async def get_experiment(
         for m in ((media_row or {}).get("videos") or [])
         if str(m.get("path", "")).startswith(f"{auth.org_id}/")
     ]
+    # A launched test reads itself back: each version against the original on its measure.
+    test_read_out = await test_read.read(db, auth.org_id, experiment_id) if e["kind"] == "test" else None
     return {
         "media": media,
+        "test_read": test_read_out,
         "id": str(e["id"]),
         "title": e["title"],
         "kind": e["kind"],

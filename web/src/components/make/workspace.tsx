@@ -184,6 +184,7 @@ export function Workspace({ v }: { v: MakeVideo }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showBrief, setShowBrief] = useState(false);
   const [uploading, setUploading] = useState(false);
   const set = (patch: Partial<BriefContent>) => c && setC({ ...c, ...patch });
 
@@ -226,7 +227,7 @@ export function Workspace({ v }: { v: MakeVideo }) {
   const shoot = variants.filter(({ x }) => !x.edit);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 pb-6">
       <div className="grid gap-6 sm:grid-cols-[180px_minmax(0,1fr)] sm:gap-8">
         <aside>
           {v.video_url ? (
@@ -405,6 +406,9 @@ export function Workspace({ v }: { v: MakeVideo }) {
                     <MoreHorizontal className="size-4" aria-hidden="true" />
                   </summary>
                   <div className="absolute right-0 z-30 mt-1 w-48 space-y-0.5 rounded-lg border border-border bg-popover p-1 text-sm shadow-lg shadow-foreground/5">
+                    <button type="button" onClick={() => setShowBrief((x) => !x)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted">
+                      <FileText className="size-4" aria-hidden="true" /> {showBrief ? 'Hide the full brief' : 'Show the full brief'}
+                    </button>
                     <button type="button" onClick={() => setEditing(true)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted">
                       <Pencil className="size-4" aria-hidden="true" /> Edit the brief
                     </button>
@@ -433,8 +437,8 @@ export function Workspace({ v }: { v: MakeVideo }) {
           />
         )}
 
-        {brief && c && (
-          <details className="group rounded-xl border border-border" open={editing || undefined}>
+        {brief && c && (showBrief || editing) && (
+          <details className="group rounded-xl border border-border" open>
             <summary className="cursor-pointer list-none px-4 py-3 text-base font-semibold marker:hidden">
               The brief in full
               <span className="ml-2 text-sm font-normal text-muted-foreground">Line-by-line map, offer, launch plan and claims review</span>

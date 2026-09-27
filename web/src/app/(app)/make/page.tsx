@@ -1,16 +1,18 @@
 import Link from 'next/link';
+import { cn } from 'cn';
 import { ChevronRight, Loader2 } from 'lucide-react';
 import { LiveRefresh } from '@/components/live-refresh';
 import { Poster, ReasonChips } from '@/components/make/shared';
 import { api } from '@/lib/api';
 import { shortTitle } from '@/lib/make-format';
 import { requireAuth } from '@/lib/require-auth.server';
-import type { MakeInProgress } from '@/lib/types';
+import type { CreatorScriptRow, MakeInProgress } from '@/lib/types';
 
 export const metadata = { title: 'Make' };
 
-// Make is where batches are built: the videos being worked on, by how close each batch is to
-// launch. Once launched, a batch leaves Make and lives under Tests. There are two ways in: a finding in What works, or "Make new versions" on an ad.
+// Make has two starting points. Improve a video: batches of new versions of an ad, by how close
+// each is to launch (entered from a finding in What works or "Make new versions" on an ad). New
+// video for a kind: a script per kind of video, made into a video. Launched work lives under Tests.
 const STAGES = [
   { key: 'drafting', title: 'Drafting', empty: 'Nothing being drafted.' },
   { key: 'ready', title: 'Ready to launch', empty: 'No batch ready yet.' },
@@ -24,25 +26,60 @@ function progress(p: MakeInProgress): string {
   return bits.join(', ') || 'Started';
 }
 
-export default async function Make() {
+const VIEWS = [
+  { key: 'improve', href: '/make', label: 'Improve a video' },
+  { key: 'new', href: '/make?view=new', label: 'New video for a kind' },
+] as const;
+
+function MakeViews({ current }: { current: (typeof VIEWS)[number]['key'] }) {
+  return (
+    <nav aria-label="Make view" className="inline-flex h-8 items-center rounded-lg bg-muted p-[3px] text-sm font-medium">
+      {VIEWS.map((v) => (
+        <Link
+          key={v.key}
+          href={v.href}
+          aria-current={current === v.key ? 'page' : undefined}
+          className={cn(
+            'inline-flex h-full items-center rounded-md px-3 transition-colors',
+            current === v.key
+              ? 'bg-background text-foreground shadow-sm dark:border dark:border-input dark:bg-input/30'
+              : 'text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground',
+          )}
+        >
+          {v.label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+export default async function Make({ searchParams }: { searchParams: Promise<{ view?: string }> }) {
   await requireAuth();
+  const view = (await searchParams).view === 'new' ? 'new' : 'improve';
   const accounts = await api.accounts();
   const active = accounts.find((a) => a.status === 'active') ?? accounts[0];
   if (!active) return <p className="text-sm text-muted-foreground">Connect an ad account to start.</p>;
-  const o = await api.makeOverview(active.id);
+  const [o, w] = await Promise.all([api.makeOverview(active.id), view === 'new' ? api.whatWorks().catch(() => null) : null]);
+  const kinds = [...(w?.creator_scripts ?? [])].sort((a, b) => (a.cpa ?? 1e9) - (b.cpa ?? 1e9));
   const running = Object.values(o.stages).flat().some((p) => p.running);
   const any = Object.values(o.stages).some((l) => l.length > 0);
 
   return (
     <div className="max-w-6xl space-y-10">
       <LiveRefresh active={running} everyMs={8000} />
-      <div className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Make</h1>
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight">Make</h1>
+          <MakeViews current={view} />
+        </div>
         <p className="max-w-prose text-sm text-muted-foreground">
-          Build a batch of new versions of a video, then launch it against the original. Launched batches move to Tests. Start from a finding in What works, or from any video in Ads.
+          {view === 'new'
+            ? 'A brand-new video of a kind that works, from a script written with what holds up for it. Kinds with the lowest cost per purchase first. Launched videos move to Tests.'
+            : 'New versions of an ad you already run, launched against the original. Launched batches move to Tests.'}
         </p>
       </div>
 
+      {view === 'improve' && (
       <section className="space-y-3" aria-label="Your batches">
         {!any ? (
           <p className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
@@ -90,7 +127,51 @@ export default async function Make() {
           </div>
         )}
       </section>
+      )}
 
+      {view === 'new' && (
+        <section className="space-y-3" aria-label="Kinds of video">
+          {kinds.length === 0 && <p className="text-sm text-muted-foreground">No kinds of video have been read yet.</p>}
+          <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border">
+            {kinds.map((k) => (
+              <li key={k.cluster}>
+                <Link
+                  href={`/make/new/${encodeURIComponent(k.cluster)}`}
+                  className="group grid grid-cols-[minmax(0,1fr)_auto_1rem] items-center gap-x-4 px-4 py-3 transition-colors hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
+                >
+                  <div className="min-w-0 space-y-0.5">
+                    <p className="text-sm font-semibold">{k.name}</p>
+                    <p className="text-[13px] text-muted-foreground tabular-nums">
+                      {k.cpa != null ? `$${Math.round(k.cpa)} a purchase, last 30 days` : 'No purchases yet'} · {k.files} {k.files === 1 ? 'video' : 'videos'}
+                      {!k.makeable && ' · filmed by a creator'}
+                    </p>
+                  </div>
+                  <KindStatus k={k} />
+                  <ChevronRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   );
+}
+
+function KindStatus({ k }: { k: CreatorScriptRow }) {
+  const v = k.video;
+  const [label, cls] = v?.experiment_id
+    ? ['Launched', 'border-success/40 text-success']
+    : v?.status === 'done'
+      ? ['Made', 'border-success/40 text-success']
+      : v?.status === 'confirm'
+        ? ['Waiting for you', 'border-primary/40 text-primary']
+        : v?.status === 'queued' || v?.status === 'running'
+          ? ['Making', 'border-primary/40 text-primary']
+          : v?.status === 'blocked' || v?.status === 'failed'
+            ? ['Stopped', 'border-destructive/40 text-destructive']
+            : k.script
+              ? ['Script written', 'border-foreground/25 text-foreground']
+              : ['Not started', 'border-border text-muted-foreground'];
+  return <span className={`w-fit rounded-sm border px-1.5 py-0.5 text-[12px] leading-none font-medium whitespace-nowrap ${cls}`}>{label}</span>;
 }

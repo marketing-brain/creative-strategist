@@ -22,6 +22,7 @@ from uuid import UUID
 
 from cs.core import model_calls
 from cs.core.db import Database
+from cs.make import compliance
 
 PURPOSE = "briefs.generate"
 VERSION = "brief-v2"
@@ -56,7 +57,10 @@ Rules:
    `quotes`: the sentences moved or removed, copied exactly; empty for the others.
 3. Claims: list what a claims reviewer should check: profanity, named retailers or competitors, numeric or health claims, offers.
 4. Never write a number about performance (cost, ROAS, percentages of viewers). Code adds those.
-5. `title`: a 2-5 word name for the parent's idea, e.g. "Not a sleep aid"."""
+5. `title`: a 2-5 word name for the parent's idea, e.g. "Not a sleep aid".
+6. Never write a line that says the product cures, treats or prevents anything, names a disease, or asks the viewer
+   about a condition; supplement ads may only describe how the product supports the body.
+Use only the facts in the evidence you are given; if something is not in it, leave it out."""
 
 SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -255,6 +259,10 @@ def check(out: dict, facts: dict) -> tuple[dict, list[str]]:
         bad = _invented_figures(v["change"] + " " + v["text"], ev)
         if bad:
             dropped.append(f"{label}: figures not in the evidence ({', '.join(bad)})")
+            continue
+        claims = compliance.problems(v["text"])
+        if claims:
+            dropped.append(f"{label}: {claims[0]}")
             continue
         variants.append(v)
     return {**out, "slots": slots, "variants": variants}, dropped

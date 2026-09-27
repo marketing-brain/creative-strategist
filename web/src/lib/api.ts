@@ -50,6 +50,8 @@ export const api = {
     apiFetch<{ id: string; status: string }>('/what-works/script-video', { method: 'POST', body: JSON.stringify({ cluster }) }),
   approveScriptVideo: (id: string) =>
     apiFetch<{ id: string; status: string }>(`/what-works/script-video/${id}/approve`, { method: 'POST' }),
+  launchScriptVideo: (id: string) =>
+    apiFetch<{ experiment_id: string }>(`/what-works/script-video/${id}/launch`, { method: 'POST' }),
   finding: (id: string) => apiFetch<import('./types').FocusFinding>(`/what-works/findings/${id}`),
   experiment: (id: string) => apiFetch<import('./types').Experiment>(`/experiments/${id}`),
   experimentAdsets: (id: string) => apiFetch<{ label: string; files: number }[]>(`/experiments/${id}/adsets`),
@@ -129,6 +131,9 @@ export const api = {
     apiFetch<import('./types').MakeVideo>(`/make/${footageId}${findingId ? `?finding=${encodeURIComponent(findingId)}` : ''}`),
   makeFindingEdit: (footageId: string, findingId: string) =>
     apiFetch<{ brief_id: string; code: string; cut: string[] }>(`/make/${footageId}/finding-edit`, { method: 'POST', body: JSON.stringify({ finding_id: findingId }) }),
+  planFix: (footageId: string, key: string) =>
+    apiFetch<{ id: string }>(`/make/${footageId}/fixes/${encodeURIComponent(key)}/plan`, { method: 'POST' }),
+  approveFix: (generationId: string) => apiFetch<{ id: string }>(`/make/fixes/${generationId}/approve`, { method: 'POST' }),
   makeDecide: (footageId: string, ref: string, decision: 'in' | 'skipped' | 'none') =>
     apiFetch<{ ok: boolean }>(`/make/${footageId}/decide`, { method: 'POST', body: JSON.stringify({ ref, decision }) }),
   makeLaunch: (footageId: string) => apiFetch<{ experiment_id: string }>(`/make/${footageId}/launch`, { method: 'POST' }),

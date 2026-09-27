@@ -20,6 +20,7 @@ WORK = (
     ("creative_brief", "briefs.generate", "brief:", "updated_at = now()"),
     ("brief_render", "briefs.render", "render:", "finished_at = coalesce(t.finished_at, now())"),
     ("generation", "generate.opening_edit", "gen:", "finished_at = coalesce(t.finished_at, now())"),
+    ("generation", "generate.fix", "fix:", "finished_at = coalesce(t.finished_at, now())"),
     ("script_video", "make.script_video", "script_video:", "updated_at = now()"),
 )
 

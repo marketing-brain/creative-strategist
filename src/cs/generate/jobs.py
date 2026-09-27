@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from uuid import UUID
 
 from cs.core import model_calls
+from cs.generate import gateway_edit as gw
 from cs.generate import opening
 from cs.generate import wavespeed as ws
 from cs.jobs.registry import JobContext, handler
@@ -52,13 +54,22 @@ async def opening_edit(ctx: JobContext) -> None:
         if await model_calls.attempts_for(ctx.db, PURPOSE, key):
             raise RuntimeError("this generation was already sent once; paid calls are not re-sent")
         await _stage(ctx, gid, "Editing with Seedance 2.5 (usually 3–6 minutes)")
+        width, height = await asyncio.to_thread(_size, clip)
         claim = await model_calls.claim(ctx.db, g["org_id"], PURPOSE, key, g["model"])
         try:
-            pid = await ws.submit(ctx.settings.wavespeed_api_key, url, g["prompt"], g["resolution"])
-            await _stage(
-                ctx, gid, "Editing with Seedance 2.5 (usually 3–6 minutes)", prediction_id=pid
+            op = await gw.submit(
+                ctx.settings,
+                url,
+                ws.edit_prompt(g["prompt"], "[Video 1]"),
+                g["resolution"],
+                width,
+                height,
+                f"generate:{gid}",
             )
-            edited = await ws.wait(ctx.settings.wavespeed_api_key, pid)
+            await _stage(
+                ctx, gid, "Editing with Seedance 2.5 (usually 3–6 minutes)", prediction_id=json.dumps(op)
+            )
+            edited = await gw.wait(ctx.settings, op)
         except Exception as exc:
             await model_calls.fail(ctx.db, claim.id, str(exc))
             raise
@@ -102,6 +113,16 @@ def _cuts(original: bytes) -> list[float]:
         p = Path(tmp) / "o.mp4"
         p.write_bytes(original)
         return opening.shot_changes(p)
+
+
+def _size(clip: bytes) -> tuple[int, int]:
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        p = Path(tmp) / "c.mp4"
+        p.write_bytes(clip)
+        return opening.size(p)
 
 
 def _clip(original: bytes, seconds: float) -> bytes:
