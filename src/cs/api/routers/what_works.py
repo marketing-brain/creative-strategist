@@ -407,7 +407,7 @@ async def make_script_video(
             acc,
             body.cluster,
             script,
-            sv.VIDEO_MODEL,
+            sv.sd.MODEL,
             est["prep_usd"],
         )
     await queue.enqueue(
