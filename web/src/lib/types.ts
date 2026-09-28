@@ -1088,6 +1088,8 @@ export type CreatorScript = {
   lines: { t: string; direction: string; text: string }[];
   follows: { id: string; how: string; title: string }[];
   missed: { id: string; title: string }[];
+  avoids?: { id: string; title: string; how: string }[];
+  unchecked_avoids?: { id: string; title: string }[];
   claims: string[];
   dropped: string[];
   from_videos: { footage_id: string; name: string | null; cpa: number | null; watched?: boolean }[];

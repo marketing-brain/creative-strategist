@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { AlertTriangle, Check, Clapperboard, Copy, Download, FileText, Loader2, Rocket } from 'lucide-react';
+import { AlertTriangle, Ban, Check, Clapperboard, Copy, Download, FileText, Loader2, Rocket } from 'lucide-react';
 import { cn } from 'cn';
 import { Button } from '@/components/ui/button';
 import { api, ApiError } from '@/lib/api';
@@ -330,6 +330,21 @@ export function NewVideo({ row }: { row: CreatorScriptRow }) {
                   </ul>
                 </div>
               )}
+              {(script.avoids ?? []).length > 0 && (
+                <div className="space-y-1.5 text-sm">
+                  <p className="font-medium">What it stays clear of</p>
+                  <ul className="space-y-1">
+                    {script.avoids!.map((f) => (
+                      <li key={f.id} className="flex items-start gap-2">
+                        <Ban className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                        <span>
+                          <span className="font-medium">{f.title}.</span> <span className="text-muted-foreground">{f.how}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {script.presenter && (
                 <p className="text-[13px] text-muted-foreground">These are the exact words the presenter will say in the video.</p>
               )}
@@ -345,7 +360,11 @@ export function NewVideo({ row }: { row: CreatorScriptRow }) {
                   Too close to a video that already ran: {Math.round(script.closest.ratio * 100)}% the same words as {script.closest.name ?? 'one of them'}. Write it again.
                 </p>
               )}
-              {[...script.missed.map((m) => `It does not say how it follows the rule “${m.title}”. Check before filming.`), ...script.dropped].map((m, k) => (
+              {[
+                ...script.missed.map((m) => `It does not say how it follows the rule “${m.title}”. Check before filming.`),
+                ...(script.unchecked_avoids ?? []).map((m) => `It does not say how it stays clear of “${m.title}”. Check before filming.`),
+                ...script.dropped,
+              ].map((m, k) => (
                 <p key={k} className="flex items-start gap-1.5 text-[13px] text-chart-2">
                   <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" /> {m}
                 </p>

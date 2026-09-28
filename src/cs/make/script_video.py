@@ -26,6 +26,7 @@ import logging
 import math
 import random
 import re
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -347,6 +348,16 @@ async def sd_plan(db: Database, settings, row) -> dict:
         + ["", "SOURCE VIDEOS (for how they are filmed; the words come only from the script):", evidence[:9000]]
         + [f"\nHOW BEST VIDEO {i} IS FILMED (watched):\n{w}" for i, w in enumerate(watched, 1)]
     )
+    # What holds up for this kind reaches the filming too (tone, framing, how the product is
+    # handled): the script carries the words, the planner only how they are delivered and shot.
+    from cs.experiments import creator_script as cs_
+
+    eid = await cs_.experiment_id(db, row["org_id"])
+    x = await cs_.inputs(db, row["org_id"], eid, row["cluster"]) if eid else {}
+    kind = [f"DO: {f['title']}. {f['trait']}" for t in ("rule", "context") for f in x.get(t, [])]
+    kind += [f"NEVER: {f['title']}. {f['trait']}" for f in x.get("avoid", [])]
+    if kind:
+        text += "\n\nWHAT HOLDS UP FOR THIS KIND (apply what bears on how it is delivered and filmed; the words are fixed):\n" + "\n".join(kind)
     m = sd.mode(row["cluster"])
     out = await _ledgered(
         db,
@@ -455,6 +466,40 @@ async def sd_generate(db: Database, blobs, settings, row, p: dict, prod: dict, w
     return raw
 
 
+PUNCH = 1.15  # zoom of a punch-in cut
+PUNCH_MIN_S = 4  # a line this long or longer gets a punch-in halfway through
+
+
+def punch_ins(src: Path, out: Path, beats: list[dict], total: float) -> int:
+    """Jump-cut pacing (2026-09-27): Seedance cuts between lines, alternating framing; a line of
+    PUNCH_MIN_S or more also gets a free punch-in halfway, so a cut lands about every 3 seconds.
+    The audio is untouched. Returns the number of punch-ins."""
+    segs: list[tuple[float, float, bool]] = []
+    for b in beats:
+        end = min(b["end"], total)
+        if b["start"] >= end:
+            continue
+        if b["line"].strip() and end - b["start"] >= PUNCH_MIN_S:
+            mid = b["start"] + (end - b["start"]) / 2
+            segs += [(b["start"], mid, False), (mid, end, True)]
+        else:
+            segs.append((b["start"], end, False))
+    if segs:
+        segs[-1] = (segs[-1][0], total, segs[-1][2])
+    n = sum(z for *_, z in segs)
+    if not n:
+        shutil.copy(src, out)
+        return 0
+    parts = []
+    for i, (a, e, z) in enumerate(segs):
+        zoom = f",crop=iw/{PUNCH}:ih/{PUNCH}:(iw-iw/{PUNCH})/2:(ih-ih/{PUNCH})*0.3" if z else ""
+        parts.append(f"[0:v]trim={a:.3f}:{e:.3f},setpts=PTS-STARTPTS{zoom},scale={W}:{H},setsar=1[v{i}]")
+    graph = ";".join(parts) + ";" + "".join(f"[v{i}]" for i in range(len(segs))) + f"concat=n={len(segs)}:v=1:a=0[v]"
+    run(["ffmpeg", "-y", "-i", str(src), "-filter_complex", graph, "-map", "[v]", "-map", "0:a?", "-c:v", "libx264",
+         "-crf", "17", "-preset", "slow", "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out)])
+    return n
+
+
 def burn_captions(src: Path, out: Path, items: list[tuple[str, float, float]], work: Path) -> None:
     """Captions over a finished video, each line on screen while it is said. Added after
     generation: Seedance renders subtitles unreliably, and most feeds play muted."""
@@ -520,11 +565,16 @@ async def sd_finish(db: Database, settings, row, p: dict, raw: Path, work: Path)
     vf = ["-vf", "hflip"] if look["mirrored"] else []
     run(["ffmpeg", "-y", "-i", str(raw), *vf, "-t", f"{max(1.0, d - 0.1):.3f}", "-c:v", "libx264", "-crf", "17",
          "-preset", "slow", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", str(final)])
-    # 3. Captions of the script, timed to its beats, for the muted feed.
+    # 3. Jump-cut pacing for a talking head: a punch-in halfway through each longer line.
+    if p.get("mode", "talking_head") == "talking_head":
+        punched = work / "punched.mp4"
+        notes["punch_ins"] = punch_ins(final, punched, p["beats"], duration(final))
+        final = punched
+    # 4. Captions of the script, timed to its beats, for the muted feed.
     captioned = work / "captioned.mp4"
     burn_captions(final, captioned, [(b["line"], b["start"], b["end"]) for b in p["beats"] if b["line"].strip()], work)
     final = captioned
-    # 4. What was actually said, against the lines.
+    # 5. What was actually said, against the lines.
     async def hear():
         async with httpx.AsyncClient(timeout=120) as c:
             r = await c.post(

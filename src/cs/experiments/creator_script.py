@@ -3,8 +3,10 @@ product first shows) made by someone new, following what holds up for that kind.
 
 It used to be part of every video's brief, which gave one script per video and none per kind.
 Here it is written once per cluster, from the cluster's playbook findings (rules to follow,
-shared traits to keep, at most one lead to try) and the evidence of its best-ranked videos
-(the stored profile read's 'best' side, lowest cost per purchase first).
+shared traits to keep, at most one lead to try, and every 'avoid' finding of any tier as a thing
+the script must never do) and the evidence of its best videos: the whole best third of the stored
+profile read, in its ranking order (cost per purchase pulled toward the cluster's by a prior, so a
+video with 8 purchases does not outrank one with 200 on a few dollars).
 
 The best videos are also watched (Gemini, the video passed by link through the gateway's
 OpenResponses route): what text tags miss (pacing, what is on screen during each line, how the
@@ -13,7 +15,8 @@ About $0.006 for a one-minute video (probe 2026-09-27).
 
 One paid call per click for the script, never retried. Code checks the output:
 - figures ($, %) not in the source videos are replaced with [current offer];
-- a finding the script says it follows must be one it was given;
+- a finding the script says it follows must be one it was given, and never one to avoid;
+- every finding to avoid must be accounted for (how the script stays clear of it), else listed;
 - rules the script does not say it follows are listed as missed, for the page to show;
 - the spoken script is compared with every transcript in the cluster: a new creator's script
   must not be a rewording of one that already ran (same-script twins measure 0.7).
@@ -44,7 +47,7 @@ PURPOSE = "experiments.creator_script"
 VERSION = "creator-script-v1"
 SLUG = "tag-clusters"
 KEY = "creator_script:"
-BEST_VIDEOS = 2
+BEST_VIDEOS = 3  # the best third, in rank order; small kinds have 1-3
 EVIDENCE_CHARS = 5000  # per video: transcript, on-screen text, scenes
 WATCH_PURPOSE = "experiments.watch_video"
 WATCH_VERSION = "watch-v1"  # the prompt was refined 2026-09-27; stored watches stay valid
@@ -66,7 +69,7 @@ The script must be the same kind of video as the kind named (who carries it on c
 appears): a new person making that kind of video, not a copy of any one video.
 You get: the kind; RULES that held up when the best and worst videos of this kind were compared (follow every one);
 SHARED traits every video of this kind has (keep them); LEADS that are not proven (you may apply at most one, and
-say so); and the evidence of the best videos of this kind (transcript, on-screen text, scenes, and a shot list from
+say so); NEVER: things that went with the worse videos of this kind (the script must not do any of them); and the evidence of the best videos of this kind (transcript, on-screen text, scenes, and a shot list from
 watching them), for the product's real claims, the voice and how they are filmed.
 Make it new: a different person, setting, story and wording. Borrow how the best videos work (pacing, when the
 product shows, what the opening does), never their lines, props or setting.
@@ -76,6 +79,7 @@ Write:
 - lines: 15-30 seconds in all when read aloud (about 2 words per second, so at most 55 spoken words). Each line has `t` (m:ss start), `direction` (what we see or the creator does; empty if
   nothing), `text` (the spoken words only; for a kind with no one speaking, the on-screen text or voiceover).
 - follows: for each rule, shared trait or lead the script applies, its id and one short line on where and how.
+- avoids: for each NEVER item, its id and one short line on how the script stays clear of it.
 - claims: what a claims reviewer should check (health or numeric claims, offers, named retailers or competitors).
 Never invent a health claim, number, price or offer that the best videos do not make. Write [current offer] for any
 offer. Never write performance numbers (cost, ROAS, rates).
@@ -111,9 +115,18 @@ SCHEMA: dict[str, Any] = {
                 "required": ["id", "how"],
             },
         },
+        "avoids": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {"id": {"type": "string"}, "how": {"type": "string"}},
+                "required": ["id", "how"],
+            },
+        },
         "claims": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["title", "note", "lines", "follows", "claims"],
+    "required": ["title", "note", "lines", "follows", "avoids", "claims"],
 }
 
 
@@ -232,23 +245,24 @@ async def inputs(db: Database, org_id: UUID, eid: UUID, cluster: str, settings=N
         "SELECT payload FROM experiment_result WHERE experiment_id=$1 AND key='playbook'", eid
     )
     placed = (pb or {}).get("findings", {})
-    groups: dict[str, list[dict]] = {"rule": [], "context": [], "test": []}
+    # 'do' findings by tier; every 'avoid' of any tier (story included) is a thing never to do.
+    groups: dict[str, list[dict]] = {"rule": [], "context": [], "test": [], "avoid": []}
     for fid, f in (await all_findings(db, org_id)).items():
         p = placed.get(fid)
-        if f["cluster"] != cluster or p is None or p["tier"] not in groups:
+        if f["cluster"] != cluster or p is None:
             continue
-        groups[p["tier"]].append(
-            {"id": fid, "title": f["title"], "direction": p["direction"], "trait": p["trait"]}
-        )
+        item = {"id": fid, "title": f["title"], "direction": p["direction"], "trait": p["trait"]}
+        if p["direction"] == "avoid":
+            groups["avoid"].append(item)
+        elif p["tier"] in ("rule", "context", "test"):
+            groups[p["tier"]].append(item)
     read = await db.fetchval(
         "SELECT payload->'videos' FROM experiment_result WHERE experiment_id=$1 AND key=$2",
         eid,
         f"profile_read:{cluster}",
     )
-    best = sorted(
-        (v for v in (read or {}).values() if v.get("side") == "best" and v.get("cpa")),
-        key=lambda v: v["cpa"],
-    )[:BEST_VIDEOS]
+    # The read's codes (V01, V02, ...) follow its ranking, best first.
+    best = [v for _, v in sorted((read or {}).items()) if v.get("side") == "best" and v.get("cpa")][:BEST_VIDEOS]
     videos = []
     for v in best:
         f = await db.fetchrow(
@@ -287,6 +301,7 @@ def prompt(x: dict) -> str:
     lines += block("RULES (follow every one)", x["rule"]) + [""]
     lines += block("SHARED (keep)", x["context"]) + [""]
     lines += block("LEADS (at most one, optional)", x["test"]) + [""]
+    lines += block("NEVER (the script must not do any of these)", x["avoid"]) + [""]
     for i, v in enumerate(x["videos"], 1):
         lines += [f"BEST VIDEO {i}:", v["evidence"], ""]
         if v.get("watched"):
@@ -321,8 +336,13 @@ def check(out: dict, x: dict, transcripts: list[dict] | None = None, presenter: 
     for f in out["follows"]:
         if f["id"] in given:
             follows.append({**f, "title": given[f["id"]]["title"]})
-        else:
+        # An avoid it applies is a blocker below; a non-id (the kind's own name) is not a finding.
+        elif f["id"] not in {g["id"] for g in x["avoid"]} and re.fullmatch(r"[0-9a-f]{12}", f["id"]):
             dropped.append(f"said it follows an unknown finding ({f['id']})")
+    never = {f["id"]: f for f in x["avoid"]}
+    blocked_by_avoid = [f for f in out["follows"] if f["id"] in never]
+    avoids = [{**a, "title": never[a["id"]]["title"]} for a in out.get("avoids", []) if a["id"] in never]
+    unchecked = [{"id": f["id"], "title": f["title"]} for f in x["avoid"] if f["id"] not in {a["id"] for a in avoids}]
     leads = [f for f in follows if f["id"] in {g["id"] for g in x["test"]}]
     if len(leads) > 1:
         dropped.append("applied more than one unproven lead")
@@ -332,7 +352,7 @@ def check(out: dict, x: dict, transcripts: list[dict] | None = None, presenter: 
     near = closest(spoken, transcripts or [])
     # A presenter script is what will be said, so the video's rules apply to it here; a script
     # that breaks one cannot be made (the page says why and offers to write it again).
-    blockers: list[str] = []
+    blockers: list[str] = [f"applies something to avoid: {never[f['id']]['title']}" for f in blocked_by_avoid]
     for line in out["lines"]:
         for msg in compliance.problems(line["text"]):
             blockers.append(f"{msg}: “{line['text']}”")
@@ -360,6 +380,8 @@ def check(out: dict, x: dict, transcripts: list[dict] | None = None, presenter: 
         "lines": out["lines"],
         "follows": follows,
         "missed": missed,
+        "avoids": avoids,
+        "unchecked_avoids": unchecked,
         "claims": out["claims"],
         "dropped": dropped,
         "from_videos": [

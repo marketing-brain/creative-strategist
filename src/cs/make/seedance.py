@@ -64,10 +64,40 @@ MOVE = re.compile(r"(,\s*)?\b(gentle |slow |subtle )?(push[- ]in|zoom[- ]?in|zoo
 # (a plan once gave the pouch a window showing the gummies, which it does not have).
 PRODUCT = "a supplement pouch"
 SAFE_CAMERA = "Chest-up medium close-up, handheld phone at arm's length, slight natural sway"
+# Reels energy (2026-09-27: the first video came out flat because the plan asked for "one mild
+# word" and a "measured" voice). A spoken line is delivered with one of these, never a mild word;
+# the verb is what Seedance hears, since "says" alone gives a neutral read.
+DELIVERY = {
+    "excited": "exclaims excitedly, eyebrows up, with a big rise in pitch",
+    "urgent": "says urgently, leaning into the lens, punching the key words",
+    "surprised": "says with genuine surprise, voice jumping up",
+    "animated": "says with animated energy, voice rising and falling",
+    "emphatic": "says emphatically, hitting the key words hard",
+    "playful": "says playfully, with a quick grin",
+    "confident": "says with bright, punchy confidence",
+    "upbeat": "says upbeat and punchy, smiling",
+}
+HOOK = ("excited", "urgent", "surprised")
+FLAT = re.compile(r"\b(calm|measured|soft|steady|gentle|soothing|slow|monotone|flat)\b", re.I)
+STILL = re.compile(r"\b(still|maintains?|motionless|unmoving)\b", re.I)
+EXPRESSIVE = (
+    "leans toward the lens and gestures with the free hand on the key word, the pouch raised beside the face with the "
+    "label facing the camera"
+)
+VOICE_ENERGY = (
+    "high energy and expressive like a creator talking to followers on Reels: fast, lively pace, wide pitch range, "
+    "clear emphasis on key words, never flat, measured or monotone"
+)
+# Talking head: one shot per line, hard jump cuts, the framing alternating so every cut shows.
+FRAMES = (
+    "Medium close-up, chest up, handheld phone at arm's length",
+    "Close-up, face and shoulders, handheld phone slightly closer",
+)
 CAMERA_BANNED = re.compile(r"\b(selfie|front[- ]?(facing )?camera|mirror(ed)?)\b", re.I)
 
-SYSTEM = f"""You turn a script for a brand's video ad into a plan for ONE continuous vertical talking-head video,
-made by a video model with its own voice and lip sync. The finished video is at most {MAX_S} seconds.
+SYSTEM = f"""You turn a script for a brand's video ad into a plan for ONE vertical talking-head video for Reels,
+made by a video model with its own voice and lip sync: short shots of the same presenter in the same room, joined by
+hard jump cuts, high energy from the first frame. The finished video is at most {MAX_S} seconds.
 The speaker is a presenter who explains the product to camera. They NEVER claim personal results or experience with
 it ("I took", "my sleep", "changed my life"): the person is generated, and testimonials from people who do not exist
 are not allowed. The script's lines, numbered from 0, are what is said; code puts them in and times them.
@@ -76,15 +106,19 @@ Plan:
 - person: age (e.g. "early 30s"), gender ("woman" or "man"), look (hair, clothing, one small detail; ordinary and
   natural, not a model), setting (a real, lived-in room), light (one natural source, e.g. "soft daylight from a window
   on camera-left").
-- voice: timbre, register, accent, age, pace, e.g. "warm, mid-register, neutral American English, early 30s, measured".
+- voice: timbre, register, accent, age, e.g. "bright, mid-register, neutral American English, early 30s". Code adds
+  the energy; never describe the voice as calm, measured, soft or steady.
 - summary: one sentence: who, where, doing what, with the product.
 - product: leave as "the pouch" (the reference image shows it).
-- beats: exactly one per script line, in order, each with line (the line's number), camera (framing and movement:
-  chest-up medium close-up, handheld at arm's length, slight natural sway; a gentle push-in in one beat at most),
-  action and emotion (one mild word: warm, curious, matter-of-fact, reassuring).
-- action: one full sentence starting with "She" or "He": ONE simple hand action while saying the line, e.g. raising
-  the pouch beside the face with the label facing the camera. The pouch stays in one hand the whole time; no second
-  object, no pointing at small details.
+- beats: exactly one per script line, in order (each is its own shot; code sets the framing), each with line (the
+  line's number), camera (leave as "handheld"), action and emotion.
+- emotion: exactly one of {", ".join(DELIVERY)}. The first line is the hook and starts with a bang: {", ".join(HOOK)}.
+  Vary it from line to line; the call to action is upbeat.
+- action: one full sentence starting with "She" or "He": ONE expressive action while saying the line, e.g. leaning
+  into the lens, a quick point at the camera with the free hand, a hand chop on the key word, raising the pouch
+  beside the face with the label facing the camera. The pouch stays in one hand the whole time; no second object, no
+  pointing at small details. Never "holds still", "maintains" or "stays still" while speaking. The first shot begins
+  mid-motion, with no lead-in.
 - Code adds a silent 2-second ending. Keep the product visible and the face towards the
   camera throughout; no turning to profile, nothing covering the mouth while speaking.
 Use only the facts in the evidence you are given; if something is not in it, leave it out.
@@ -106,8 +140,8 @@ Plan:
 - beats: exactly one per script line, in order, each with line (the line's number), camera (shot type and at most ONE
   simple move, e.g. "close-up, slow push-in" or "medium shot, static"), shot (one full sentence: the subject, ONE
   action, the setting; key action first; people may appear, seen from behind, at a distance or as hands, never
-  talking; the pouch appears in at least two shots, label towards the camera) and emotion (one mild word for the
-  narration, e.g. calm, warm, curious; for text-only, the mood of the shot).
+  talking; the pouch appears in at least two shots, label towards the camera) and emotion (for a narrator, exactly
+  one of {", ".join(DELIVERY)}, the first line one of {", ".join(HOOK)}; for text-only, the mood of the shot).
 - Leave plain, uncluttered space in the lower third of every shot: captions go there.
 - Code adds a short ending shot that holds on the pouch.
 Use only the facts in the evidence you are given; if something is not in it, leave it out.
@@ -136,7 +170,7 @@ SHOTS_SCHEMA: dict[str, Any] = {
                     "line": {"type": "integer", "description": "the script line's number"},
                     "camera": {"type": "string", "description": "shot type and at most one simple move"},
                     "shot": {"type": "string", "description": "one full sentence: subject, one action, setting"},
-                    "emotion": {"type": "string", "description": "one mild word"},
+                    "emotion": {"type": "string", "description": "the narrator's delivery word, or the shot's mood for text-only"},
                 },
                 "required": ["line", "camera", "shot", "emotion"],
             },
@@ -153,8 +187,8 @@ def system(m: str) -> str:
     voice = (
         'leave empty (there is no voice)'
         if m == "text_only"
-        else 'the narrator: timbre, register, accent, age, pace, e.g. "warm, mid-register, neutral American English, '
-        'early 30s, measured"'
+        else 'the narrator: timbre, register, accent, age, e.g. "bright, mid-register, neutral American English, '
+        'early 30s"; code adds the energy, never describe it as calm, measured, soft or steady'
     )
     return SHOTS_SYSTEM.replace("{said}", said).replace("{voice}", voice)
 
@@ -191,7 +225,7 @@ SCHEMA: dict[str, Any] = {
                     "line": {"type": "integer", "description": "the script line's number"},
                     "camera": {"type": "string", "description": "framing and movement, e.g. chest-up medium close-up, handheld at arm's length"},
                     "action": {"type": "string", "description": "a full sentence starting with She or He: what they physically do with the pouch while speaking"},
-                    "emotion": {"type": "string", "description": "one mild word for how the line is said, e.g. warm"},
+                    "emotion": {"type": "string", "enum": list(DELIVERY), "description": "how the line is delivered"},
                 },
                 "required": ["line", "camera", "action", "emotion"],
             },
@@ -294,7 +328,7 @@ def check(
     last = beats[-1]
     if last["line"].strip():
         ending = (
-            "Smiles and holds still, looking into the lens."
+            "Grins at the lens and gives a quick nod, lips closed."
             if m == "talking_head"
             else "The pouch stands still in sharp focus, label towards the camera."
         )
@@ -322,6 +356,23 @@ def check(
                 b[k] = SAFE_CAMERA if k == "camera" else CAMERA_BANNED.sub("", b[k]).strip()
                 fixed.append(f"replaced selfie or mirror wording at {b['start']} s")
         b["said_as"] = say_as(b["line"])
+    # Energy is enforced, not requested: a mild or unknown word becomes an energetic one.
+    if speaks(m):
+        spoken = [b for b in beats if b["line"].strip()]
+        for i, b in enumerate(spoken):
+            e = str(b.get("emotion", "")).lower().strip()
+            want = HOOK if i == 0 else tuple(DELIVERY)
+            if e not in want:
+                b["emotion"] = "excited" if i == 0 else "upbeat" if i == len(spoken) - 1 else "animated"
+                fixed.append(f"delivery at {b['start']} s set to {b['emotion']} (was {e or 'empty'})")
+        voice = [w for w in plan["voice"].split(",") if not FLAT.search(w)]
+        plan = {**plan, "voice": f"{', '.join(w.strip() for w in voice).rstrip('. ')}; {VOICE_ENERGY}"}
+    if m == "talking_head":
+        for i, b in enumerate(beats):
+            b["camera"] = FRAMES[i % 2]
+            if b["line"].strip() and STILL.search(b["action"]):
+                b["action"] = EXPRESSIVE
+                fixed.append(f"replaced a still action at {b['start']} s with an expressive one")
     # One camera idea: a push-in or zoom once, not in every beat (a 30 s creep reads as fake).
     seen_move = False
     for b in beats:
@@ -351,20 +402,23 @@ def prompt(plan: dict) -> str:
     lines = [
         audio,
         PRODUCT_LINE,
-        f"Summary: {plan['summary']} Vertical 9:16 phone video, one continuous take.",
+        f"Summary: {plan['summary']} Vertical 9:16 creator video for Reels: short shots of the same presenter in the "
+        "same room, joined by hard jump cuts, high energy from the very first frame.",
         f"The presenter: a {p['gender']} in {her} {p['age']}, {p['look']}. Setting: {p['setting']}. Voice: {plan['voice']}.",
     ]
     subject = "She" if female else "He"
-    for b in plan["beats"]:
-        head = f"{b['start']}-{b['end']} seconds: {_sentence(b['camera'])} {_sentence(b['action'], subject)}"
+    for n, b in enumerate(plan["beats"], 1):
+        cut = "" if n == 1 else "Hard jump cut. "
+        head = f"{b['start']}-{b['end']} seconds: Shot {n}. {cut}{_sentence(b['camera'])} {_sentence(b['action'], subject)}"
         if b["line"].strip():
-            lines.append(f"{head} {she} line ({b['emotion']}), in English: {{{b['said_as']}}}")
+            how = DELIVERY.get(b["emotion"], b["emotion"])
+            lines.append(f"{head} {subject} {how} ({b['emotion']}), in English: {{{b['said_as']}}}")
         else:
             lines.append(f"{head} {she} lips stay closed. Silent.")
     lines.append(
         f"Additional notes: {p['light']}; natural skin texture with visible pores; normal human eyes; five fingers on "
-        f"each hand; chest-up framing, facing the camera; the product stays visible with its label readable; the same "
-        f"setting throughout; one continuous take. {audio}"
+        f"each hand; facing the camera in every shot; the product stays visible with its label readable; the same person, "
+        f"outfit and room in every shot; lively, expressive delivery with real vocal ups and downs, never monotone. {audio}"
     )
     return "\n".join(lines)
 
@@ -391,7 +445,8 @@ def shots_prompt(plan: dict, m: str) -> str:
     for n, b in enumerate(plan["beats"], 1):
         head = f"{b['start']}-{b['end']} seconds: Shot {n}. {_sentence(b['camera'])} {_sentence(b['action'])}"
         if b["line"].strip() and m != "text_only":
-            lines.append(f"{head} Narrator voice-over ({b['emotion']}), in English: {{{b['said_as']}}}")
+            how = DELIVERY.get(b["emotion"], b["emotion"]).replace("leaning into the lens, ", "").replace(", eyebrows up", "").replace(", smiling", "").replace(", with a quick grin", "")
+            lines.append(f"{head} The narrator {how} ({b['emotion']}), in English: {{{b['said_as']}}}")
         else:
             lines.append(head)
     lines.append(
