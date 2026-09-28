@@ -35,7 +35,9 @@ MODEL = "bytedance/seedance-2.5"
 PRICE_PER_S = 0.233  # 720p, measured: an 8 s generation cost $1.86 on 2026-09-27
 MAX_S = 30
 MIN_S = 8
-WORDS_PER_S = 2.2
+# Real creators in Talking head speak at 3.05 words a second (median of 24 videos, 2.6-4.3,
+# measured 2026-09-27); timing at 2.2 made the voice stretch each line and sound flat.
+WORDS_PER_S = 3.0
 END_SILENCE_S = 2
 RESOLUTION = "720x1280"
 READ_WORDS_PER_S = 2.5  # captions a viewer reads, text-only kinds
@@ -78,6 +80,9 @@ DELIVERY = {
     "upbeat": "says upbeat and punchy, smiling",
 }
 HOOK = ("excited", "urgent", "surprised")
+# An action that quotes or names words gets them spoken ("Steady," was said on 2026-09-27).
+QUOTED = re.compile(r"[\"“”‘’]|'[^']+'|\b(the )?(word|phrase|line)s?\b|\b(says?|saying|mouths?)\b", re.I)
+STRESS = re.compile(r",?\s*(to|while|as (he|she) )?\s*(emphasi[sz]\w*|stress\w*|highlight\w*|underlin\w*)\s+(on\s+)?(the\s+)?(key\s+)?(words?|phrases?)\s+[^,.;]*", re.I)
 FLAT = re.compile(r"\b(calm|measured|soft|steady|gentle|soothing|slow|monotone|flat)\b", re.I)
 STILL = re.compile(r"\b(still|maintains?|motionless|unmoving)\b", re.I)
 EXPRESSIVE = (
@@ -118,7 +123,8 @@ Plan:
   into the lens, a quick point at the camera with the free hand, a hand chop on the key word, raising the pouch
   beside the face with the label facing the camera. The pouch stays in one hand the whole time; no second object, no
   pointing at small details. Never "holds still", "maintains" or "stays still" while speaking. The first shot begins
-  mid-motion, with no lead-in.
+  mid-motion, with no lead-in. Never quote or name words from the line in the action (not "to stress the word
+  steady"): the video model speaks them.
 - Code adds a silent 2-second ending. Keep the product visible and the face towards the
   camera throughout; no turning to profile, nothing covering the mouth while speaking.
 Use only the facts in the evidence you are given; if something is not in it, leave it out.
@@ -367,6 +373,13 @@ def check(
                 fixed.append(f"delivery at {b['start']} s set to {b['emotion']} (was {e or 'empty'})")
         voice = [w for w in plan["voice"].split(",") if not FLAT.search(w)]
         plan = {**plan, "voice": f"{', '.join(w.strip() for w in voice).rstrip('. ')}; {VOICE_ENERGY}"}
+    for b in beats:
+        a = STRESS.sub("", b["action"]).strip(" ,")
+        if QUOTED.search(a) and "key word" not in a.lower():
+            a = EXPRESSIVE if m == "talking_head" else re.sub(QUOTED, "", a).strip(" ,")
+        if a != b["action"]:
+            fixed.append(f"removed words the model would speak from the action at {b['start']} s")
+            b["action"] = a
     if m == "talking_head":
         for i, b in enumerate(beats):
             b["camera"] = FRAMES[i % 2]
